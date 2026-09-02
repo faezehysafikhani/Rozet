@@ -495,6 +495,10 @@ const agilePriorityLabels = { 0: 'کم', 1: 'متوسط', 2: 'بالا', 3: 'ب�
 const approvalLabels = { 0: 'ثبت اولیه', 1: 'در انتظار تأیید', 2: 'تأیید شده', 3: 'رد شده', NotSubmitted: 'ثبت اولیه', PendingApproval: 'در انتظار تأیید', Approved: 'تأیید شده', Rejected: 'رد شده' }
 const performanceLabels = { 0: 'طبق برنامه', 1: 'در معرض ریسک', 2: 'عقب‌افتاده', OnTrack: 'طبق برنامه', AtRisk: 'در معرض ریسک', Behind: 'عقب‌افتاده' }
 const documentTypeLabels = { 0: 'گزارش', 1: 'نامه', 2: 'صورت‌جلسه', 3: 'سایر', Report: 'گزارش', Letter: 'نامه', MeetingMinutes: 'صورت‌جلسه', Other: 'سایر' }
+const deliverableStatusLabels = { 0: 'باز', 1: 'در حال انجام', 2: 'تحویل شده', 3: 'پذیرفته شده', Open: 'باز', InProgress: 'در حال انجام', Delivered: 'تحویل شده', Accepted: 'پذیرفته شده' }
+const stakeholderLevelLabels = { 0: 'کم', 1: 'متوسط', 2: 'زیاد', Low: 'کم', Medium: 'متوسط', High: 'زیاد' }
+const kpiTypeLabels = { 0: 'کیفی', 1: 'کمی', Quality: 'کیفی', Quantity: 'کمی' }
+const compactEnumLabel = (value, labels) => enumLabel(value, labels, value === undefined || value === null || value === '' ? '—' : String(value))
 
 function arrayPayload(result) {
   const payload = unwrap(result)
@@ -518,12 +522,31 @@ function formatDateOnly(value) {
   }
 }
 
+function projectDisplayName(project) {
+  if (!project) return '—'
+  if (project.name && project.name !== 'string') return project.name
+  if (project.code && project.code !== 'string') return `پروژه ${project.code}`
+  return 'پروژه ثبت‌شده'
+}
+
 function formatBytes(value) {
   const size = Number(value || 0)
   if (!size) return '—'
   if (size < 1024) return `${size.toLocaleString('fa-IR')} بایت`
   if (size < 1024 * 1024) return `${Math.round(size / 1024).toLocaleString('fa-IR')} کیلوبایت`
   return `${(size / 1024 / 1024).toFixed(1).replace('.', '/')} مگابایت`
+}
+
+function todayInputValue() {
+  return new Date().toISOString().slice(0, 10)
+}
+
+function emptyToNull(value) {
+  return value === undefined || value === null || value === '' ? null : value
+}
+
+function numberOrNull(value) {
+  return value === undefined || value === null || value === '' ? null : Number(value)
 }
 
 function taskProgress(status) {
@@ -553,6 +576,7 @@ function useProjectManagementData() {
   const [loading, setLoading] = useState(true)
   const [loadingDetails, setLoadingDetails] = useState(false)
   const [error, setError] = useState('')
+  const [refreshKey, setRefreshKey] = useState(0)
 
   useEffect(() => {
     let cancelled = false
@@ -573,7 +597,7 @@ function useProjectManagementData() {
       setLoading(false)
     })()
     return () => { cancelled = true }
-  }, [tenantId])
+  }, [tenantId, refreshKey])
 
   useEffect(() => {
     let cancelled = false
@@ -584,7 +608,7 @@ function useProjectManagementData() {
       }
       const results = await Promise.all(projects.map((project) => projectManagementApi.agileTasks({ projectId: project.id })))
       if (cancelled) return
-      setTasks(results.flatMap((result, index) => arrayPayload(result).map((task) => ({ ...task, projectName: projects[index].name }))))
+      setTasks(results.flatMap((result, index) => arrayPayload(result).map((task) => ({ ...task, projectName: projectDisplayName(projects[index]) }))))
     })()
     return () => { cancelled = true }
   }, [projects])
@@ -622,7 +646,7 @@ function useProjectManagementData() {
       setLoadingDetails(false)
     })()
     return () => { cancelled = true }
-  }, [selectedProjectId])
+  }, [selectedProjectId, refreshKey])
 
   const userName = useMemo(() => {
     const map = new Map(users.map((item) => [item.id, item.displayName || item.email]))
@@ -632,9 +656,10 @@ function useProjectManagementData() {
   const selectedProject = projects.find((project) => project.id === selectedProjectId) || null
 
   return {
-    tenantId, projects, projectTotal, selectedProject, selectedProjectId, setSelectedProjectId,
+    tenantId, projects, projectTotal, selectedProject, selectedProjectId, setSelectedProjectId, users,
     tasks, activities, progressUpdates, documents, risks, stakeholders, teamMembers,
     governanceRoles, deliverables, kpis, userName, loading, loadingDetails, error,
+    refresh: () => setRefreshKey((value) => value + 1),
   }
 }
 
@@ -642,7 +667,7 @@ function ProjectSelector({ data }) {
   if (!data.projects.length) return null
   return (
     <select className="project-selector" value={data.selectedProjectId} onChange={(event) => data.setSelectedProjectId(event.target.value)}>
-      {data.projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
+      {data.projects.map((project) => <option key={project.id} value={project.id}>{projectDisplayName(project)}</option>)}
     </select>
   )
 }
@@ -652,6 +677,301 @@ function DataState({ loading, error, empty, children }) {
   if (error) return <p className="data-state data-state--error">{error}</p>
   if (empty) return <p className="data-state">داده‌ای برای نمایش وجود ندارد.</p>
   return children
+}
+
+function FormField({ label, children, wide = false }) {
+  return <label className="ue-field" style={wide ? { gridColumn: '1 / -1' } : undefined}><span>{label}</span>{children}</label>
+}
+
+function UserSelect({ data, value, onChange, required = false }) {
+  return (
+    <select value={value || ''} onChange={(event) => onChange(event.target.value)} required={required}>
+      <option value="">انتخاب نشده</option>
+      {data.users.map((item) => <option key={item.id} value={item.id}>{item.displayName || item.email}</option>)}
+    </select>
+  )
+}
+
+const creationTitles = {
+  project: 'ایجاد پروژه',
+  task: 'ایجاد وظیفه',
+  activity: 'افزودن فعالیت برنامه‌ریزی',
+  progress: 'ثبت گزارش پیشرفت',
+  document: 'آپلود سند پروژه',
+  deliverable: 'تعریف خروجی پروژه',
+  kpi: 'تعریف KPI',
+  risk: 'ثبت ریسک',
+  stakeholder: 'ثبت ذینفع',
+  member: 'افزودن عضو پروژه',
+  governance: 'تعریف نقش حاکمیتی',
+}
+
+const creationInitialState = (kind, data) => ({
+  project: { name: '', code: '', type: '1', startDate: '', endDate: '', cost: '', goal: '', description: '' },
+  task: { title: '', description: '', responsibleUserId: '', approverUserId: '', dueDate: '', priority: '1', sprintNumber: '' },
+  activity: { name: '', description: '', responsibleUserId: '', approverUserId: '', startDate: '', endDate: '', durationDays: '', manHours: '', weight: '1' },
+  progress: { statusDescription: '', registerDate: todayInputValue(), plannedProgress: '0', actualProgress: '0', delayReasons: '' },
+  document: { description: '', documentType: '0', file: null },
+  deliverable: { title: '', description: '', acceptanceCriteria: '', responsibleUserId: '', targetDate: '' },
+  kpi: { deliverableId: data.deliverables[0]?.id || '', type: '1', description: '', formula: '', targetValue: '' },
+  risk: { description: '', probabilityScore: '1', severityScore: '1', impactScore: '1', responsePlan: '', riskOwnerUserId: '' },
+  stakeholder: { name: '', isInternal: 'true', expectations: '', notes: '', power: '1', interest: '1', engagementStrategy: '', requirements: '' },
+  member: { userId: '', roleTitle: '' },
+  governance: { title: '', userId: '', personnelNumber: '', phone: '', email: '', serviceLocation: '' },
+}[kind] || {})
+
+function CreateProjectItemModal({ kind, data, onClose }) {
+  const [form, setForm] = useState(() => creationInitialState(kind, data))
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const selectedProjectId = data.selectedProjectId
+  const set = (key, value) => setForm((current) => ({ ...current, [key]: value }))
+
+  const submit = async (event) => {
+    event.preventDefault()
+    if (kind !== 'project' && !selectedProjectId) {
+      setError('ابتدا یک پروژه انتخاب کنید.')
+      return
+    }
+    if (kind === 'kpi' && !form.deliverableId) {
+      setError('برای تعریف KPI ابتدا باید یک خروجی پروژه بسازید.')
+      return
+    }
+    if (kind === 'document' && !form.file) {
+      setError('فایل سند را انتخاب کنید.')
+      return
+    }
+    setBusy(true)
+    setError('')
+    const base = { tenantId: data.tenantId, projectId: selectedProjectId }
+    const result = await ({
+      project: () => projectManagementApi.createProject({
+        tenantId: data.tenantId,
+        name: form.name,
+        code: form.code,
+        type: Number(form.type),
+        managerUserId: null,
+        ownerUserId: null,
+        organizationUnitId: null,
+        workCalendarId: null,
+        startDate: emptyToNull(form.startDate),
+        endDate: emptyToNull(form.endDate),
+        cost: numberOrNull(form.cost),
+        goal: emptyToNull(form.goal),
+        requirements: null,
+        constraints: null,
+        assumptions: null,
+        description: emptyToNull(form.description),
+        charter: null,
+      }),
+      task: () => projectManagementApi.createAgileTask({
+        ...base,
+        title: form.title,
+        description: emptyToNull(form.description),
+        responsibleUserId: emptyToNull(form.responsibleUserId),
+        approverUserId: emptyToNull(form.approverUserId),
+        dueDate: emptyToNull(form.dueDate),
+        priority: Number(form.priority),
+        sprintNumber: numberOrNull(form.sprintNumber),
+      }),
+      activity: () => projectManagementApi.createWaterfallActivity({
+        ...base,
+        parentActivityId: null,
+        name: form.name,
+        description: emptyToNull(form.description),
+        deliverableId: null,
+        responsibleUserId: emptyToNull(form.responsibleUserId),
+        approverUserId: emptyToNull(form.approverUserId),
+        startDate: emptyToNull(form.startDate),
+        endDate: emptyToNull(form.endDate),
+        durationDays: numberOrNull(form.durationDays),
+        manHours: numberOrNull(form.manHours),
+        weight: Number(form.weight || 1),
+      }),
+      progress: () => projectManagementApi.createProgressUpdate({
+        ...base,
+        statusDescription: emptyToNull(form.statusDescription),
+        registerDate: form.registerDate,
+        plannedProgress: Number(form.plannedProgress || 0),
+        actualProgress: Number(form.actualProgress || 0),
+        delayReasons: emptyToNull(form.delayReasons),
+      }),
+      document: () => projectManagementApi.uploadDocument({
+        ...base,
+        description: form.description,
+        documentType: Number(form.documentType),
+        file: form.file,
+      }),
+      deliverable: () => projectManagementApi.createDeliverable({
+        ...base,
+        title: form.title,
+        description: emptyToNull(form.description),
+        acceptanceCriteria: emptyToNull(form.acceptanceCriteria),
+        responsibleUserId: emptyToNull(form.responsibleUserId),
+        targetDate: emptyToNull(form.targetDate),
+      }),
+      kpi: () => projectManagementApi.createKpi({
+        ...base,
+        deliverableId: form.deliverableId,
+        type: Number(form.type),
+        description: form.description,
+        formula: emptyToNull(form.formula),
+        targetValue: numberOrNull(form.targetValue),
+      }),
+      risk: () => projectManagementApi.createRisk({
+        ...base,
+        description: form.description,
+        probabilityScore: Number(form.probabilityScore),
+        severityScore: Number(form.severityScore),
+        impactScore: Number(form.impactScore),
+        responsePlan: emptyToNull(form.responsePlan),
+        riskOwnerUserId: emptyToNull(form.riskOwnerUserId),
+      }),
+      stakeholder: () => projectManagementApi.createStakeholder({
+        ...base,
+        name: form.name,
+        isInternal: form.isInternal === 'true',
+        expectations: emptyToNull(form.expectations),
+        notes: emptyToNull(form.notes),
+        power: Number(form.power),
+        interest: Number(form.interest),
+        engagementStrategy: emptyToNull(form.engagementStrategy),
+        requirements: emptyToNull(form.requirements),
+      }),
+      member: () => projectManagementApi.addTeamMember({
+        ...base,
+        userId: form.userId,
+        roleTitle: emptyToNull(form.roleTitle),
+      }),
+      governance: () => projectManagementApi.createGovernanceRole({
+        ...base,
+        title: form.title,
+        userId: emptyToNull(form.userId),
+        personnelNumber: emptyToNull(form.personnelNumber),
+        phone: emptyToNull(form.phone),
+        email: emptyToNull(form.email),
+        serviceLocation: emptyToNull(form.serviceLocation),
+      }),
+    }[kind])()
+    setBusy(false)
+    if (!result.isSuccess) {
+      setError(PersianMessages.error(result.error))
+      return
+    }
+    data.refresh()
+    onClose()
+  }
+
+  return (
+    <div className="ue-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+      <form className="ue-modal pm-modal" onSubmit={submit}>
+        <header className="ue-head">
+          <div className="ue-head-title"><strong>{creationTitles[kind]}</strong><small>{kind === 'project' ? 'ثبت در Projects API' : projectDisplayName(data.selectedProject)}</small></div>
+          <button className="ue-close" type="button" onClick={onClose}><X size={17} /></button>
+        </header>
+        <div className="ue-body"><div className="ue-grid">
+          {kind === 'project' && <>
+            <FormField label="نام پروژه"><input value={form.name} onChange={(event) => set('name', event.target.value)} required /></FormField>
+            <FormField label="کد پروژه"><input value={form.code} onChange={(event) => set('code', event.target.value)} required /></FormField>
+            <FormField label="نوع پروژه"><select value={form.type} onChange={(event) => set('type', event.target.value)}><option value="1">چابک</option><option value="0">آبشاری</option></select></FormField>
+            <FormField label="هزینه اولیه"><input type="number" min="0" value={form.cost} onChange={(event) => set('cost', event.target.value)} /></FormField>
+            <FormField label="تاریخ شروع"><input type="date" value={form.startDate} onChange={(event) => set('startDate', event.target.value)} /></FormField>
+            <FormField label="تاریخ پایان"><input type="date" value={form.endDate} onChange={(event) => set('endDate', event.target.value)} /></FormField>
+            <FormField label="هدف پروژه" wide><textarea rows="2" value={form.goal} onChange={(event) => set('goal', event.target.value)} /></FormField>
+            <FormField label="توضیحات" wide><textarea rows="2" value={form.description} onChange={(event) => set('description', event.target.value)} /></FormField>
+          </>}
+          {kind === 'task' && <>
+            <FormField label="عنوان وظیفه"><input value={form.title} onChange={(event) => set('title', event.target.value)} required /></FormField>
+            <FormField label="اولویت"><select value={form.priority} onChange={(event) => set('priority', event.target.value)}><option value="0">کم</option><option value="1">متوسط</option><option value="2">بالا</option><option value="3">بحرانی</option></select></FormField>
+            <FormField label="مسئول"><UserSelect data={data} value={form.responsibleUserId} onChange={(value) => set('responsibleUserId', value)} /></FormField>
+            <FormField label="تأییدکننده"><UserSelect data={data} value={form.approverUserId} onChange={(value) => set('approverUserId', value)} /></FormField>
+            <FormField label="موعد انجام"><input type="date" value={form.dueDate} onChange={(event) => set('dueDate', event.target.value)} /></FormField>
+            <FormField label="شماره اسپرینت"><input type="number" min="1" value={form.sprintNumber} onChange={(event) => set('sprintNumber', event.target.value)} /></FormField>
+            <FormField label="توضیحات" wide><textarea rows="3" value={form.description} onChange={(event) => set('description', event.target.value)} /></FormField>
+          </>}
+          {kind === 'activity' && <>
+            <FormField label="نام فعالیت"><input value={form.name} onChange={(event) => set('name', event.target.value)} required /></FormField>
+            <FormField label="وزن"><input type="number" min="0" step="0.1" value={form.weight} onChange={(event) => set('weight', event.target.value)} required /></FormField>
+            <FormField label="مسئول"><UserSelect data={data} value={form.responsibleUserId} onChange={(value) => set('responsibleUserId', value)} /></FormField>
+            <FormField label="تأییدکننده"><UserSelect data={data} value={form.approverUserId} onChange={(value) => set('approverUserId', value)} /></FormField>
+            <FormField label="تاریخ شروع"><input type="date" value={form.startDate} onChange={(event) => set('startDate', event.target.value)} /></FormField>
+            <FormField label="تاریخ پایان"><input type="date" value={form.endDate} onChange={(event) => set('endDate', event.target.value)} /></FormField>
+            <FormField label="مدت روز"><input type="number" min="0" value={form.durationDays} onChange={(event) => set('durationDays', event.target.value)} /></FormField>
+            <FormField label="نفرساعت"><input type="number" min="0" step="0.1" value={form.manHours} onChange={(event) => set('manHours', event.target.value)} /></FormField>
+            <FormField label="توضیحات" wide><textarea rows="2" value={form.description} onChange={(event) => set('description', event.target.value)} /></FormField>
+          </>}
+          {kind === 'progress' && <>
+            <FormField label="تاریخ ثبت"><input type="date" value={form.registerDate} onChange={(event) => set('registerDate', event.target.value)} required /></FormField>
+            <FormField label="پیشرفت برنامه‌ای"><input type="number" min="0" max="100" step="0.1" value={form.plannedProgress} onChange={(event) => set('plannedProgress', event.target.value)} required /></FormField>
+            <FormField label="پیشرفت واقعی"><input type="number" min="0" max="100" step="0.1" value={form.actualProgress} onChange={(event) => set('actualProgress', event.target.value)} required /></FormField>
+            <FormField label="شرح وضعیت" wide><textarea rows="2" value={form.statusDescription} onChange={(event) => set('statusDescription', event.target.value)} /></FormField>
+            <FormField label="دلایل تأخیر" wide><textarea rows="2" value={form.delayReasons} onChange={(event) => set('delayReasons', event.target.value)} /></FormField>
+          </>}
+          {kind === 'document' && <>
+            <FormField label="نوع سند"><select value={form.documentType} onChange={(event) => set('documentType', event.target.value)}><option value="0">گزارش</option><option value="1">نامه</option><option value="2">صورت‌جلسه</option><option value="3">سایر</option></select></FormField>
+            <FormField label="فایل"><input type="file" onChange={(event) => set('file', event.target.files?.[0] || null)} required /></FormField>
+            <FormField label="توضیح سند" wide><textarea rows="2" value={form.description} onChange={(event) => set('description', event.target.value)} required /></FormField>
+          </>}
+          {kind === 'deliverable' && <>
+            <FormField label="عنوان خروجی"><input value={form.title} onChange={(event) => set('title', event.target.value)} required /></FormField>
+            <FormField label="مسئول"><UserSelect data={data} value={form.responsibleUserId} onChange={(value) => set('responsibleUserId', value)} /></FormField>
+            <FormField label="تاریخ هدف"><input type="date" value={form.targetDate} onChange={(event) => set('targetDate', event.target.value)} /></FormField>
+            <FormField label="توضیحات" wide><textarea rows="2" value={form.description} onChange={(event) => set('description', event.target.value)} /></FormField>
+            <FormField label="معیار پذیرش" wide><textarea rows="2" value={form.acceptanceCriteria} onChange={(event) => set('acceptanceCriteria', event.target.value)} /></FormField>
+          </>}
+          {kind === 'kpi' && <>
+            <FormField label="خروجی پروژه"><select value={form.deliverableId} onChange={(event) => set('deliverableId', event.target.value)} required>{data.deliverables.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}</select></FormField>
+            <FormField label="نوع KPI"><select value={form.type} onChange={(event) => set('type', event.target.value)}><option value="1">کمی</option><option value="0">کیفی</option></select></FormField>
+            <FormField label="هدف عددی"><input type="number" step="0.1" value={form.targetValue} onChange={(event) => set('targetValue', event.target.value)} /></FormField>
+            <FormField label="شرح شاخص" wide><textarea rows="2" value={form.description} onChange={(event) => set('description', event.target.value)} required /></FormField>
+            <FormField label="فرمول" wide><textarea rows="2" value={form.formula} onChange={(event) => set('formula', event.target.value)} /></FormField>
+          </>}
+          {kind === 'risk' && <>
+            <FormField label="احتمال"><input type="number" min="1" max="5" value={form.probabilityScore} onChange={(event) => set('probabilityScore', event.target.value)} required /></FormField>
+            <FormField label="شدت"><input type="number" min="1" max="5" value={form.severityScore} onChange={(event) => set('severityScore', event.target.value)} required /></FormField>
+            <FormField label="اثر"><input type="number" min="1" max="5" value={form.impactScore} onChange={(event) => set('impactScore', event.target.value)} required /></FormField>
+            <FormField label="مالک ریسک"><UserSelect data={data} value={form.riskOwnerUserId} onChange={(value) => set('riskOwnerUserId', value)} /></FormField>
+            <FormField label="شرح ریسک" wide><textarea rows="2" value={form.description} onChange={(event) => set('description', event.target.value)} required /></FormField>
+            <FormField label="برنامه پاسخ" wide><textarea rows="2" value={form.responsePlan} onChange={(event) => set('responsePlan', event.target.value)} /></FormField>
+          </>}
+          {kind === 'stakeholder' && <>
+            <FormField label="نام ذینفع"><input value={form.name} onChange={(event) => set('name', event.target.value)} required /></FormField>
+            <FormField label="نوع"><select value={form.isInternal} onChange={(event) => set('isInternal', event.target.value)}><option value="true">داخلی</option><option value="false">خارجی</option></select></FormField>
+            <FormField label="قدرت"><select value={form.power} onChange={(event) => set('power', event.target.value)}><option value="0">کم</option><option value="1">متوسط</option><option value="2">زیاد</option></select></FormField>
+            <FormField label="علاقه"><select value={form.interest} onChange={(event) => set('interest', event.target.value)}><option value="0">کم</option><option value="1">متوسط</option><option value="2">زیاد</option></select></FormField>
+            <FormField label="انتظارات" wide><textarea rows="2" value={form.expectations} onChange={(event) => set('expectations', event.target.value)} /></FormField>
+            <FormField label="استراتژی تعامل" wide><textarea rows="2" value={form.engagementStrategy} onChange={(event) => set('engagementStrategy', event.target.value)} /></FormField>
+          </>}
+          {kind === 'member' && <>
+            <FormField label="کاربر"><UserSelect data={data} value={form.userId} onChange={(value) => set('userId', value)} required /></FormField>
+            <FormField label="نقش در پروژه"><input value={form.roleTitle} onChange={(event) => set('roleTitle', event.target.value)} /></FormField>
+          </>}
+          {kind === 'governance' && <>
+            <FormField label="عنوان نقش"><input value={form.title} onChange={(event) => set('title', event.target.value)} required /></FormField>
+            <FormField label="کاربر"><UserSelect data={data} value={form.userId} onChange={(value) => set('userId', value)} /></FormField>
+            <FormField label="شماره پرسنلی"><input value={form.personnelNumber} onChange={(event) => set('personnelNumber', event.target.value)} /></FormField>
+            <FormField label="تلفن"><input value={form.phone} onChange={(event) => set('phone', event.target.value)} /></FormField>
+            <FormField label="ایمیل"><input type="email" value={form.email} onChange={(event) => set('email', event.target.value)} /></FormField>
+            <FormField label="محل خدمت"><input value={form.serviceLocation} onChange={(event) => set('serviceLocation', event.target.value)} /></FormField>
+          </>}
+        </div></div>
+        <footer className="ue-foot">
+          {error && <span className="ue-error">{error}</span>}
+          <div className="ue-foot-actions"><button className="ue-cancel" type="button" onClick={onClose}>انصراف</button><button className="ue-save" type="submit" disabled={busy}>{busy ? 'در حال ذخیره...' : 'ذخیره'}</button></div>
+        </footer>
+      </form>
+    </div>
+  )
+}
+
+function CreateButton({ kind, data, label, disabled = false }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <>
+      <button type="button" onClick={() => setOpen(true)} disabled={disabled}><Plus size={18} />{label || creationTitles[kind]}</button>
+      {open && <CreateProjectItemModal kind={kind} data={data} onClose={() => setOpen(false)} />}
+    </>
+  )
 }
 
 function normalizeTask(task, userName) {
@@ -670,11 +990,11 @@ function normalizeTask(task, userName) {
   }
 }
 
-function TaskPageHeader({ title, description, action = 'ایجاد وظیفه جدید', children }) {
+function TaskPageHeader({ title, description, action = 'ایجاد وظیفه جدید', actionNode, children }) {
   return (
     <div className="task-page-header">
       <div><span>مدیریت وظایف / {title}</span><h1>{title}</h1><p>{description}</p></div>
-      <div className="task-head-actions">{children}<button><Plus size={18} />{action}</button></div>
+      <div className="task-head-actions">{children}{actionNode || (action ? <button type="button"><Plus size={18} />{action}</button> : null)}</div>
     </div>
   )
 }
@@ -688,12 +1008,12 @@ function TaskDashboard({ data }) {
     const projectTasks = normalized.filter((task) => task.project === project.name)
     const projectDone = projectTasks.filter((task) => task.status === 'تکمیل شده').length
     const percent = projectTasks.length ? Math.round((projectDone / projectTasks.length) * 100) : 0
-    return [project.name, percent, `${projectDone.toLocaleString('fa-IR')} از ${projectTasks.length.toLocaleString('fa-IR')} وظیفه`]
+    return [projectDisplayName(project), percent, `${projectDone.toLocaleString('fa-IR')} از ${projectTasks.length.toLocaleString('fa-IR')} وظیفه`]
   })
 
   return (
     <>
-      <TaskPageHeader title="داشبورد وظایف" description="نمای کلی وضعیت وظایف متصل به Nexus Core">
+      <TaskPageHeader title="داشبورد وظایف" description="نمای کلی وضعیت وظایف متصل به Nexus Core" actionNode={<CreateButton kind="task" data={data} label="ایجاد وظیفه جدید" />}>
         <ProjectSelector data={data} />
       </TaskPageHeader>
       <DataState loading={data.loading} error={data.error} empty={!data.projects.length}>
@@ -747,7 +1067,7 @@ function TaskList({ compact = false, data }) {
 }
 
 function AllTasks({ data }) {
-  return <><TaskPageHeader title="همه وظایف" description="مشاهده و مدیریت وظایف دریافت شده از Agile Tasks API"><ProjectSelector data={data} /></TaskPageHeader><div className="view-switch"><button className="active"><ListTodo size={16} />نمای لیستی</button><button><Network size={16} />نمای درختی</button><button><UserRound size={16} />وظایف من</button></div><TaskList data={data} /></>
+  return <><TaskPageHeader title="همه وظایف" description="مشاهده و مدیریت وظایف دریافت شده از Agile Tasks API" actionNode={<CreateButton kind="task" data={data} label="ایجاد وظیفه جدید" />}><ProjectSelector data={data} /></TaskPageHeader><div className="view-switch"><button className="active"><ListTodo size={16} />نمای لیستی</button><button><Network size={16} />نمای درختی</button><button><UserRound size={16} />وظایف من</button></div><TaskList data={data} /></>
 }
 
 const kanbanColumns = [
@@ -764,7 +1084,7 @@ function KanbanBoard({ data }) {
     { title: 'در حال انجام', tone: 'blue' },
     { title: 'تکمیل شده', tone: 'green' },
   ].map((column) => ({ ...column, tasks: normalized.filter((task) => task.status === column.title) }))
-  return <><TaskPageHeader title="برد کانبان" description="نمای دیداری وضعیت وظایف موجود در Nexus Core"><ProjectSelector data={data} /></TaskPageHeader><div className="kanban-toolbar"><div className="view-switch"><button className="active">کانبان</button><button>اسکرامبان</button></div><ProjectSelector data={data} /></div><DataState loading={data.loading} error={data.error} empty={!normalized.length}><div className="kanban-board">{columns.map((column) => <section className="kanban-column" key={column.title}><header><div><i className={column.tone} /><strong>{column.title}</strong><span>{column.tasks.length.toLocaleString('fa-IR')}</span></div><button><Plus size={16} /></button></header>{column.tasks.map((task) => <article className="kanban-card" key={task.id}><div><span className={`priority ${task.priority === 'بالا' || task.priority === 'بحرانی' ? 'high' : task.priority === 'متوسط' ? 'medium' : 'low'}`}>{task.priority}</span><MoreHorizontal size={16} /></div><h4>{task.title}</h4><p>{task.project}</p><footer><span><Clock3 size={14} />{task.due}</span><i>{initialsOf(task.owner).slice(0, 1)}</i></footer></article>)}</section>)}</div></DataState></>
+  return <><TaskPageHeader title="برد کانبان" description="نمای دیداری وضعیت وظایف موجود در Nexus Core" actionNode={<CreateButton kind="task" data={data} label="ایجاد وظیفه جدید" />}><ProjectSelector data={data} /></TaskPageHeader><div className="kanban-toolbar"><div className="view-switch"><button className="active">کانبان</button><button>اسکرامبان</button></div></div><DataState loading={data.loading} error={data.error} empty={!normalized.length}><div className="kanban-board">{columns.map((column) => <section className="kanban-column" key={column.title}><header><div><i className={column.tone} /><strong>{column.title}</strong><span>{column.tasks.length.toLocaleString('fa-IR')}</span></div></header>{column.tasks.map((task) => <article className="kanban-card" key={task.id}><div><span className={`priority ${task.priority === 'بالا' || task.priority === 'بحرانی' ? 'high' : task.priority === 'متوسط' ? 'medium' : 'low'}`}>{task.priority}</span><MoreHorizontal size={16} /></div><h4>{task.title}</h4><p>{task.project}</p><footer><span><Clock3 size={14} />{task.due}</span><i>{initialsOf(task.owner).slice(0, 1)}</i></footer></article>)}</section>)}</div></DataState></>
 }
 
 function ProjectCalendar({ data }) {
@@ -785,14 +1105,14 @@ function ProjectCalendar({ data }) {
     }
     return map
   }, {})
-  return <><TaskPageHeader title="تقویم پروژه" description="تقویم موعد وظایف؛ Core هنوز endpoint رویداد پروژه مستقل ندارد" action="افزودن رویداد"><ProjectSelector data={data} /></TaskPageHeader><div className="calendar-toolbar"><button>امروز</button><div><ChevronLeft size={18} /><strong>{today.toLocaleDateString('fa-IR', { month: 'long', year: 'numeric' })}</strong><ChevronLeft className="flip" size={18} /></div><ProjectSelector data={data} /></div><DataState loading={data.loading} error={data.error} empty={!data.tasks.length}><section className="calendar-card"><div className="calendar-weekdays">{['شنبه','یکشنبه','دوشنبه','سه‌شنبه','چهارشنبه','پنجشنبه','جمعه'].map((day) => <span key={day}>{day}</span>)}</div><div className="calendar-days">{cells.map((day, index) => <div className={day === today.getDate() ? 'today' : ''} key={index}>{day && <b>{day.toLocaleString('fa-IR')}</b>}{(byDay[day] || []).slice(0, 3).map((task) => <span className={`event ${task.priority === 'بالا' || task.priority === 'بحرانی' ? 'gold' : task.status === 'تکمیل شده' ? 'green' : 'blue'}`} key={task.id}>{task.title}</span>)}</div>)}</div></section></DataState></>
+  return <><TaskPageHeader title="تقویم پروژه" description="تقویم موعد وظایف؛ Core هنوز endpoint رویداد پروژه مستقل ندارد" action={null}><ProjectSelector data={data} /></TaskPageHeader><div className="calendar-toolbar"><button>امروز</button><div><ChevronLeft size={18} /><strong>{today.toLocaleDateString('fa-IR', { month: 'long', year: 'numeric' })}</strong><ChevronLeft className="flip" size={18} /></div></div><DataState loading={data.loading} error={data.error} empty={!data.tasks.length}><section className="calendar-card"><div className="calendar-weekdays">{['شنبه','یکشنبه','دوشنبه','سه‌شنبه','چهارشنبه','پنجشنبه','جمعه'].map((day) => <span key={day}>{day}</span>)}</div><div className="calendar-days">{cells.map((day, index) => <div className={day === today.getDate() ? 'today' : ''} key={index}>{day && <b>{day.toLocaleString('fa-IR')}</b>}{(byDay[day] || []).slice(0, 3).map((task) => <span className={`event ${task.priority === 'بالا' || task.priority === 'بحرانی' ? 'gold' : task.status === 'تکمیل شده' ? 'green' : 'blue'}`} key={task.id}>{task.title}</span>)}</div>)}</div></section></DataState></>
 }
 
 function ProjectPlanning({ data }) {
   const project = data.selectedProject
   return (
     <>
-      <TaskPageHeader title="برنامه‌ریزی پروژه" description="فهرست پروژه‌ها و فعالیت‌های WBS متصل به Core" action="ایجاد پروژه">
+      <TaskPageHeader title="برنامه‌ریزی پروژه" description="فهرست پروژه‌ها و فعالیت‌های WBS متصل به Core" actionNode={<CreateButton kind="project" data={data} label="ایجاد پروژه" />}>
         <ProjectSelector data={data} />
       </TaskPageHeader>
       <DataState loading={data.loading} error={data.error} empty={!data.projects.length}>
@@ -803,7 +1123,7 @@ function ProjectPlanning({ data }) {
           <article className="stat-card"><span>بودجه/هزینه</span><div className="stat-value"><strong>{project?.cost ? Number(project.cost).toLocaleString('fa-IR') : '—'}</strong></div><p>فیلد کلی Cost در Core</p></article>
         </section>
         <section className="task-panel task-table-panel">
-          <div className="task-panel-title"><div><h3>فعالیت‌های برنامه</h3><p>داده‌های Waterfall Activities برای پروژه منتخب</p></div></div>
+          <div className="task-panel-title"><div><h3>فعالیت‌های برنامه</h3><p>داده‌های Waterfall Activities برای پروژه منتخب</p></div><CreateButton kind="activity" data={data} label="افزودن فعالیت" /></div>
           <DataState loading={data.loadingDetails} empty={!data.activities.length}>
             <div className="table-scroll"><table><thead><tr><th>فعالیت</th><th>مسئول</th><th>شروع</th><th>پایان</th><th>مدت</th><th>پیشرفت برنامه‌ای</th><th>پیشرفت واقعی</th></tr></thead><tbody>
               {data.activities.map((item) => <tr key={item.id}><td><strong>{item.name}</strong></td><td>{data.userName(item.responsibleUserId)}</td><td>{formatDateOnly(item.startDate)}</td><td>{formatDateOnly(item.endDate)}</td><td>{item.durationDays || '—'}</td><td>{Number(item.plannedProgress || 0).toLocaleString('fa-IR')}٪</td><td>{Number(item.actualProgress || 0).toLocaleString('fa-IR')}٪</td></tr>)}
@@ -818,7 +1138,7 @@ function ProjectPlanning({ data }) {
 function ProjectDocuments({ data }) {
   return (
     <>
-      <TaskPageHeader title="مدیریت مستندات" description="لیست مستندات پروژه از Project Documents API" action="آپلود سند">
+      <TaskPageHeader title="مدیریت مستندات" description="لیست مستندات پروژه از Project Documents API" actionNode={<CreateButton kind="document" data={data} label="آپلود سند" />}>
         <ProjectSelector data={data} />
       </TaskPageHeader>
       <section className="task-panel task-table-panel">
@@ -836,7 +1156,7 @@ function ProjectProgress({ data }) {
   const latest = [...data.progressUpdates].sort((a, b) => String(b.registerDate).localeCompare(String(a.registerDate)))[0]
   return (
     <>
-      <TaskPageHeader title="کنترل پیشرفت پروژه" description="گزارش‌های پیشرفت ثبت‌شده در Core" action="ثبت گزارش پیشرفت">
+      <TaskPageHeader title="کنترل پیشرفت پروژه" description="گزارش‌های پیشرفت ثبت‌شده در Core" actionNode={<CreateButton kind="progress" data={data} label="ثبت گزارش پیشرفت" />}>
         <ProjectSelector data={data} />
       </TaskPageHeader>
       <DataState loading={data.loading || data.loadingDetails} error={data.error} empty={!data.selectedProject}>
@@ -862,21 +1182,21 @@ function ProjectProgress({ data }) {
 function ProjectStrategic({ data }) {
   return (
     <>
-      <TaskPageHeader title="مدیریت استراتژیک پروژه‌ها" description="نمای خلاصه پروژه، خروجی‌ها و KPIهای موجود در Core" action="تعریف KPI">
+      <TaskPageHeader title="مدیریت استراتژیک پروژه‌ها" description="نمای خلاصه پروژه، خروجی‌ها و KPIهای موجود در Core" actionNode={<CreateButton kind="deliverable" data={data} label="تعریف خروجی" />}>
         <ProjectSelector data={data} />
       </TaskPageHeader>
       <DataState loading={data.loading || data.loadingDetails} error={data.error} empty={!data.selectedProject}>
         <section className="task-dashboard-grid">
           <div className="task-panel task-table-panel">
-            <div className="task-panel-title"><div><h3>خروجی‌های پروژه</h3><p>Deliverables API</p></div></div>
+            <div className="task-panel-title"><div><h3>خروجی‌های پروژه</h3><p>Deliverables API</p></div><CreateButton kind="deliverable" data={data} label="تعریف خروجی" /></div>
             <DataState loading={data.loadingDetails} empty={!data.deliverables.length}>
-              <div className="table-scroll"><table><thead><tr><th>خروجی</th><th>وضعیت</th><th>مسئول</th></tr></thead><tbody>{data.deliverables.map((item) => <tr key={item.id}><td><strong>{item.title || item.name || item.description || item.id}</strong></td><td>{item.status ?? '—'}</td><td>{data.userName(item.responsibleUserId)}</td></tr>)}</tbody></table></div>
+              <div className="table-scroll"><table><thead><tr><th>خروجی</th><th>وضعیت</th><th>مسئول</th></tr></thead><tbody>{data.deliverables.map((item) => <tr key={item.id}><td><strong>{item.title || item.name || item.description || item.id}</strong></td><td>{compactEnumLabel(item.status, deliverableStatusLabels)}</td><td>{data.userName(item.responsibleUserId)}</td></tr>)}</tbody></table></div>
             </DataState>
           </div>
           <div className="task-panel task-table-panel">
-            <div className="task-panel-title"><div><h3>KPIها</h3><p>KPI API</p></div></div>
+            <div className="task-panel-title"><div><h3>KPIها</h3><p>KPI API</p></div><CreateButton kind="kpi" data={data} label="تعریف KPI" /></div>
             <DataState loading={data.loadingDetails} empty={!data.kpis.length}>
-              <div className="table-scroll"><table><thead><tr><th>شاخص</th><th>هدف</th><th>واحد</th></tr></thead><tbody>{data.kpis.map((item) => <tr key={item.id}><td><strong>{item.name || item.title || item.id}</strong></td><td>{item.targetValue ?? item.target ?? '—'}</td><td>{item.unit || '—'}</td></tr>)}</tbody></table></div>
+              <div className="table-scroll"><table><thead><tr><th>شاخص</th><th>نوع</th><th>هدف</th><th>فرمول</th></tr></thead><tbody>{data.kpis.map((item) => <tr key={item.id}><td><strong>{item.description || item.name || item.title || item.id}</strong></td><td>{compactEnumLabel(item.type, kpiTypeLabels)}</td><td>{item.targetValue ?? item.target ?? '—'}</td><td>{item.formula || '—'}</td></tr>)}</tbody></table></div>
             </DataState>
           </div>
         </section>
@@ -891,34 +1211,34 @@ function Meetings() {
     ['بررسی نقشه‌های فاز اجرایی', 'برج اداری روزت', 'دوشنبه، ساعت ۱۰:۳۰', 'جلسه آنلاین', 'در پیش رو'],
     ['هماهنگی پیمانکاران تأسیسات', 'مجتمع مسکونی آفتاب', '۲۸ مرداد ۱۴۰۵', 'دفتر کارگاه', 'برگزار شده'],
   ]
-  return <><TaskPageHeader title="جلسات و صورت‌جلسات" description="برنامه‌ریزی جلسات، ثبت صورت‌جلسه و تخصیص بندهای اجرایی" action="برگزاری جلسه جدید" /><div className="meeting-summary"><article><CalendarDays size={22} /><div><strong>۵</strong><span>جلسه پیش رو</span></div></article><article><FileText size={22} /><div><strong>۱۲</strong><span>بند اجرایی باز</span></div></article><article><CheckCircle2 size={22} /><div><strong>۸</strong><span>صورت‌جلسه نهایی‌شده</span></div></article></div><section className="task-panel meetings-list"><div className="task-panel-title"><div><h3>جلسات اخیر و پیش رو</h3><p>فهرست جلسات مرتبط با پروژه‌های شما</p></div><div className="view-switch"><button className="active">همه</button><button>پیش رو</button><button>گذشته</button></div></div>{meetings.map(([title, project, time, location, status]) => <article key={title}><span className="meeting-date"><b>{time.split(' ')[0]}</b><small>{time.replace(time.split(' ')[0], '')}</small></span><div className="meeting-info"><h4>{title}</h4><p>{project}</p><span>{location === 'جلسه آنلاین' ? <Video size={14} /> : <Users2 size={14} />}{location}</span></div><div className="meeting-meta"><StatusPill status={status === 'برگزار شده' ? 'تکمیل شده' : 'در حال انجام'} /><button>{status === 'برگزار شده' ? 'مشاهده صورت‌جلسه' : 'ورود به جلسه'}</button></div></article>)}</section></>
+  return <><TaskPageHeader title="جلسات و صورت‌جلسات" description="برنامه‌ریزی جلسات، ثبت صورت‌جلسه و تخصیص بندهای اجرایی" action={null} /><div className="meeting-summary"><article><CalendarDays size={22} /><div><strong>۵</strong><span>جلسه پیش رو</span></div></article><article><FileText size={22} /><div><strong>۱۲</strong><span>بند اجرایی باز</span></div></article><article><CheckCircle2 size={22} /><div><strong>۸</strong><span>صورت‌جلسه نهایی‌شده</span></div></article></div><section className="task-panel meetings-list"><div className="task-panel-title"><div><h3>جلسات اخیر و پیش رو</h3><p>فهرست جلسات مرتبط با پروژه‌های شما</p></div><div className="view-switch"><button className="active">همه</button><button>پیش رو</button><button>گذشته</button></div></div>{meetings.map(([title, project, time, location, status]) => <article key={title}><span className="meeting-date"><b>{time.split(' ')[0]}</b><small>{time.replace(time.split(' ')[0], '')}</small></span><div className="meeting-info"><h4>{title}</h4><p>{project}</p><span>{location === 'جلسه آنلاین' ? <Video size={14} /> : <Users2 size={14} />}{location}</span></div><div className="meeting-meta"><StatusPill status={status === 'برگزار شده' ? 'تکمیل شده' : 'در حال انجام'} /><button>{status === 'برگزار شده' ? 'مشاهده صورت‌جلسه' : 'ورود به جلسه'}</button></div></article>)}</section></>
 }
 
 function Workflows() {
   const flows = [['گردش کار وظایف اجرایی','پیش‌نویس، در حال انجام، بازبینی، تأیید نهایی','۳ پروژه','فعال'],['فرآیند بررسی مستندات','ثبت، بررسی کارشناس، اصلاح، تأیید مدیر','۲ پروژه','فعال'],['الگوی درخواست تغییر','ثبت درخواست، ارزیابی اثر، کمیته تغییر، اجرا','تمام پروژه‌ها','پیش‌نویس']]
-  return <><TaskPageHeader title="گردش کار و الگوها" description="تعریف مراحل و قوانین گردش وظایف به تفکیک پروژه" action="ساخت گردش کار" /><section className="workflow-help"><Workflow size={28} /><div><h3>فرآیندهای کاری را با پروژه خود هماهنگ کنید</h3><p>وضعیت‌ها، مسئول هر مرحله و قوانین انتقال را بدون نیاز به کدنویسی تعریف کنید.</p></div><button>راهنمای طراحی گردش کار</button></section><div className="workflow-grid">{flows.map(([title, steps, projects, status], index) => <article key={title}><header><span className={`workflow-icon tone-${index}`}><Workflow size={20} /></span><MoreHorizontal size={18} /></header><h3>{title}</h3><p>{steps}</p><div className="flow-steps">{[1,2,3,4].map((step) => <i key={step} />)}</div><footer><span>{projects}</span><StatusPill status={status === 'فعال' ? 'تکمیل شده' : 'برای انجام'} /></footer></article>)}</div></>
+  return <><TaskPageHeader title="گردش کار و الگوها" description="تعریف مراحل و قوانین گردش وظایف به تفکیک پروژه" action={null} /><section className="workflow-help"><Workflow size={28} /><div><h3>فرآیندهای کاری را با پروژه خود هماهنگ کنید</h3><p>وضعیت‌ها، مسئول هر مرحله و قوانین انتقال را بدون نیاز به کدنویسی تعریف کنید.</p></div><button>راهنمای طراحی گردش کار</button></section><div className="workflow-grid">{flows.map(([title, steps, projects, status], index) => <article key={title}><header><span className={`workflow-icon tone-${index}`}><Workflow size={20} /></span><MoreHorizontal size={18} /></header><h3>{title}</h3><p>{steps}</p><div className="flow-steps">{[1,2,3,4].map((step) => <i key={step} />)}</div><footer><span>{projects}</span><StatusPill status={status === 'فعال' ? 'تکمیل شده' : 'برای انجام'} /></footer></article>)}</div></>
 }
 
 function RaciMatrix({ data }) {
   const people = data.governanceRoles.length ? data.governanceRoles : data.teamMembers.map((member) => ({ id: member.id, title: member.roleTitle || 'عضو تیم', userId: member.userId }))
   const rows = [...data.activities, ...data.deliverables].slice(0, 8)
-  return <><TaskPageHeader title="ماتریس مسئولیت‌ها (RACI)" description="Core نقش‌های حاکمیتی دارد، ولی RACI واقعی به‌عنوان endpoint مستقل ندارد" action="افزودن فعالیت"><ProjectSelector data={data} /></TaskPageHeader><div className="raci-legend"><span><i className="r">R</i>مسئول اجرا</span><span><i className="a">A</i>پاسخگو</span><span><i className="c">C</i>مشاور</span><span><i className="i">I</i>مطلع</span><ProjectSelector data={data} /></div><section className="task-panel raci-table"><DataState loading={data.loading || data.loadingDetails} error={data.error} empty={!rows.length || !people.length}><div className="table-scroll"><table><thead><tr><th>فعالیت / خروجی</th>{people.slice(0, 5).map((person) => <th key={person.id}><span className="person-head"><i>{initialsOf(data.userName(person.userId)).slice(0, 1)}</i>{data.userName(person.userId)}<small>{person.title}</small></span></th>)}</tr></thead><tbody>{rows.map((row) => <tr key={row.id}><td><strong>{row.name || row.title || row.description || row.id}</strong></td>{people.slice(0, 5).map((person, index) => <td key={person.id}><span className={`raci-role ${index === 0 ? 'a' : row.responsibleUserId === person.userId ? 'r' : index === 1 ? 'c' : 'i'}`}>{index === 0 ? 'A' : row.responsibleUserId === person.userId ? 'R' : index === 1 ? 'C' : 'I'}</span></td>)}</tr>)}</tbody></table></div></DataState></section></>
+  return <><TaskPageHeader title="ماتریس مسئولیت‌ها (RACI)" description="Core نقش‌های حاکمیتی دارد، ولی RACI واقعی به‌عنوان endpoint مستقل ندارد" actionNode={<CreateButton kind="activity" data={data} label="افزودن فعالیت" />}><ProjectSelector data={data} /></TaskPageHeader><div className="raci-legend"><span><i className="r">R</i>مسئول اجرا</span><span><i className="a">A</i>پاسخگو</span><span><i className="c">C</i>مشاور</span><span><i className="i">I</i>مطلع</span></div><section className="task-panel raci-table"><DataState loading={data.loading || data.loadingDetails} error={data.error} empty={!rows.length || !people.length}><div className="table-scroll"><table><thead><tr><th>فعالیت / خروجی</th>{people.slice(0, 5).map((person) => <th key={person.id}><span className="person-head"><i>{initialsOf(data.userName(person.userId)).slice(0, 1)}</i>{data.userName(person.userId)}<small>{person.title}</small></span></th>)}</tr></thead><tbody>{rows.map((row) => <tr key={row.id}><td><strong>{row.name || row.title || row.description || row.id}</strong></td>{people.slice(0, 5).map((person, index) => <td key={person.id}><span className={`raci-role ${index === 0 ? 'a' : row.responsibleUserId === person.userId ? 'r' : index === 1 ? 'c' : 'i'}`}>{index === 0 ? 'A' : row.responsibleUserId === person.userId ? 'R' : index === 1 ? 'C' : 'I'}</span></td>)}</tr>)}</tbody></table></div></DataState></section></>
 }
 
 function RisksPage({ data }) {
-  return <><TaskPageHeader title="مدیریت ریسک" description="ریسک‌های پروژه از Risks API" action="ثبت ریسک"><ProjectSelector data={data} /></TaskPageHeader><section className="task-panel task-table-panel"><DataState loading={data.loading || data.loadingDetails} error={data.error} empty={!data.risks.length}><div className="table-scroll"><table><thead><tr><th>ریسک</th><th>احتمال</th><th>شدت</th><th>اثر</th><th>RPN</th><th>مالک</th><th>برنامه پاسخ</th></tr></thead><tbody>{data.risks.map((risk) => <tr key={risk.id}><td><strong>{risk.description}</strong></td><td>{risk.probabilityScore}</td><td>{risk.severityScore}</td><td>{risk.impactScore}</td><td>{risk.rpn}</td><td>{data.userName(risk.riskOwnerUserId)}</td><td>{risk.responsePlan || '—'}</td></tr>)}</tbody></table></div></DataState></section></>
+  return <><TaskPageHeader title="مدیریت ریسک" description="ریسک‌های پروژه از Risks API" actionNode={<CreateButton kind="risk" data={data} label="ثبت ریسک" />}><ProjectSelector data={data} /></TaskPageHeader><section className="task-panel task-table-panel"><DataState loading={data.loading || data.loadingDetails} error={data.error} empty={!data.risks.length}><div className="table-scroll"><table><thead><tr><th>ریسک</th><th>احتمال</th><th>شدت</th><th>اثر</th><th>RPN</th><th>مالک</th><th>برنامه پاسخ</th></tr></thead><tbody>{data.risks.map((risk) => <tr key={risk.id}><td><strong>{risk.description}</strong></td><td>{risk.probabilityScore}</td><td>{risk.severityScore}</td><td>{risk.impactScore}</td><td>{risk.rpn}</td><td>{data.userName(risk.riskOwnerUserId)}</td><td>{risk.responsePlan || '—'}</td></tr>)}</tbody></table></div></DataState></section></>
 }
 
 function ResourcesPage({ data }) {
-  return <><TaskPageHeader title="مدیریت منابع" description="منابع انسانی فعلاً از Project Team API پوشش داده می‌شود" action="افزودن عضو"><ProjectSelector data={data} /></TaskPageHeader><section className="task-panel task-table-panel"><DataState loading={data.loading || data.loadingDetails} error={data.error} empty={!data.teamMembers.length}><div className="table-scroll"><table><thead><tr><th>نام عضو</th><th>نقش پروژه</th><th>شناسه کاربر</th></tr></thead><tbody>{data.teamMembers.map((member) => <tr key={member.id}><td><span className="owner-cell"><i>{initialsOf(data.userName(member.userId)).slice(0, 1)}</i><strong>{data.userName(member.userId)}</strong></span></td><td>{member.roleTitle || '—'}</td><td>{member.userId}</td></tr>)}</tbody></table></div></DataState></section></>
+  return <><TaskPageHeader title="مدیریت منابع" description="منابع انسانی فعلاً از Project Team API پوشش داده می‌شود" actionNode={<CreateButton kind="member" data={data} label="افزودن عضو" />}><ProjectSelector data={data} /><CreateButton kind="governance" data={data} label="تعریف نقش حاکمیتی" /></TaskPageHeader><section className="task-panel task-table-panel"><DataState loading={data.loading || data.loadingDetails} error={data.error} empty={!data.teamMembers.length}><div className="table-scroll"><table><thead><tr><th>نام عضو</th><th>نقش پروژه</th><th>شناسه کاربر</th></tr></thead><tbody>{data.teamMembers.map((member) => <tr key={member.id}><td><span className="owner-cell"><i>{initialsOf(data.userName(member.userId)).slice(0, 1)}</i><strong>{data.userName(member.userId)}</strong></span></td><td>{member.roleTitle || '—'}</td><td>{member.userId}</td></tr>)}</tbody></table></div></DataState></section></>
 }
 
 function StakeholdersPage({ data }) {
-  return <><TaskPageHeader title="مدیریت ذینفعان" description="ذینفعان پروژه از Stakeholders API" action="ثبت ذینفع"><ProjectSelector data={data} /></TaskPageHeader><section className="task-panel task-table-panel"><DataState loading={data.loading || data.loadingDetails} error={data.error} empty={!data.stakeholders.length}><div className="table-scroll"><table><thead><tr><th>نام</th><th>نوع</th><th>قدرت</th><th>علاقه</th><th>انتظارات</th><th>استراتژی تعامل</th></tr></thead><tbody>{data.stakeholders.map((item) => <tr key={item.id}><td><strong>{item.name}</strong></td><td>{item.isInternal ? 'داخلی' : 'خارجی'}</td><td>{item.power}</td><td>{item.interest}</td><td>{item.expectations || '—'}</td><td>{item.engagementStrategy || '—'}</td></tr>)}</tbody></table></div></DataState></section></>
+  return <><TaskPageHeader title="مدیریت ذینفعان" description="ذینفعان پروژه از Stakeholders API" actionNode={<CreateButton kind="stakeholder" data={data} label="ثبت ذینفع" />}><ProjectSelector data={data} /></TaskPageHeader><section className="task-panel task-table-panel"><DataState loading={data.loading || data.loadingDetails} error={data.error} empty={!data.stakeholders.length}><div className="table-scroll"><table><thead><tr><th>نام</th><th>نوع</th><th>قدرت</th><th>علاقه</th><th>انتظارات</th><th>استراتژی تعامل</th></tr></thead><tbody>{data.stakeholders.map((item) => <tr key={item.id}><td><strong>{item.name}</strong></td><td>{item.isInternal ? 'داخلی' : 'خارجی'}</td><td>{compactEnumLabel(item.power, stakeholderLevelLabels)}</td><td>{compactEnumLabel(item.interest, stakeholderLevelLabels)}</td><td>{item.expectations || '—'}</td><td>{item.engagementStrategy || '—'}</td></tr>)}</tbody></table></div></DataState></section></>
 }
 
 function CostPage({ data }) {
-  return <><TaskPageHeader title="مدیریت هزینه" description="Core فعلاً فقط Cost کلی پروژه را پوشش می‌دهد" action="ثبت هزینه"><ProjectSelector data={data} /></TaskPageHeader><section className="empty-page"><div><WalletCards size={38} /></div><h1>{data.selectedProject?.cost ? Number(data.selectedProject.cost).toLocaleString('fa-IR') : 'هزینه ثبت نشده'}</h1><p>برای مدیریت هزینه واقعی، endpointهای بودجه، هزینه واقعی، پیش‌بینی و آیتم‌های هزینه لازم است.</p></section></>
+  return <><TaskPageHeader title="مدیریت هزینه" description="Core فعلاً فقط Cost کلی پروژه را پوشش می‌دهد" action={null}><ProjectSelector data={data} /></TaskPageHeader><section className="empty-page"><div><WalletCards size={38} /></div><h1>{data.selectedProject?.cost ? Number(data.selectedProject.cost).toLocaleString('fa-IR') : 'هزینه ثبت نشده'}</h1><p>برای مدیریت هزینه واقعی، endpointهای بودجه، هزینه واقعی، پیش‌بینی و آیتم‌های هزینه لازم است.</p></section></>
 }
 
 function UnsupportedProjectArea({ title, message }) {

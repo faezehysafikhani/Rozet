@@ -32,7 +32,7 @@ export const PersianMessages = {
 }
 
 async function rawRequest(endpoint, options, token) {
-  const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) }
+  const headers = { ...(options.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }), ...(options.headers || {}) }
   if (token) headers.Authorization = `Bearer ${token}`
 
   const url = /^https?:\/\//.test(endpoint)
@@ -244,27 +244,43 @@ const projectQuery = (params = {}) => {
 export const projectManagementApi = {
   projects: ({ tenantId, pageNumber = 1, pageSize = 20, search = '', type, status, organizationUnitId, managerUserId, sortBy, sortDescending } = {}) =>
     api.get(`/api/project-management/projects?${projectQuery({ tenantId, pageNumber, pageSize, search, type, status, organizationUnitId, managerUserId, sortBy, sortDescending })}`),
+  createProject: (payload) => api.post('/api/project-management/projects', payload),
   project: (id) => api.get(`/api/project-management/projects/${id}`),
   agileTasks: ({ projectId, sprintNumber } = {}) =>
     api.get(`/api/project-management/agile/tasks?${projectQuery({ projectId, sprintNumber })}`),
+  createAgileTask: (payload) => api.post('/api/project-management/agile/tasks', payload),
   waterfallActivities: (projectId) =>
     api.get(`/api/project-management/waterfall/activities?${projectQuery({ projectId })}`),
+  createWaterfallActivity: (payload) => api.post('/api/project-management/waterfall/activities', payload),
   progressUpdates: (projectId) =>
     api.get(`/api/project-management/progress-updates?${projectQuery({ projectId })}`),
+  createProgressUpdate: (payload) => api.post('/api/project-management/progress-updates', payload),
   documents: (projectId) =>
     api.get(`/api/project-management/documents?${projectQuery({ projectId })}`),
+  uploadDocument: ({ file, tenantId, projectId, description, documentType }) => {
+    const form = new FormData()
+    form.append('file', file)
+    const query = projectQuery({ tenantId, projectId, description, documentType })
+    return apiRequest(`/api/project-management/documents?${query}`, { method: 'POST', body: form })
+  },
   deliverables: (projectId) =>
     api.get(`/api/project-management/deliverables?${projectQuery({ projectId })}`),
+  createDeliverable: (payload) => api.post('/api/project-management/deliverables', payload),
   kpis: ({ projectId, deliverableId } = {}) =>
     api.get(`/api/project-management/kpis?${projectQuery({ projectId, deliverableId })}`),
+  createKpi: (payload) => api.post('/api/project-management/kpis', payload),
   risks: (projectId) =>
     api.get(`/api/project-management/risks?${projectQuery({ projectId })}`),
+  createRisk: (payload) => api.post('/api/project-management/risks', payload),
   stakeholders: (projectId) =>
     api.get(`/api/project-management/stakeholders?${projectQuery({ projectId })}`),
+  createStakeholder: (payload) => api.post('/api/project-management/stakeholders', payload),
   teamMembers: (projectId) =>
     api.get(`/api/project-management/team/members?${projectQuery({ projectId })}`),
+  addTeamMember: (payload) => api.post('/api/project-management/team/members', payload),
   governanceRoles: (projectId) =>
     api.get(`/api/project-management/team/governance-roles?${projectQuery({ projectId })}`),
+  createGovernanceRole: (payload) => api.post('/api/project-management/team/governance-roles', payload),
   myDashboard: (tenantId) =>
     api.get(`/api/reporting/me?${projectQuery({ tenantId })}`),
   projectDashboard: (projectId) =>
