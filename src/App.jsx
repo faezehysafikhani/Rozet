@@ -68,7 +68,7 @@ import {
   LockKeyhole,
 } from 'lucide-react'
 import { AuthProvider, Can, useAuth } from './services/AuthContext'
-import { PersianMessages, groupsApi, identityApi, labelForModule, labelForPermission, orgChartApi, permissionsApi, platformApi, rolesApi, unwrap, usersApi } from './services/api'
+import { PersianMessages, groupsApi, identityApi, labelForModule, labelForPermission, orgChartApi, permissionsApi, platformApi, projectManagementApi, rolesApi, unwrap, usersApi } from './services/api'
 import { DEFAULT_TENANT_ID } from './services/config'
 import { useChat } from './hooks/useChat'
 import { useNotifications } from './hooks/useNotifications'
@@ -487,46 +487,238 @@ const sampleTasks = [
   { title: 'هماهنگی جلسه با پیمانکار تأسیسات', project: 'پروژه توسعه مرکز تجاری', owner: 'زهرا کریمی', due: '۱۰ شهریور ۱۴۰۵', priority: 'کم', status: 'تکمیل شده', progress: 100 },
 ]
 
-function TaskPageHeader({ title, description, action = 'ایجاد وظیفه جدید' }) {
+const enumLabel = (value, labels, fallback = 'نامشخص') => labels[value] ?? labels[String(value)] ?? fallback
+const projectStatusLabels = { 0: 'پیش‌نویس', 1: 'فعال', 2: 'متوقف', 3: 'تکمیل شده', 4: 'آرشیو', Draft: 'پیش‌نویس', Active: 'فعال', OnHold: 'متوقف', Completed: 'تکمیل شده', Archived: 'آرشیو' }
+const projectTypeLabels = { 0: 'آبشاری', 1: 'چابک', Waterfall: 'آبشاری', Agile: 'چابک' }
+const agileStatusLabels = { 0: 'برای انجام', 1: 'در حال انجام', 2: 'تکمیل شده', ToDo: 'برای انجام', InProgress: 'در حال انجام', Done: 'تکمیل شده' }
+const agilePriorityLabels = { 0: 'کم', 1: 'متوسط', 2: 'بالا', 3: 'بحرانی', Low: 'کم', Medium: 'متوسط', High: 'بالا', Critical: 'بحرانی' }
+const approvalLabels = { 0: 'ثبت اولیه', 1: 'در انتظار تأیید', 2: 'تأیید شده', 3: 'رد شده', NotSubmitted: 'ثبت اولیه', PendingApproval: 'در انتظار تأیید', Approved: 'تأیید شده', Rejected: 'رد شده' }
+const performanceLabels = { 0: 'طبق برنامه', 1: 'در معرض ریسک', 2: 'عقب‌افتاده', OnTrack: 'طبق برنامه', AtRisk: 'در معرض ریسک', Behind: 'عقب‌افتاده' }
+const documentTypeLabels = { 0: 'گزارش', 1: 'نامه', 2: 'صورت‌جلسه', 3: 'سایر', Report: 'گزارش', Letter: 'نامه', MeetingMinutes: 'صورت‌جلسه', Other: 'سایر' }
+
+function arrayPayload(result) {
+  const payload = unwrap(result)
+  if (Array.isArray(payload)) return payload
+  if (Array.isArray(payload?.items)) return payload.items
+  if (Array.isArray(payload?.value)) return payload.value
+  return []
+}
+
+function totalPayload(result, items) {
+  const payload = unwrap(result)
+  return payload?.totalCount ?? payload?.total ?? items.length
+}
+
+function formatDateOnly(value) {
+  if (!value) return '—'
+  try {
+    return new Date(`${String(value).slice(0, 10)}T00:00:00`).toLocaleDateString('fa-IR')
+  } catch {
+    return String(value)
+  }
+}
+
+function formatBytes(value) {
+  const size = Number(value || 0)
+  if (!size) return '—'
+  if (size < 1024) return `${size.toLocaleString('fa-IR')} بایت`
+  if (size < 1024 * 1024) return `${Math.round(size / 1024).toLocaleString('fa-IR')} کیلوبایت`
+  return `${(size / 1024 / 1024).toFixed(1).replace('.', '/')} مگابایت`
+}
+
+function taskProgress(status) {
+  const label = enumLabel(status, agileStatusLabels)
+  if (label === 'تکمیل شده') return 100
+  if (label === 'در حال انجام') return 55
+  return 10
+}
+
+function useProjectManagementData() {
+  const { user } = useAuth()
+  const tenantId = user?.tenantId || DEFAULT_TENANT_ID
+  const [projects, setProjects] = useState([])
+  const [users, setUsers] = useState([])
+  const [selectedProjectId, setSelectedProjectId] = useState('')
+  const [tasks, setTasks] = useState([])
+  const [activities, setActivities] = useState([])
+  const [progressUpdates, setProgressUpdates] = useState([])
+  const [documents, setDocuments] = useState([])
+  const [risks, setRisks] = useState([])
+  const [stakeholders, setStakeholders] = useState([])
+  const [teamMembers, setTeamMembers] = useState([])
+  const [governanceRoles, setGovernanceRoles] = useState([])
+  const [deliverables, setDeliverables] = useState([])
+  const [kpis, setKpis] = useState([])
+  const [projectTotal, setProjectTotal] = useState(0)
+  const [loading, setLoading] = useState(true)
+  const [loadingDetails, setLoadingDetails] = useState(false)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      setLoading(true)
+      setError('')
+      const [projectResult, userResult] = await Promise.all([
+        projectManagementApi.projects({ tenantId, pageNumber: 1, pageSize: 50 }),
+        usersApi.list({ tenantId, pageNumber: 1, pageSize: 200 }),
+      ])
+      if (cancelled) return
+      if (!projectResult.isSuccess) setError(PersianMessages.error(projectResult.error))
+      const projectItems = arrayPayload(projectResult)
+      setProjects(projectItems)
+      setProjectTotal(totalPayload(projectResult, projectItems))
+      setUsers(arrayPayload(userResult))
+      setSelectedProjectId((current) => current && projectItems.some((p) => p.id === current) ? current : projectItems[0]?.id || '')
+      setLoading(false)
+    })()
+    return () => { cancelled = true }
+  }, [tenantId])
+
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      if (!projects.length) {
+        setTasks([])
+        return
+      }
+      const results = await Promise.all(projects.map((project) => projectManagementApi.agileTasks({ projectId: project.id })))
+      if (cancelled) return
+      setTasks(results.flatMap((result, index) => arrayPayload(result).map((task) => ({ ...task, projectName: projects[index].name }))))
+    })()
+    return () => { cancelled = true }
+  }, [projects])
+
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      if (!selectedProjectId) {
+        setActivities([]); setProgressUpdates([]); setDocuments([]); setRisks([])
+        setStakeholders([]); setTeamMembers([]); setGovernanceRoles([]); setDeliverables([]); setKpis([])
+        return
+      }
+      setLoadingDetails(true)
+      const [activityResult, progressResult, documentResult, riskResult, stakeholderResult, memberResult, governanceResult, deliverableResult, kpiResult] = await Promise.all([
+        projectManagementApi.waterfallActivities(selectedProjectId),
+        projectManagementApi.progressUpdates(selectedProjectId),
+        projectManagementApi.documents(selectedProjectId),
+        projectManagementApi.risks(selectedProjectId),
+        projectManagementApi.stakeholders(selectedProjectId),
+        projectManagementApi.teamMembers(selectedProjectId),
+        projectManagementApi.governanceRoles(selectedProjectId),
+        projectManagementApi.deliverables(selectedProjectId),
+        projectManagementApi.kpis({ projectId: selectedProjectId }),
+      ])
+      if (cancelled) return
+      setActivities(arrayPayload(activityResult))
+      setProgressUpdates(arrayPayload(progressResult))
+      setDocuments(arrayPayload(documentResult))
+      setRisks(arrayPayload(riskResult))
+      setStakeholders(arrayPayload(stakeholderResult))
+      setTeamMembers(arrayPayload(memberResult))
+      setGovernanceRoles(arrayPayload(governanceResult))
+      setDeliverables(arrayPayload(deliverableResult))
+      setKpis(arrayPayload(kpiResult))
+      setLoadingDetails(false)
+    })()
+    return () => { cancelled = true }
+  }, [selectedProjectId])
+
+  const userName = useMemo(() => {
+    const map = new Map(users.map((item) => [item.id, item.displayName || item.email]))
+    return (id) => map.get(id) || '—'
+  }, [users])
+
+  const selectedProject = projects.find((project) => project.id === selectedProjectId) || null
+
+  return {
+    tenantId, projects, projectTotal, selectedProject, selectedProjectId, setSelectedProjectId,
+    tasks, activities, progressUpdates, documents, risks, stakeholders, teamMembers,
+    governanceRoles, deliverables, kpis, userName, loading, loadingDetails, error,
+  }
+}
+
+function ProjectSelector({ data }) {
+  if (!data.projects.length) return null
+  return (
+    <select className="project-selector" value={data.selectedProjectId} onChange={(event) => data.setSelectedProjectId(event.target.value)}>
+      {data.projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
+    </select>
+  )
+}
+
+function DataState({ loading, error, empty, children }) {
+  if (loading) return <p className="data-state">در حال دریافت اطلاعات از Nexus Core...</p>
+  if (error) return <p className="data-state data-state--error">{error}</p>
+  if (empty) return <p className="data-state">داده‌ای برای نمایش وجود ندارد.</p>
+  return children
+}
+
+function normalizeTask(task, userName) {
+  const status = enumLabel(task.status, agileStatusLabels)
+  const priority = enumLabel(task.priority, agilePriorityLabels)
+  return {
+    id: task.id,
+    title: task.title,
+    project: task.projectName || '—',
+    owner: userName(task.responsibleUserId),
+    due: formatDateOnly(task.dueDate),
+    priority,
+    status,
+    progress: taskProgress(task.status),
+    sprintNumber: task.sprintNumber,
+  }
+}
+
+function TaskPageHeader({ title, description, action = 'ایجاد وظیفه جدید', children }) {
   return (
     <div className="task-page-header">
       <div><span>مدیریت وظایف / {title}</span><h1>{title}</h1><p>{description}</p></div>
-      <button><Plus size={18} />{action}</button>
+      <div className="task-head-actions">{children}<button><Plus size={18} />{action}</button></div>
     </div>
   )
 }
 
-function TaskDashboard() {
+function TaskDashboard({ data }) {
+  const normalized = data.tasks.map((task) => normalizeTask(task, data.userName))
+  const done = normalized.filter((task) => task.status === 'تکمیل شده').length
+  const doing = normalized.filter((task) => task.status === 'در حال انجام').length
+  const overdue = data.tasks.filter((task) => task.dueDate && new Date(`${task.dueDate}T23:59:59`) < new Date() && enumLabel(task.status, agileStatusLabels) !== 'تکمیل شده').length
+  const projectRows = data.projects.slice(0, 5).map((project) => {
+    const projectTasks = normalized.filter((task) => task.project === project.name)
+    const projectDone = projectTasks.filter((task) => task.status === 'تکمیل شده').length
+    const percent = projectTasks.length ? Math.round((projectDone / projectTasks.length) * 100) : 0
+    return [project.name, percent, `${projectDone.toLocaleString('fa-IR')} از ${projectTasks.length.toLocaleString('fa-IR')} وظیفه`]
+  })
+
   return (
     <>
-      <TaskPageHeader title="داشبورد وظایف" description="نمای کلی وضعیت وظایف تمام پروژه‌های مرجع" />
+      <TaskPageHeader title="داشبورد وظایف" description="نمای کلی وضعیت وظایف متصل به Nexus Core">
+        <ProjectSelector data={data} />
+      </TaskPageHeader>
+      <DataState loading={data.loading} error={data.error} empty={!data.projects.length}>
       <div className="task-kpis">
-        <article><span className="task-kpi-icon navy"><ListTodo size={21} /></span><div><small>کل وظایف</small><strong>۱۲۸</strong><p>در ۶ پروژه فعال</p></div></article>
-        <article><span className="task-kpi-icon blue"><Clock3 size={21} /></span><div><small>در حال انجام</small><strong>۴۶</strong><p>۳۶٪ از کل وظایف</p></div></article>
-        <article><span className="task-kpi-icon green"><CheckCircle2 size={21} /></span><div><small>تکمیل شده</small><strong>۶۷</strong><p>۱۲ مورد این هفته</p></div></article>
-        <article><span className="task-kpi-icon red"><TriangleAlert size={21} /></span><div><small>دارای تأخیر</small><strong>۱۵</strong><p>نیازمند اقدام فوری</p></div></article>
+        <article><span className="task-kpi-icon navy"><ListTodo size={21} /></span><div><small>کل وظایف</small><strong>{normalized.length.toLocaleString('fa-IR')}</strong><p>در {data.projectTotal.toLocaleString('fa-IR')} پروژه</p></div></article>
+        <article><span className="task-kpi-icon blue"><Clock3 size={21} /></span><div><small>در حال انجام</small><strong>{doing.toLocaleString('fa-IR')}</strong><p>از Agile Tasks</p></div></article>
+        <article><span className="task-kpi-icon green"><CheckCircle2 size={21} /></span><div><small>تکمیل شده</small><strong>{done.toLocaleString('fa-IR')}</strong><p>{normalized.length ? Math.round((done / normalized.length) * 100).toLocaleString('fa-IR') : '۰'}٪ از کل</p></div></article>
+        <article><span className="task-kpi-icon red"><TriangleAlert size={21} /></span><div><small>دارای تأخیر</small><strong>{overdue.toLocaleString('fa-IR')}</strong><p>براساس موعد انجام</p></div></article>
       </div>
       <div className="task-dashboard-grid">
         <section className="task-panel project-progress">
           <div className="task-panel-title"><div><h3>پیشرفت وظایف پروژه‌ها</h3><p>درصد وظایف تکمیل‌شده به تفکیک پروژه مرجع</p></div><button>مشاهده همه</button></div>
-          {[
-            ['توسعه مرکز تجاری', 78, '۳۲ از ۴۱ وظیفه'],
-            ['برج اداری روزت', 62, '۲۱ از ۳۴ وظیفه'],
-            ['مجتمع مسکونی آفتاب', 45, '۱۴ از ۳۱ وظیفه'],
-            ['نوسازی دفتر مرکزی', 86, '۱۹ از ۲۲ وظیفه'],
-          ].map(([name, percent, count]) => <div className="progress-row" key={name}><div><strong>{name}</strong><span>{count}</span></div><div className="progress-track"><i style={{ width: `${percent}%` }} /></div><em>{percent}٪</em></div>)}
+          {projectRows.length ? projectRows.map(([name, percent, count]) => <div className="progress-row" key={name}><div><strong>{name}</strong><span>{count}</span></div><div className="progress-track"><i style={{ width: `${percent}%` }} /></div><em>{percent}٪</em></div>) : <p className="data-state">هنوز وظیفه‌ای برای پروژه‌ها ثبت نشده است.</p>}
         </section>
         <section className="task-panel workload-panel">
           <div className="task-panel-title"><div><h3>توزیع حجم کار تیم</h3><p>وظایف فعال اعضای پروژه</p></div><MoreHorizontal size={18} /></div>
-          {[
-            ['علی رضایی', 'مدیر پروژه', 12, 'ع‌ر'],
-            ['مریم احمدی', 'کارشناس برنامه‌ریزی', 9, 'م‌ا'],
-            ['سینا محمدی', 'سرپرست اجرا', 7, 'س‌م'],
-            ['زهرا کریمی', 'کارشناس کنترل پروژه', 5, 'ز‌ک'],
-          ].map(([name, role, count, initials], index) => <div className="workload-row" key={name}><span className={`mini-avatar tone-${index}`}>{initials}</span><div><strong>{name}</strong><small>{role}</small></div><b>{count} وظیفه</b></div>)}
+          {Object.entries(normalized.reduce((map, task) => {
+            if (task.owner !== '—' && task.status !== 'تکمیل شده') map[task.owner] = (map[task.owner] || 0) + 1
+            return map
+          }, {})).slice(0, 5).map(([name, count], index) => <div className="workload-row" key={name}><span className={`mini-avatar tone-${index}`}>{initialsOf(name)}</span><div><strong>{name}</strong><small>عضو تیم پروژه</small></div><b>{count.toLocaleString('fa-IR')} وظیفه</b></div>)}
+          {!normalized.length && <p className="data-state">برای محاسبه حجم کار، وظیفه‌ای ثبت نشده است.</p>}
         </section>
       </div>
-      <TaskList compact />
+      <TaskList compact data={data} />
+      </DataState>
     </>
   )
 }
@@ -536,19 +728,26 @@ function StatusPill({ status }) {
   return <span className={`status-pill ${type}`}>{status}</span>
 }
 
-function TaskList({ compact = false }) {
+function TaskList({ compact = false, data }) {
+  const [search, setSearch] = useState('')
+  const tasks = (data?.tasks || []).map((task) => normalizeTask(task, data.userName))
+  const shownTasks = tasks
+    .filter((task) => !search || task.title.includes(search) || task.project.includes(search) || task.owner.includes(search))
+    .slice(0, compact ? 5 : 100)
   return (
     <section className={`task-panel task-table-panel ${compact ? 'compact' : ''}`}>
-      <div className="task-panel-title"><div><h3>{compact ? 'وظایف نزدیک به موعد' : 'فهرست وظایف'}</h3><p>{compact ? 'وظایفی که نیازمند توجه شما هستند' : 'مدیریت، فیلتر و پیگیری تمام وظایف پروژه‌ها'}</p></div>{compact ? <button>مشاهده همه</button> : <div className="table-actions"><label><Search size={16} /><input placeholder="جست‌وجوی وظیفه..." /></label><button><Filter size={16} />فیلترها</button></div>}</div>
+      <div className="task-panel-title"><div><h3>{compact ? 'وظایف نزدیک به موعد' : 'فهرست وظایف'}</h3><p>{compact ? 'وظایفی که از API وظایف دریافت شده‌اند' : 'مدیریت، فیلتر و پیگیری وظایف پروژه‌ها از Nexus Core'}</p></div>{compact ? <button>مشاهده همه</button> : <div className="table-actions"><label><Search size={16} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="جست‌وجوی وظیفه..." /></label><button><Filter size={16} />فیلترها</button></div>}</div>
+      <DataState loading={data?.loading} error={data?.error} empty={!shownTasks.length}>
       <div className="table-scroll"><table><thead><tr><th>عنوان وظیفه</th><th>پروژه مرجع</th><th>مسئول</th><th>مهلت انجام</th><th>اولویت</th><th>وضعیت</th><th>پیشرفت</th><th /></tr></thead><tbody>
-        {sampleTasks.map((task) => <tr key={task.title}><td><span className="task-check" /><strong>{task.title}</strong></td><td>{task.project}</td><td><span className="owner-cell"><i>{task.owner.slice(0, 1)}</i>{task.owner}</span></td><td>{task.due}</td><td><span className={`priority ${task.priority === 'بالا' ? 'high' : task.priority === 'متوسط' ? 'medium' : 'low'}`}>{task.priority}</span></td><td><StatusPill status={task.status} /></td><td><span className="inline-progress"><i><b style={{ width: `${task.progress}%` }} /></i>{task.progress}٪</span></td><td><MoreHorizontal size={17} /></td></tr>)}
+        {shownTasks.map((task) => <tr key={task.id}><td><span className="task-check" /><strong>{task.title}</strong></td><td>{task.project}</td><td><span className="owner-cell"><i>{initialsOf(task.owner).slice(0, 1)}</i>{task.owner}</span></td><td>{task.due}</td><td><span className={`priority ${task.priority === 'بالا' || task.priority === 'بحرانی' ? 'high' : task.priority === 'متوسط' ? 'medium' : 'low'}`}>{task.priority}</span></td><td><StatusPill status={task.status} /></td><td><span className="inline-progress"><i><b style={{ width: `${task.progress}%` }} /></i>{task.progress.toLocaleString('fa-IR')}٪</span></td><td><MoreHorizontal size={17} /></td></tr>)}
       </tbody></table></div>
+      </DataState>
     </section>
   )
 }
 
-function AllTasks() {
-  return <><TaskPageHeader title="همه وظایف" description="مشاهده و مدیریت وظایف در نمای لیستی و سلسله‌مراتبی" /><div className="view-switch"><button className="active"><ListTodo size={16} />نمای لیستی</button><button><Network size={16} />نمای درختی</button><button><UserRound size={16} />وظایف من</button></div><TaskList /></>
+function AllTasks({ data }) {
+  return <><TaskPageHeader title="همه وظایف" description="مشاهده و مدیریت وظایف دریافت شده از Agile Tasks API"><ProjectSelector data={data} /></TaskPageHeader><div className="view-switch"><button className="active"><ListTodo size={16} />نمای لیستی</button><button><Network size={16} />نمای درختی</button><button><UserRound size={16} />وظایف من</button></div><TaskList data={data} /></>
 }
 
 const kanbanColumns = [
@@ -558,13 +757,132 @@ const kanbanColumns = [
   { title: 'تکمیل شده', count: 6, tone: 'green', tasks: [sampleTasks[3]] },
 ]
 
-function KanbanBoard() {
-  return <><TaskPageHeader title="برد کانبان" description="مدیریت دیداری جریان وظایف با امکان جابه‌جایی بین مراحل" /><div className="kanban-toolbar"><div className="view-switch"><button className="active">کانبان</button><button>اسکرامبان</button></div><select><option>پروژه توسعه مرکز تجاری</option><option>تمام پروژه‌ها</option></select></div><div className="kanban-board">{kanbanColumns.map((column) => <section className="kanban-column" key={column.title}><header><div><i className={column.tone} /><strong>{column.title}</strong><span>{column.count}</span></div><button><Plus size={16} /></button></header>{column.tasks.map((task) => <article className="kanban-card" key={task.title}><div><span className={`priority ${task.priority === 'بالا' ? 'high' : 'medium'}`}>{task.priority}</span><MoreHorizontal size={16} /></div><h4>{task.title}</h4><p>{task.project}</p><footer><span><Clock3 size={14} />{task.due}</span><i>{task.owner.slice(0, 1)}</i></footer></article>)}</section>)}</div></>
+function KanbanBoard({ data }) {
+  const normalized = data.tasks.map((task) => normalizeTask(task, data.userName))
+  const columns = [
+    { title: 'برای انجام', tone: 'gray' },
+    { title: 'در حال انجام', tone: 'blue' },
+    { title: 'تکمیل شده', tone: 'green' },
+  ].map((column) => ({ ...column, tasks: normalized.filter((task) => task.status === column.title) }))
+  return <><TaskPageHeader title="برد کانبان" description="نمای دیداری وضعیت وظایف موجود در Nexus Core"><ProjectSelector data={data} /></TaskPageHeader><div className="kanban-toolbar"><div className="view-switch"><button className="active">کانبان</button><button>اسکرامبان</button></div><ProjectSelector data={data} /></div><DataState loading={data.loading} error={data.error} empty={!normalized.length}><div className="kanban-board">{columns.map((column) => <section className="kanban-column" key={column.title}><header><div><i className={column.tone} /><strong>{column.title}</strong><span>{column.tasks.length.toLocaleString('fa-IR')}</span></div><button><Plus size={16} /></button></header>{column.tasks.map((task) => <article className="kanban-card" key={task.id}><div><span className={`priority ${task.priority === 'بالا' || task.priority === 'بحرانی' ? 'high' : task.priority === 'متوسط' ? 'medium' : 'low'}`}>{task.priority}</span><MoreHorizontal size={16} /></div><h4>{task.title}</h4><p>{task.project}</p><footer><span><Clock3 size={14} />{task.due}</span><i>{initialsOf(task.owner).slice(0, 1)}</i></footer></article>)}</section>)}</div></DataState></>
 }
 
-function ProjectCalendar() {
-  const days = Array.from({ length: 35 }, (_, index) => index < 3 || index > 33 ? '' : index - 2)
-  return <><TaskPageHeader title="تقویم پروژه" description="تقویم اختصاصی وظایف، رویدادها و موعدهای هر پروژه" action="افزودن رویداد" /><div className="calendar-toolbar"><button>امروز</button><div><ChevronLeft size={18} /><strong>شهریور ۱۴۰۵</strong><ChevronLeft className="flip" size={18} /></div><select><option>تمام پروژه‌ها</option><option>پروژه توسعه مرکز تجاری</option></select></div><section className="calendar-card"><div className="calendar-weekdays">{['شنبه','یکشنبه','دوشنبه','سه‌شنبه','چهارشنبه','پنجشنبه','جمعه'].map((day) => <span key={day}>{day}</span>)}</div><div className="calendar-days">{days.map((day, index) => <div className={day === 5 ? 'today' : ''} key={index}>{day && <b>{day.toLocaleString('fa-IR')}</b>}{day === 5 && <><span className="event blue">جلسه هماهنگی پروژه</span><span className="event gold">مهلت گزارش هفتگی</span></>}{day === 9 && <span className="event green">بازدید کارگاهی</span>}{day === 14 && <span className="event violet">تحویل نقشه‌های اجرایی</span>}{day === 21 && <span className="event blue">جلسه کنترل پروژه</span>}</div>)}</div></section></>
+function ProjectCalendar({ data }) {
+  const today = new Date()
+  const year = today.getFullYear()
+  const month = today.getMonth()
+  const firstDay = new Date(year, month, 1)
+  const leading = (firstDay.getDay() + 1) % 7
+  const daysInMonth = new Date(year, month + 1, 0).getDate()
+  const cells = Array.from({ length: Math.ceil((leading + daysInMonth) / 7) * 7 }, (_, index) => index < leading || index >= leading + daysInMonth ? null : index - leading + 1)
+  const byDay = data.tasks.reduce((map, task) => {
+    if (!task.dueDate) return map
+    const date = new Date(`${task.dueDate}T00:00:00`)
+    if (date.getFullYear() === year && date.getMonth() === month) {
+      const day = date.getDate()
+      if (!map[day]) map[day] = []
+      map[day].push(normalizeTask(task, data.userName))
+    }
+    return map
+  }, {})
+  return <><TaskPageHeader title="تقویم پروژه" description="تقویم موعد وظایف؛ Core هنوز endpoint رویداد پروژه مستقل ندارد" action="افزودن رویداد"><ProjectSelector data={data} /></TaskPageHeader><div className="calendar-toolbar"><button>امروز</button><div><ChevronLeft size={18} /><strong>{today.toLocaleDateString('fa-IR', { month: 'long', year: 'numeric' })}</strong><ChevronLeft className="flip" size={18} /></div><ProjectSelector data={data} /></div><DataState loading={data.loading} error={data.error} empty={!data.tasks.length}><section className="calendar-card"><div className="calendar-weekdays">{['شنبه','یکشنبه','دوشنبه','سه‌شنبه','چهارشنبه','پنجشنبه','جمعه'].map((day) => <span key={day}>{day}</span>)}</div><div className="calendar-days">{cells.map((day, index) => <div className={day === today.getDate() ? 'today' : ''} key={index}>{day && <b>{day.toLocaleString('fa-IR')}</b>}{(byDay[day] || []).slice(0, 3).map((task) => <span className={`event ${task.priority === 'بالا' || task.priority === 'بحرانی' ? 'gold' : task.status === 'تکمیل شده' ? 'green' : 'blue'}`} key={task.id}>{task.title}</span>)}</div>)}</div></section></DataState></>
+}
+
+function ProjectPlanning({ data }) {
+  const project = data.selectedProject
+  return (
+    <>
+      <TaskPageHeader title="برنامه‌ریزی پروژه" description="فهرست پروژه‌ها و فعالیت‌های WBS متصل به Core" action="ایجاد پروژه">
+        <ProjectSelector data={data} />
+      </TaskPageHeader>
+      <DataState loading={data.loading} error={data.error} empty={!data.projects.length}>
+        <section className="stats-grid project-summary-grid">
+          <article className="stat-card"><span>پروژه‌های ثبت‌شده</span><div className="stat-value"><strong>{data.projectTotal.toLocaleString('fa-IR')}</strong><small>پروژه</small></div><p>از Projects API</p></article>
+          <article className="stat-card"><span>وضعیت پروژه منتخب</span><div className="stat-value"><strong>{enumLabel(project?.status, projectStatusLabels)}</strong></div><p>{enumLabel(project?.type, projectTypeLabels)}</p></article>
+          <article className="stat-card"><span>بازه زمانی</span><div className="stat-value"><strong>{formatDateOnly(project?.startDate)}</strong></div><p>تا {formatDateOnly(project?.endDate)}</p></article>
+          <article className="stat-card"><span>بودجه/هزینه</span><div className="stat-value"><strong>{project?.cost ? Number(project.cost).toLocaleString('fa-IR') : '—'}</strong></div><p>فیلد کلی Cost در Core</p></article>
+        </section>
+        <section className="task-panel task-table-panel">
+          <div className="task-panel-title"><div><h3>فعالیت‌های برنامه</h3><p>داده‌های Waterfall Activities برای پروژه منتخب</p></div></div>
+          <DataState loading={data.loadingDetails} empty={!data.activities.length}>
+            <div className="table-scroll"><table><thead><tr><th>فعالیت</th><th>مسئول</th><th>شروع</th><th>پایان</th><th>مدت</th><th>پیشرفت برنامه‌ای</th><th>پیشرفت واقعی</th></tr></thead><tbody>
+              {data.activities.map((item) => <tr key={item.id}><td><strong>{item.name}</strong></td><td>{data.userName(item.responsibleUserId)}</td><td>{formatDateOnly(item.startDate)}</td><td>{formatDateOnly(item.endDate)}</td><td>{item.durationDays || '—'}</td><td>{Number(item.plannedProgress || 0).toLocaleString('fa-IR')}٪</td><td>{Number(item.actualProgress || 0).toLocaleString('fa-IR')}٪</td></tr>)}
+            </tbody></table></div>
+          </DataState>
+        </section>
+      </DataState>
+    </>
+  )
+}
+
+function ProjectDocuments({ data }) {
+  return (
+    <>
+      <TaskPageHeader title="مدیریت مستندات" description="لیست مستندات پروژه از Project Documents API" action="آپلود سند">
+        <ProjectSelector data={data} />
+      </TaskPageHeader>
+      <section className="task-panel task-table-panel">
+        <DataState loading={data.loading || data.loadingDetails} error={data.error} empty={!data.documents.length}>
+          <div className="table-scroll"><table><thead><tr><th>عنوان/توضیح</th><th>نوع</th><th>فایل</th><th>حجم</th><th>تاریخ ثبت</th><th>وضعیت تأیید</th></tr></thead><tbody>
+            {data.documents.map((item) => <tr key={item.id}><td><strong>{item.description}</strong></td><td>{enumLabel(item.documentType, documentTypeLabels)}</td><td>{item.fileName}</td><td>{formatBytes(item.sizeBytes)}</td><td>{formatDateOnly(item.registerDate)}</td><td>{enumLabel(item.approvalStatus, approvalLabels)}</td></tr>)}
+          </tbody></table></div>
+        </DataState>
+      </section>
+    </>
+  )
+}
+
+function ProjectProgress({ data }) {
+  const latest = [...data.progressUpdates].sort((a, b) => String(b.registerDate).localeCompare(String(a.registerDate)))[0]
+  return (
+    <>
+      <TaskPageHeader title="کنترل پیشرفت پروژه" description="گزارش‌های پیشرفت ثبت‌شده در Core" action="ثبت گزارش پیشرفت">
+        <ProjectSelector data={data} />
+      </TaskPageHeader>
+      <DataState loading={data.loading || data.loadingDetails} error={data.error} empty={!data.selectedProject}>
+        <div className="task-kpis">
+          <article><span className="task-kpi-icon navy"><TrendingUp size={21} /></span><div><small>پیشرفت برنامه‌ای</small><strong>{Number(latest?.plannedProgress || 0).toLocaleString('fa-IR')}٪</strong><p>آخرین گزارش</p></div></article>
+          <article><span className="task-kpi-icon green"><CheckCircle2 size={21} /></span><div><small>پیشرفت واقعی</small><strong>{Number(latest?.actualProgress || 0).toLocaleString('fa-IR')}٪</strong><p>{enumLabel(latest?.performanceClassification, performanceLabels)}</p></div></article>
+          <article><span className="task-kpi-icon red"><TriangleAlert size={21} /></span><div><small>انحراف</small><strong>{Number(latest?.deviation || 0).toLocaleString('fa-IR')}٪</strong><p>Actual - Planned</p></div></article>
+          <article><span className="task-kpi-icon blue"><FileText size={21} /></span><div><small>تعداد گزارش‌ها</small><strong>{data.progressUpdates.length.toLocaleString('fa-IR')}</strong><p>Progress Updates</p></div></article>
+        </div>
+        <section className="task-panel task-table-panel">
+          <div className="task-panel-title"><div><h3>تاریخچه گزارش پیشرفت</h3><p>داده‌های ثبت‌شده برای پروژه منتخب</p></div></div>
+          <DataState loading={data.loadingDetails} empty={!data.progressUpdates.length}>
+            <div className="table-scroll"><table><thead><tr><th>تاریخ</th><th>شرح وضعیت</th><th>برنامه‌ای</th><th>واقعی</th><th>انحراف</th><th>طبقه‌بندی</th><th>دلایل تأخیر</th></tr></thead><tbody>
+              {data.progressUpdates.map((item) => <tr key={item.id}><td>{formatDateOnly(item.registerDate)}</td><td><strong>{item.statusDescription || '—'}</strong></td><td>{Number(item.plannedProgress || 0).toLocaleString('fa-IR')}٪</td><td>{Number(item.actualProgress || 0).toLocaleString('fa-IR')}٪</td><td>{Number(item.deviation || 0).toLocaleString('fa-IR')}٪</td><td>{enumLabel(item.performanceClassification, performanceLabels)}</td><td>{item.delayReasons || '—'}</td></tr>)}
+            </tbody></table></div>
+          </DataState>
+        </section>
+      </DataState>
+    </>
+  )
+}
+
+function ProjectStrategic({ data }) {
+  return (
+    <>
+      <TaskPageHeader title="مدیریت استراتژیک پروژه‌ها" description="نمای خلاصه پروژه، خروجی‌ها و KPIهای موجود در Core" action="تعریف KPI">
+        <ProjectSelector data={data} />
+      </TaskPageHeader>
+      <DataState loading={data.loading || data.loadingDetails} error={data.error} empty={!data.selectedProject}>
+        <section className="task-dashboard-grid">
+          <div className="task-panel task-table-panel">
+            <div className="task-panel-title"><div><h3>خروجی‌های پروژه</h3><p>Deliverables API</p></div></div>
+            <DataState loading={data.loadingDetails} empty={!data.deliverables.length}>
+              <div className="table-scroll"><table><thead><tr><th>خروجی</th><th>وضعیت</th><th>مسئول</th></tr></thead><tbody>{data.deliverables.map((item) => <tr key={item.id}><td><strong>{item.title || item.name || item.description || item.id}</strong></td><td>{item.status ?? '—'}</td><td>{data.userName(item.responsibleUserId)}</td></tr>)}</tbody></table></div>
+            </DataState>
+          </div>
+          <div className="task-panel task-table-panel">
+            <div className="task-panel-title"><div><h3>KPIها</h3><p>KPI API</p></div></div>
+            <DataState loading={data.loadingDetails} empty={!data.kpis.length}>
+              <div className="table-scroll"><table><thead><tr><th>شاخص</th><th>هدف</th><th>واحد</th></tr></thead><tbody>{data.kpis.map((item) => <tr key={item.id}><td><strong>{item.name || item.title || item.id}</strong></td><td>{item.targetValue ?? item.target ?? '—'}</td><td>{item.unit || '—'}</td></tr>)}</tbody></table></div>
+            </DataState>
+          </div>
+        </section>
+      </DataState>
+    </>
+  )
 }
 
 function Meetings() {
@@ -581,19 +899,58 @@ function Workflows() {
   return <><TaskPageHeader title="گردش کار و الگوها" description="تعریف مراحل و قوانین گردش وظایف به تفکیک پروژه" action="ساخت گردش کار" /><section className="workflow-help"><Workflow size={28} /><div><h3>فرآیندهای کاری را با پروژه خود هماهنگ کنید</h3><p>وضعیت‌ها، مسئول هر مرحله و قوانین انتقال را بدون نیاز به کدنویسی تعریف کنید.</p></div><button>راهنمای طراحی گردش کار</button></section><div className="workflow-grid">{flows.map(([title, steps, projects, status], index) => <article key={title}><header><span className={`workflow-icon tone-${index}`}><Workflow size={20} /></span><MoreHorizontal size={18} /></header><h3>{title}</h3><p>{steps}</p><div className="flow-steps">{[1,2,3,4].map((step) => <i key={step} />)}</div><footer><span>{projects}</span><StatusPill status={status === 'فعال' ? 'تکمیل شده' : 'برای انجام'} /></footer></article>)}</div></>
 }
 
-function RaciMatrix() {
-  const rows = [['تهیه برنامه زمان‌بندی','R','A','C','I'],['تأیید نقشه‌های اجرایی','C','A','R','I'],['کنترل صورت‌وضعیت پیمانکار','R','A','C','C'],['گزارش پیشرفت ماهانه','R','A','I','C'],['مدیریت درخواست تغییر','C','A','R','I']]
-  return <><TaskPageHeader title="ماتریس مسئولیت‌ها (RACI)" description="شفاف‌سازی نقش و مسئولیت اعضای تیم در فعالیت‌های پروژه" action="افزودن فعالیت" /><div className="raci-legend"><span><i className="r">R</i>مسئول اجرا</span><span><i className="a">A</i>پاسخگو</span><span><i className="c">C</i>مشاور</span><span><i className="i">I</i>مطلع</span><select><option>پروژه توسعه مرکز تجاری</option></select></div><section className="task-panel raci-table"><div className="table-scroll"><table><thead><tr><th>فعالیت / خروجی</th><th><span className="person-head"><i>ع</i>علی رضایی<small>مدیر پروژه</small></span></th><th><span className="person-head"><i>م</i>مریم احمدی<small>مدیر فنی</small></span></th><th><span className="person-head"><i>س</i>سینا محمدی<small>سرپرست اجرا</small></span></th><th><span className="person-head"><i>ز</i>زهرا کریمی<small>کنترل پروژه</small></span></th></tr></thead><tbody>{rows.map((row) => <tr key={row[0]}><td><strong>{row[0]}</strong></td>{row.slice(1).map((role, index) => <td key={index}><span className={`raci-role ${role.toLowerCase()}`}>{role}</span></td>)}</tr>)}</tbody></table></div></section></>
+function RaciMatrix({ data }) {
+  const people = data.governanceRoles.length ? data.governanceRoles : data.teamMembers.map((member) => ({ id: member.id, title: member.roleTitle || 'عضو تیم', userId: member.userId }))
+  const rows = [...data.activities, ...data.deliverables].slice(0, 8)
+  return <><TaskPageHeader title="ماتریس مسئولیت‌ها (RACI)" description="Core نقش‌های حاکمیتی دارد، ولی RACI واقعی به‌عنوان endpoint مستقل ندارد" action="افزودن فعالیت"><ProjectSelector data={data} /></TaskPageHeader><div className="raci-legend"><span><i className="r">R</i>مسئول اجرا</span><span><i className="a">A</i>پاسخگو</span><span><i className="c">C</i>مشاور</span><span><i className="i">I</i>مطلع</span><ProjectSelector data={data} /></div><section className="task-panel raci-table"><DataState loading={data.loading || data.loadingDetails} error={data.error} empty={!rows.length || !people.length}><div className="table-scroll"><table><thead><tr><th>فعالیت / خروجی</th>{people.slice(0, 5).map((person) => <th key={person.id}><span className="person-head"><i>{initialsOf(data.userName(person.userId)).slice(0, 1)}</i>{data.userName(person.userId)}<small>{person.title}</small></span></th>)}</tr></thead><tbody>{rows.map((row) => <tr key={row.id}><td><strong>{row.name || row.title || row.description || row.id}</strong></td>{people.slice(0, 5).map((person, index) => <td key={person.id}><span className={`raci-role ${index === 0 ? 'a' : row.responsibleUserId === person.userId ? 'r' : index === 1 ? 'c' : 'i'}`}>{index === 0 ? 'A' : row.responsibleUserId === person.userId ? 'R' : index === 1 ? 'C' : 'I'}</span></td>)}</tr>)}</tbody></table></div></DataState></section></>
 }
 
-function TaskManagement({ active }) {
-  if (active === 'همه وظایف') return <AllTasks />
-  if (active === 'برد کانبان') return <KanbanBoard />
-  if (active === 'تقویم پروژه') return <ProjectCalendar />
+function RisksPage({ data }) {
+  return <><TaskPageHeader title="مدیریت ریسک" description="ریسک‌های پروژه از Risks API" action="ثبت ریسک"><ProjectSelector data={data} /></TaskPageHeader><section className="task-panel task-table-panel"><DataState loading={data.loading || data.loadingDetails} error={data.error} empty={!data.risks.length}><div className="table-scroll"><table><thead><tr><th>ریسک</th><th>احتمال</th><th>شدت</th><th>اثر</th><th>RPN</th><th>مالک</th><th>برنامه پاسخ</th></tr></thead><tbody>{data.risks.map((risk) => <tr key={risk.id}><td><strong>{risk.description}</strong></td><td>{risk.probabilityScore}</td><td>{risk.severityScore}</td><td>{risk.impactScore}</td><td>{risk.rpn}</td><td>{data.userName(risk.riskOwnerUserId)}</td><td>{risk.responsePlan || '—'}</td></tr>)}</tbody></table></div></DataState></section></>
+}
+
+function ResourcesPage({ data }) {
+  return <><TaskPageHeader title="مدیریت منابع" description="منابع انسانی فعلاً از Project Team API پوشش داده می‌شود" action="افزودن عضو"><ProjectSelector data={data} /></TaskPageHeader><section className="task-panel task-table-panel"><DataState loading={data.loading || data.loadingDetails} error={data.error} empty={!data.teamMembers.length}><div className="table-scroll"><table><thead><tr><th>نام عضو</th><th>نقش پروژه</th><th>شناسه کاربر</th></tr></thead><tbody>{data.teamMembers.map((member) => <tr key={member.id}><td><span className="owner-cell"><i>{initialsOf(data.userName(member.userId)).slice(0, 1)}</i><strong>{data.userName(member.userId)}</strong></span></td><td>{member.roleTitle || '—'}</td><td>{member.userId}</td></tr>)}</tbody></table></div></DataState></section></>
+}
+
+function StakeholdersPage({ data }) {
+  return <><TaskPageHeader title="مدیریت ذینفعان" description="ذینفعان پروژه از Stakeholders API" action="ثبت ذینفع"><ProjectSelector data={data} /></TaskPageHeader><section className="task-panel task-table-panel"><DataState loading={data.loading || data.loadingDetails} error={data.error} empty={!data.stakeholders.length}><div className="table-scroll"><table><thead><tr><th>نام</th><th>نوع</th><th>قدرت</th><th>علاقه</th><th>انتظارات</th><th>استراتژی تعامل</th></tr></thead><tbody>{data.stakeholders.map((item) => <tr key={item.id}><td><strong>{item.name}</strong></td><td>{item.isInternal ? 'داخلی' : 'خارجی'}</td><td>{item.power}</td><td>{item.interest}</td><td>{item.expectations || '—'}</td><td>{item.engagementStrategy || '—'}</td></tr>)}</tbody></table></div></DataState></section></>
+}
+
+function CostPage({ data }) {
+  return <><TaskPageHeader title="مدیریت هزینه" description="Core فعلاً فقط Cost کلی پروژه را پوشش می‌دهد" action="ثبت هزینه"><ProjectSelector data={data} /></TaskPageHeader><section className="empty-page"><div><WalletCards size={38} /></div><h1>{data.selectedProject?.cost ? Number(data.selectedProject.cost).toLocaleString('fa-IR') : 'هزینه ثبت نشده'}</h1><p>برای مدیریت هزینه واقعی، endpointهای بودجه، هزینه واقعی، پیش‌بینی و آیتم‌های هزینه لازم است.</p></section></>
+}
+
+function UnsupportedProjectArea({ title, message }) {
+  return <section className="empty-page"><div><Boxes size={38} /></div><h1>{title}</h1><p>{message}</p></section>
+}
+
+function TaskManagement({ active, data }) {
+  if (active === 'همه وظایف') return <AllTasks data={data} />
+  if (active === 'برد کانبان') return <KanbanBoard data={data} />
+  if (active === 'تقویم پروژه') return <ProjectCalendar data={data} />
   if (active === 'جلسات و صورت‌جلسات') return <Meetings />
   if (active === 'گردش کار و الگوها') return <Workflows />
-  if (active === 'ماتریس مسئولیت‌ها (RACI)') return <RaciMatrix />
-  return <TaskDashboard />
+  if (active === 'ماتریس مسئولیت‌ها (RACI)') return <RaciMatrix data={data} />
+  return <TaskDashboard data={data} />
+}
+
+function ProjectManagement({ active, data }) {
+  if (active === 'برنامه‌ریزی پروژه') return <ProjectPlanning data={data} />
+  if (active === 'مدیریت مستندات') return <ProjectDocuments data={data} />
+  if (active === 'کنترل پیشرفت پروژه') return <ProjectProgress data={data} />
+  if (active === 'مدیریت استراتژیک پروژه‌ها') return <ProjectStrategic data={data} />
+  return <ProjectPlanning data={data} />
+}
+
+function ControlManagement({ active, data }) {
+  if (active === 'مدیریت ریسک') return <RisksPage data={data} />
+  if (active === 'مدیریت منابع') return <ResourcesPage data={data} />
+  if (active === 'مدیریت هزینه') return <CostPage data={data} />
+  if (active === 'مدیریت ذینفعان') return <StakeholdersPage data={data} />
+  if (active === 'مدیریت تأمین‌کنندگان') return <UnsupportedProjectArea title={active} message="در Core فعلی endpoint مستقلی برای تأمین‌کنندگان پروژه پیدا نشد." />
+  if (active === 'مدیریت تغییرات') return <UnsupportedProjectArea title={active} message="در Core فعلی endpoint مستقلی برای change request یا مدیریت تغییرات پیدا نشد." />
+  return null
 }
 
 /* ------------------------------------------------------------------ *
@@ -2312,6 +2669,7 @@ function Dashboard() {
   const { user, signOut } = useAuth()
   const [active, setActive] = useState(dashboardLabel)
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const projectData = useProjectManagementData()
 
   return (
     <div className="app-shell" dir="rtl">
@@ -2367,7 +2725,11 @@ function Dashboard() {
               </section>
             </>
           ) : taskSubmenus.some((item) => item.label === active) ? (
-            <TaskManagement active={active} />
+            <TaskManagement active={active} data={projectData} />
+          ) : projectSubmenus.some((item) => item.label === active) ? (
+            <ProjectManagement active={active} data={projectData} />
+          ) : controlSubmenus.some((item) => item.label === active) ? (
+            <ControlManagement active={active} data={projectData} />
           ) : active === 'چت و گفت‌وگوی آنلاین' ? (
             <ChatPage />
           ) : active === 'مدیریت کاربران' ? (

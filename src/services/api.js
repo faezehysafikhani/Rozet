@@ -233,6 +233,44 @@ export const notificationsApi = {
   markAllAsRead: () => api.put('/api/notifications/read-all'),
 }
 
+const projectQuery = (params = {}) => {
+  const query = new URLSearchParams()
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== '') query.set(key, String(value))
+  })
+  return query.toString()
+}
+
+export const projectManagementApi = {
+  projects: ({ tenantId, pageNumber = 1, pageSize = 20, search = '', type, status, organizationUnitId, managerUserId, sortBy, sortDescending } = {}) =>
+    api.get(`/api/project-management/projects?${projectQuery({ tenantId, pageNumber, pageSize, search, type, status, organizationUnitId, managerUserId, sortBy, sortDescending })}`),
+  project: (id) => api.get(`/api/project-management/projects/${id}`),
+  agileTasks: ({ projectId, sprintNumber } = {}) =>
+    api.get(`/api/project-management/agile/tasks?${projectQuery({ projectId, sprintNumber })}`),
+  waterfallActivities: (projectId) =>
+    api.get(`/api/project-management/waterfall/activities?${projectQuery({ projectId })}`),
+  progressUpdates: (projectId) =>
+    api.get(`/api/project-management/progress-updates?${projectQuery({ projectId })}`),
+  documents: (projectId) =>
+    api.get(`/api/project-management/documents?${projectQuery({ projectId })}`),
+  deliverables: (projectId) =>
+    api.get(`/api/project-management/deliverables?${projectQuery({ projectId })}`),
+  kpis: ({ projectId, deliverableId } = {}) =>
+    api.get(`/api/project-management/kpis?${projectQuery({ projectId, deliverableId })}`),
+  risks: (projectId) =>
+    api.get(`/api/project-management/risks?${projectQuery({ projectId })}`),
+  stakeholders: (projectId) =>
+    api.get(`/api/project-management/stakeholders?${projectQuery({ projectId })}`),
+  teamMembers: (projectId) =>
+    api.get(`/api/project-management/team/members?${projectQuery({ projectId })}`),
+  governanceRoles: (projectId) =>
+    api.get(`/api/project-management/team/governance-roles?${projectQuery({ projectId })}`),
+  myDashboard: (tenantId) =>
+    api.get(`/api/reporting/me?${projectQuery({ tenantId })}`),
+  projectDashboard: (projectId) =>
+    api.get(`/api/reporting/projects/${projectId}`),
+}
+
 // Core returns Result<T> for these; unwrap to the payload.
 export const unwrap = (result, fallback = null) => {
   if (!result?.isSuccess) return fallback
