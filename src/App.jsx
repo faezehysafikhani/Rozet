@@ -154,17 +154,17 @@ const taskSubmenus = [
   { label: 'داشبورد وظایف', icon: LayoutDashboard },
   { label: 'همه وظایف', icon: ListTodo },
   { label: 'برد کانبان', icon: Columns3 },
-  { label: 'تقویم پروژه', icon: CalendarDays },
   { label: 'جلسات و صورت‌جلسات', icon: Presentation },
   { label: 'گردش کار و الگوها', icon: Workflow },
   { label: 'ماتریس مسئولیت‌ها (RACI)', icon: Network },
 ]
 
 const projectSubmenus = [
-  ...taskSubmenus,
-  { label: 'مدیریت مستندات', icon: FolderOpen },
   { label: 'برنامه‌ریزی پروژه', icon: CalendarRange },
+  { label: 'تقویم پروژه', icon: CalendarDays },
   { label: 'کنترل پیشرفت پروژه', icon: TrendingUp },
+  { label: 'مدیریت مستندات', icon: FolderOpen },
+  { label: 'مدیریت استراتژیک پروژه‌ها', icon: Target },
 ]
 
 const controlSubmenus = [
@@ -177,7 +177,6 @@ const controlSubmenus = [
 ]
 
 const governanceSubmenus = [
-  { label: 'مدیریت استراتژیک پروژه‌ها', icon: Target },
   { label: 'داشبورد مدیریتی و گزارش‌دهی', icon: ChartNoAxesCombined },
   { label: 'مدیریت دانش', icon: BookOpen },
 ]
@@ -190,13 +189,15 @@ const systemSubmenus = [
 
 const menuItems = [
   { label: 'داشبورد اصلی', icon: LayoutDashboard },
-  { label: 'پروژه‌ها و وظایف', icon: CheckSquare2, children: projectSubmenus },
+  { label: 'مدیریت پروژه', icon: CalendarRange, children: projectSubmenus },
+  { label: 'مدیریت وظایف', icon: CheckSquare2, children: taskSubmenus },
   { label: 'کنترل و اجرا', icon: SlidersHorizontal, children: controlSubmenus },
   { label: 'راهبری و دانش', icon: Target, children: governanceSubmenus },
   { label: 'ارتباطات و سیستم', icon: Settings, children: systemSubmenus },
 ]
 
 const dashboardLabel = 'داشبورد اصلی'
+const userProfileLabel = 'پروفایل کاربر'
 const submenuLabels = menuItems.flatMap((item) => item.children || []).map((item) => item.label)
 
 function isMenuItemActive(item, active) {
@@ -420,9 +421,10 @@ function Sidebar({ active, onSelect, open, onClose }) {
   const [openGroups, setOpenGroups] = useState(() => Object.fromEntries(
     menuItems.filter((item) => item.children?.some((child) => child.label === active)).map((item) => [item.label, true])
   ))
-  const { canReach } = useAuth()
+  const { canReach, user } = useAuth()
   // Hiding an entry is a convenience only - the Core still refuses the call without the permission.
   const visibleItems = menuItems.filter((item) => menuItemIsVisible(item, canReach))
+  const primaryRole = user?.roles?.[0] || 'بدون نقش'
 
   useEffect(() => {
     const activeParent = menuItems.find((item) => item.children?.some((child) => child.label === active))
@@ -434,6 +436,13 @@ function Sidebar({ active, onSelect, open, onClose }) {
       <button className={`sidebar-scrim ${open ? 'is-open' : ''}`} onClick={onClose} aria-label="بستن منو" />
       <aside className={`sidebar ${open ? 'is-open' : ''}`}>
         <div className="sidebar-top"><Brand /><button className="sidebar-close" onClick={onClose}><X size={21} /></button></div>
+        <div className="sidebar-account">
+          <span className="avatar">{initialsOf(user?.displayName || user?.email)}</span>
+          <div>
+            <strong>{user?.displayName || 'کاربر روزت'}</strong>
+            <small>{primaryRole}</small>
+          </div>
+        </div>
         <nav className="side-nav" aria-label="منوی اصلی">
           {visibleItems.map(({ label, icon: Icon, badge, children }) => (
             <div className="nav-group" key={label}>
@@ -2208,6 +2217,59 @@ function UserManagement() {
   return <div className="user-management"><div className="task-page-header"><div><span>تنظیمات سازمانی</span><h1>مدیریت کاربران</h1><p>مدیریت حساب‌ها، ساختار سازمانی و سطوح دسترسی</p></div>{tab === 'کاربران' && <Can permission="users.create"><button onClick={() => setCreating(true)}><UserPlus size={18} />کاربر جدید</button></Can>}</div><nav className="user-tabs">{tabs.map(({label,icon:Icon}) => <button key={label} className={tab === label ? 'active' : ''} onClick={() => setTab(label)}><Icon size={17} />{label}</button>)}</nav>{tab === 'کاربران' && <UsersTable />}{tab === 'تاریخچه ورود' && <LoginHistory />}{tab === 'چارت سازمانی' && <OrgChart />}{tab === 'نقش‌ها و دسترسی‌ها' && <AccessControl />}{creating && <UserCreator onClose={() => setCreating(false)} onCreated={() => { setCreating(false); setTab('کاربران') }} />}</div>
 }
 
+function UserProfile() {
+  const { user } = useAuth()
+  const fields = [
+    ['نام کاربر', user?.displayName || 'ثبت نشده'],
+    ['ایمیل', user?.email || 'ثبت نشده'],
+    ['نقش اصلی', user?.roles?.[0] || 'بدون نقش'],
+    ['همه نقش‌ها', user?.roles?.join('، ') || 'بدون نقش'],
+    ['شناسه کاربر', user?.id || 'ثبت نشده'],
+    ['شناسه سازمان', user?.tenantId || DEFAULT_TENANT_ID],
+  ]
+
+  return (
+    <section className="profile-page">
+      <div className="task-page-header">
+        <div><span>حساب کاربری</span><h1>پروفایل کاربر</h1><p>مشخصات نشست فعلی و نقش‌های اختصاص داده شده</p></div>
+      </div>
+      <div className="profile-hero">
+        <span className="avatar">{initialsOf(user?.displayName || user?.email)}</span>
+        <div>
+          <h2>{user?.displayName || 'کاربر روزت'}</h2>
+          <p>{user?.email || 'ایمیل ثبت نشده'}</p>
+        </div>
+        <small>{user?.roles?.[0] || 'بدون نقش'}</small>
+      </div>
+      <div className="profile-grid">
+        {fields.map(([label, value]) => (
+          <article key={label}>
+            <span>{label}</span>
+            <strong>{value}</strong>
+          </article>
+        ))}
+      </div>
+    </section>
+  )
+}
+
+function TopbarUserMenu({ onProfile, onSignOut }) {
+  const { user } = useAuth()
+  return (
+    <div className="profile-menu">
+      <button className="profile-chip">
+        <span className="avatar">{initialsOf(user?.displayName || user?.email)}</span>
+        <div><strong>{user?.displayName || 'کاربر'}</strong><small>{(user?.roles || [])[0] || user?.email}</small></div>
+        <ChevronLeft size={16} />
+      </button>
+      <div className="profile-dropdown">
+        <button type="button" onClick={onProfile}><UserCog size={17} />پروفایل</button>
+        <button type="button" onClick={onSignOut}><LogOut size={17} />خروج</button>
+      </div>
+    </div>
+  )
+}
+
 /** Bell + dropdown, fed by /api/notifications and the notifications hub. */
 function NotificationBell() {
   const { items, unread, markAsRead, markAllAsRead, refresh } = useNotifications(true)
@@ -2263,8 +2325,7 @@ function Dashboard() {
           <div className="topbar-actions">
             <label className="search-box"><Search size={19} /><input placeholder="جست‌وجو در سامانه..." /></label>
             <NotificationBell />
-            <button className="profile-chip"><span className="avatar">{initialsOf(user?.displayName)}</span><div><strong>{user?.displayName || 'کاربر'}</strong><small>{(user?.roles || [])[0] || user?.email}</small></div><ChevronLeft size={16} /></button>
-            <button className="icon-button" title="خروج از حساب" onClick={signOut}><LogOut size={20} /></button>
+            <TopbarUserMenu onProfile={() => setActive(userProfileLabel)} onSignOut={signOut} />
           </div>
         </header>
 
@@ -2311,6 +2372,8 @@ function Dashboard() {
             <ChatPage />
           ) : active === 'مدیریت کاربران' ? (
             <UserManagement />
+          ) : active === userProfileLabel ? (
+            <UserProfile />
           ) : submenuLabels.includes(active) ? (
             <section className="empty-page">
               <div><Boxes size={38} /></div><h1>{active}</h1><p>ساخت محتوای این بخش در مرحله بعدی انجام می‌شود.</p><button onClick={() => setActive(dashboardLabel)}>بازگشت به داشبورد</button>
