@@ -1,3 +1,5 @@
+@import url('https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;500;600;700;800&display=swap');
+
 @font-face {
   font-family: 'B Nazanin';
   src: url('/fonts/BNazanin.ttf') format('truetype');
@@ -15,7 +17,7 @@
 }
 
 :root {
-  font-family: 'B Nazanin', Tahoma, sans-serif;
+  font-family: 'Vazirmatn', 'IRANSansX', 'Segoe UI', Tahoma, sans-serif;
   /* برای تغییر اندازه تمام نوشته‌های رابط فقط این مقدار را ویرایش کنید. */
   --base-font-size: 14px;
   font-size: var(--base-font-size);
@@ -33,7 +35,7 @@
 }
 
 * { box-sizing: border-box; }
-body { margin: 0; min-width: 320px; min-height: 100vh; font-size: 1rem; }
+body { margin: 0; min-width: 320px; min-height: 100vh; font-size: 1rem; line-height: 1.65; }
 button, input, select { font: inherit; }
 button { cursor: pointer; }
 
@@ -123,29 +125,29 @@ button { cursor: pointer; }
 .sidebar-user span { color: #949bab; font-size: 1rem; }
 .sidebar-user button { margin-right: auto; border: 0; background: none; color: #9ca2b1; }
 .app-main { margin-right: 252px; min-height: 100vh; }
-.topbar { height: 74px; padding: 0 30px; background: rgba(255,255,255,.9); border-bottom: 1px solid var(--line); display: flex; align-items: center; justify-content: space-between; backdrop-filter: blur(12px); }
+.topbar { position: relative; z-index: 90; height: 74px; padding: 0 30px; overflow: visible; background: rgba(255,255,255,.9); border-bottom: 1px solid var(--line); display: flex; align-items: center; justify-content: space-between; backdrop-filter: blur(12px); }
 .topbar-title { display: flex; align-items: center; gap: 12px; }
 .topbar-title div { display: flex; flex-direction: column; }
 .topbar-title span { color: #a1a7b4; font-size: 1rem; }
 .topbar-title strong { color: #202941; font-size: 1.3333rem; }
 .mobile-menu { display: none; border: 1px solid var(--line); border-radius: 9px; background: #fff; padding: 7px; }
-.topbar-actions { display: flex; align-items: center; gap: 12px; }
+.topbar-actions { position: relative; z-index: 95; display: flex; align-items: center; gap: 12px; }
 .search-box { width: 245px; height: 40px; padding: 0 12px; border-radius: 9px; background: #f5f6f8; color: #9ba2b1; display: flex; align-items: center; gap: 8px; }
 .search-box input { width: 100%; border: 0; outline: 0; background: transparent; font-size: 1rem; }
 .icon-button { position: relative; width: 40px; height: 40px; border: 1px solid var(--line); border-radius: 9px; background: #fff; color: #697186; display: grid; place-items: center; }
 .icon-button i { position: absolute; top: 8px; right: 9px; width: 6px; height: 6px; border-radius: 50%; background: #d3a147; border: 1px solid #fff; }
-.profile-menu { position: relative; padding-block: 10px; }
+.profile-menu { position: relative; z-index: 110; padding-block: 10px; }
 .profile-chip { display: flex; align-items: center; gap: 9px; padding: 4px 6px 4px 9px; border: 1px solid transparent; border-radius: 10px; background: transparent; }
 .profile-menu:hover .profile-chip, .profile-menu:focus-within .profile-chip { border-color: #e5e9ef; background: #f7f9fb; }
 .profile-chip .avatar { width: 36px; height: 36px; }
 .profile-chip div { display: flex; flex-direction: column; text-align: right; }
 .profile-chip strong { color: #343c52; font-size: 1rem; }
 .profile-chip small { color: #a0a6b4; font-size: 1rem; }
-.profile-dropdown { position: absolute; z-index: 35; top: calc(100% - 4px); left: 0; width: 165px; padding: 7px; border: 1px solid #e3e7ee; border-radius: 10px; background: #fff; box-shadow: 0 18px 42px rgba(19,34,62,.16); opacity: 0; visibility: hidden; transform: translateY(-6px); transition: .16s; }
+.profile-dropdown { position: absolute; z-index: 140; top: calc(100% - 4px); left: 0; width: 165px; padding: 7px; border: 1px solid #e3e7ee; border-radius: 10px; background: #fff; box-shadow: 0 18px 42px rgba(19,34,62,.16); opacity: 0; visibility: hidden; transform: translateY(-6px); transition: .16s; }
 .profile-menu:hover .profile-dropdown, .profile-menu:focus-within .profile-dropdown { opacity: 1; visibility: visible; transform: translateY(0); }
 .profile-dropdown button { width: 100%; height: 37px; display: flex; align-items: center; gap: 8px; border: 0; border-radius: 8px; padding: 0 10px; color: #515b70; background: transparent; text-align: right; }
 .profile-dropdown button:hover { color: #0d356e; background: #f1f5f8; }
-.dashboard-content { padding: 24px 30px 70px; max-width: 1500px; margin: auto; }
+.dashboard-content { position: relative; z-index: 1; padding: 24px 30px 70px; max-width: 1500px; margin: auto; }
 .welcome-banner { position: relative; overflow: hidden; min-height: 148px; border-radius: 14px; padding: 28px 32px; display: flex; align-items: center; justify-content: space-between; color: #fff; background: linear-gradient(105deg, #071944 0%, #0d376b 58%, #24716d 100%); box-shadow: 0 16px 38px rgba(9,36,88,.14); }
 .welcome-banner::after { content: ''; position: absolute; left: -70px; top: -60px; width: 300px; height: 230px; border: 38px solid rgba(255,255,255,.045); transform: rotate(-18deg); }
 .welcome-banner div, .welcome-banner button { position: relative; z-index: 1; }
@@ -377,7 +379,7 @@ button { cursor: pointer; }
 }
 
 /* --- notification bell + popover --- */
-.notification-bell { position: relative; }
+.notification-bell { position: relative; z-index: 115; }
 
 .notification-bell .icon-button i.has-unread {
   position: absolute; inset-block-start: 4px; inset-inline-end: 4px;
@@ -392,7 +394,7 @@ button { cursor: pointer; }
   width: min(360px, calc(100vw - 32px)); max-height: 460px;
   display: flex; flex-direction: column; overflow: hidden;
   background: #fff; border: 1px solid #e5e7eb; border-radius: 16px;
-  box-shadow: 0 18px 45px rgba(7, 25, 68, .16); z-index: 60;
+  box-shadow: 0 18px 45px rgba(7, 25, 68, .16); z-index: 145;
 }
 
 .notification-popover > header {
