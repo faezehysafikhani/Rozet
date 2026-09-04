@@ -247,20 +247,18 @@ function Login({ onForgotPassword }) {
   return (
     <main className="login-page" dir="rtl">
       <section className="login-visual" aria-label="معرفی سامانه روزت">
-        <div className="visual-orb visual-orb--one" />
-        <div className="visual-orb visual-orb--two" />
         <div className="visual-content">
+          <Brand compact />
           <div className="gold-mark"><span /><span /><span /><span /><span /></div>
-          <p className="eyebrow">گروه اقتصادی روزت</p>
-          <h1>مدیریت هوشمند،<br />رشد ماندگار.</h1>
-          <p className="visual-copy">تمام ابزارهای مورد نیاز کسب‌وکار شما، در یک فضای ساده، امن و یکپارچه.</p>
+          <p className="eyebrow">ROZET MANAGEMENT PLATFORM</p>
+          <h1>سامانه یکپارچه<br />مدیریت پروژه</h1>
+          <p className="visual-copy">ورود امن به فضای مدیریت پروژه، وظایف، تیم‌ها و گزارش‌های عملیاتی گروه اقتصادی روزت.</p>
           <div className="trust-row">
             <div><ShieldCheck size={21} /><span>ورود امن</span></div>
-            <div><TrendingUp size={21} /><span>گزارش لحظه‌ای</span></div>
-            <div><CircleHelp size={21} /><span>پشتیبانی همراه</span></div>
+            <div><TrendingUp size={21} /><span>کنترل پروژه</span></div>
+            <div><CircleHelp size={21} /><span>دسترسی یکپارچه</span></div>
           </div>
         </div>
-        <span className="visual-footer">ROZET ECONOMIC GROUP · 2026</span>
       </section>
 
       <section className="login-panel">
@@ -312,20 +310,18 @@ function AuthShell({ title, subtitle, children, onBack }) {
   return (
     <main className="login-page" dir="rtl">
       <section className="login-visual" aria-label="معرفی سامانه روزت">
-        <div className="visual-orb visual-orb--one" />
-        <div className="visual-orb visual-orb--two" />
         <div className="visual-content">
+          <Brand compact />
           <div className="gold-mark"><span /><span /><span /><span /><span /></div>
-          <p className="eyebrow">گروه اقتصادی روزت</p>
-          <h1>بازیابی امن<br />دسترسی شما.</h1>
-          <p className="visual-copy">لینک بازیابی محدود به زمان است و پس از یک‌بار استفاده باطل می‌شود.</p>
+          <p className="eyebrow">ROZET SECURITY ACCESS</p>
+          <h1>بازیابی امن<br />دسترسی شما</h1>
+          <p className="visual-copy">فرآیند بازیابی رمز عبور با توکن زمان‌دار انجام می‌شود تا حساب کاربری شما محافظت شود.</p>
           <div className="trust-row">
             <div><ShieldCheck size={21} /><span>توکن یک‌بارمصرف</span></div>
             <div><Clock3 size={21} /><span>انقضای زمان‌دار</span></div>
-            <div><CircleHelp size={21} /><span>پشتیبانی همراه</span></div>
+            <div><CircleHelp size={21} /><span>پشتیبانی روزت</span></div>
           </div>
         </div>
-        <span className="visual-footer">ROZET ECONOMIC GROUP · 2026</span>
       </section>
       <section className="login-panel">
         <div className="login-box">
