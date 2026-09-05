@@ -247,13 +247,12 @@ function Login({ onForgotPassword }) {
   return (
     <main className="login-page" dir="rtl">
       <section className="login-visual" aria-label="معرفی سامانه روزت">
-        <div className="visual-content">
-          <div className="gold-mark"><span /><span /><span /><span /><span /></div>
-          <p className="eyebrow">مدیریت هوشمند،</p>
-          <h1>تصمیم‌های بهتر</h1>
-          <p className="visual-copy">راهکارهای یکپارچه برای سازمان‌های پیشرو</p>
-        </div>
-      </section>
+  <img
+    src="/login-visual2.png"
+    alt="سامانه روزت"
+    className="login-visual-image"
+  />
+</section>
 
       <section className="login-panel">
         <div className="login-box">
@@ -292,7 +291,6 @@ function Login({ onForgotPassword }) {
             <div className="login-divider"><span>یا</span></div>
             <button className="forgot-link" type="button" onClick={onForgotPassword}>رمز عبور خود را فراموش کرده‌اید؟</button>
           </form>
-          <p className="support-copy">© ۱۴۰۵ گروه اقتصادی رزت. تمامی حقوق محفوظ است.</p>
         </div>
       </section>
     </main>
@@ -304,12 +302,13 @@ function AuthShell({ title, subtitle, children, onBack }) {
   return (
     <main className="login-page" dir="rtl">
       <section className="login-visual" aria-label="معرفی سامانه روزت">
-        <div className="visual-content">
-          <div className="gold-mark"><span /><span /><span /><span /><span /></div>
-          <p className="eyebrow">بازیابی امن،</p>
-          <h1>دسترسی مطمئن‌تر</h1>
-          <p className="visual-copy">فرآیند بازیابی رمز عبور با توکن زمان‌دار انجام می‌شود.</p>
-        </div>
+        <section className="login-visual" aria-label="معرفی سامانه روزت">
+  <img
+    src="/login-visual2.png"
+    alt="سامانه روزت"
+    className="login-visual-image"
+  />
+</section>  
       </section>
       <section className="login-panel">
         <div className="login-box">
@@ -848,6 +847,7 @@ function CreateProjectItemModal({ kind, data, onClose }) {
 
   return (
     <div className="ue-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+      <div className="ue-backdrop">
       <form className="ue-modal pm-modal" onSubmit={submit}>
         <header className="ue-head">
           <div className="ue-head-title"><strong>{creationTitles[kind]}</strong><small>{kind === 'project' ? 'ثبت در Projects API' : projectDisplayName(data.selectedProject)}</small></div>
@@ -944,6 +944,7 @@ function CreateProjectItemModal({ kind, data, onClose }) {
           <div className="ue-foot-actions"><button className="ue-cancel" type="button" onClick={onClose}>انصراف</button><button className="ue-save" type="submit" disabled={busy}>{busy ? 'در حال ذخیره...' : 'ذخیره'}</button></div>
         </footer>
       </form>
+</div>
     </div>
   )
 }
