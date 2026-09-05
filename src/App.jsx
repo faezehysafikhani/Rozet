@@ -248,16 +248,10 @@ function Login({ onForgotPassword }) {
     <main className="login-page" dir="rtl">
       <section className="login-visual" aria-label="معرفی سامانه روزت">
         <div className="visual-content">
-          <Brand compact />
           <div className="gold-mark"><span /><span /><span /><span /><span /></div>
-          <p className="eyebrow">ROZET MANAGEMENT PLATFORM</p>
-          <h1>سامانه یکپارچه<br />مدیریت پروژه</h1>
-          <p className="visual-copy">ورود امن به فضای مدیریت پروژه، وظایف، تیم‌ها و گزارش‌های عملیاتی گروه اقتصادی روزت.</p>
-          <div className="trust-row">
-            <div><ShieldCheck size={21} /><span>ورود امن</span></div>
-            <div><TrendingUp size={21} /><span>کنترل پروژه</span></div>
-            <div><CircleHelp size={21} /><span>دسترسی یکپارچه</span></div>
-          </div>
+          <p className="eyebrow">مدیریت هوشمند،</p>
+          <h1>تصمیم‌های بهتر</h1>
+          <p className="visual-copy">راهکارهای یکپارچه برای سازمان‌های پیشرو</p>
         </div>
       </section>
 
@@ -265,25 +259,23 @@ function Login({ onForgotPassword }) {
         <div className="login-box">
           <Brand />
           <div className="login-heading">
-            <p>به سامانه روزت خوش آمدید</p>
-            <h2>ورود به حساب کاربری</h2>
-            <span>برای ادامه، اطلاعات حساب خود را وارد کنید.</span>
+            <h2>خوش آمدید</h2>
+            <span>برای ادامه وارد حساب کاربری خود شوید.</span>
           </div>
 
           <form onSubmit={submit}>
             <label htmlFor="username">نام کاربری (ایمیل)</label>
             <div className="input-wrap">
               <UserRound size={20} />
-              <input id="username" type="email" value={username} onChange={(event) => { setUsername(event.target.value); setError('') }} autoComplete="username" placeholder="ایمیل خود را وارد کنید" required />
+              <input id="username" type="email" value={username} onChange={(event) => { setUsername(event.target.value); setError('') }} autoComplete="username" placeholder="نام کاربری یا ایمیل" required />
             </div>
 
             <div className="password-label">
               <label htmlFor="password">رمز عبور</label>
-              <button type="button" onClick={onForgotPassword}>فراموشی رمز عبور؟</button>
             </div>
             <div className="input-wrap">
               <ShieldCheck size={20} />
-              <input id="password" value={password} onChange={(event) => { setPassword(event.target.value); setError('') }} type={showPassword ? 'text' : 'password'} autoComplete="current-password" placeholder="رمز عبور خود را وارد کنید" required />
+              <input id="password" value={password} onChange={(event) => { setPassword(event.target.value); setError('') }} type={showPassword ? 'text' : 'password'} autoComplete="current-password" placeholder="رمز عبور" required />
               <button className="eye-btn" type="button" onClick={() => setShowPassword((value) => !value)} aria-label="نمایش یا مخفی کردن رمز عبور">
                 {showPassword ? <EyeOff size={19} /> : <Eye size={19} />}
               </button>
@@ -296,9 +288,11 @@ function Login({ onForgotPassword }) {
 
             {error && <p className="login-error" role="alert">{error}</p>}
 
-            <button className="login-btn" type="submit" disabled={busy}>{busy ? 'در حال ورود...' : 'ورود به سامانه'} <ChevronLeft size={20} /></button>
+            <button className="login-btn" type="submit" disabled={busy}>{busy ? 'در حال ورود...' : 'ورود'}</button>
+            <div className="login-divider"><span>یا</span></div>
+            <button className="forgot-link" type="button" onClick={onForgotPassword}>رمز عبور خود را فراموش کرده‌اید؟</button>
           </form>
-          <p className="support-copy">برای دریافت راهنمایی با <button type="button">پشتیبانی روزت</button> در ارتباط باشید.</p>
+          <p className="support-copy">© ۱۴۰۵ گروه اقتصادی رزت. تمامی حقوق محفوظ است.</p>
         </div>
       </section>
     </main>
@@ -311,16 +305,10 @@ function AuthShell({ title, subtitle, children, onBack }) {
     <main className="login-page" dir="rtl">
       <section className="login-visual" aria-label="معرفی سامانه روزت">
         <div className="visual-content">
-          <Brand compact />
           <div className="gold-mark"><span /><span /><span /><span /><span /></div>
-          <p className="eyebrow">ROZET SECURITY ACCESS</p>
-          <h1>بازیابی امن<br />دسترسی شما</h1>
-          <p className="visual-copy">فرآیند بازیابی رمز عبور با توکن زمان‌دار انجام می‌شود تا حساب کاربری شما محافظت شود.</p>
-          <div className="trust-row">
-            <div><ShieldCheck size={21} /><span>توکن یک‌بارمصرف</span></div>
-            <div><Clock3 size={21} /><span>انقضای زمان‌دار</span></div>
-            <div><CircleHelp size={21} /><span>پشتیبانی روزت</span></div>
-          </div>
+          <p className="eyebrow">بازیابی امن،</p>
+          <h1>دسترسی مطمئن‌تر</h1>
+          <p className="visual-copy">فرآیند بازیابی رمز عبور با توکن زمان‌دار انجام می‌شود.</p>
         </div>
       </section>
       <section className="login-panel">
