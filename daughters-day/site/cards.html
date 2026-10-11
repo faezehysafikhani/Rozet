@@ -35,7 +35,7 @@
 </head>
 <body>
   <div class="bar">
-    <label for="base">آدرس سایت (بعد از آپلود، همین رو با آدرس واقعی عوض کن)</label>
+    <label for="base">آدرس سایت</label>
     <input id="base" />
     <p>QRها همین الان با آدرس بالا ساخته می‌شن. هر وقت آدرس رو عوض کنی، خودکار دوباره ساخته می‌شن.
        بعد «چاپ» رو بزن، یا برای هر کارت «دانلود PNG» رو بگیر.</p>
@@ -48,7 +48,7 @@
   <script src="flower.js"></script>
   <script>
     const baseEl = document.getElementById("base");
-    baseEl.value = new URL("./", location.href).href;
+    baseEl.value = window.SITE_URL || new URL("./", location.href).href;
     const cardsEl = document.getElementById("cards");
 
     function linkFor(p) {
