@@ -1,6 +1,7 @@
 import * as signalR from '@microsoft/signalr'
-import { API_BASE_URL } from './config'
+import { API_BASE_URL, USE_MOCK } from './config'
 import { AuthTokenStore } from './authStore'
+import { createMockHub } from '../mock/mockHub'
 
 /**
  * One connection per hub, shared across the app.
@@ -120,8 +121,9 @@ function createHub(path) {
 }
 
 // Hub routes come from app.MapHub<T>(...) in NexusCore.Api/Program.cs.
-export const chatHub = createHub('/hubs/chat')
-export const notificationHub = createHub('/hubs/notifications')
+// In demo mode the hubs are in-browser fakes fed by src/mock/mockServer.js.
+export const chatHub = USE_MOCK ? createMockHub('chat') : createHub('/hubs/chat')
+export const notificationHub = USE_MOCK ? createMockHub('notifications') : createHub('/hubs/notifications')
 
 export async function startRealtime() {
   await Promise.all([chatHub.start(), notificationHub.start()])

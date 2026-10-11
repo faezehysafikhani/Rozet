@@ -7,3 +7,13 @@ export const API_BASE_URL = (
 
 // The Core seeds this tenant on first run (DefaultDataSeeder).
 export const DEFAULT_TENANT_ID = '11111111-1111-1111-1111-111111111111'
+
+// Demo mode: every API call and SignalR hub is served by src/mock from the browser's
+// localStorage - nothing ever reaches the Core. This feature branch turns it on by default;
+// set VITE_USE_MOCK=false to talk to the real backend again.
+export const USE_MOCK = !(
+  typeof import.meta !== 'undefined' && import.meta.env && String(import.meta.env.VITE_USE_MOCK) === 'false'
+)
+
+// Shared password of every seeded demo account.
+export const DEMO_PASSWORD = 'Demo@1234'

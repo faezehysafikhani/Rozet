@@ -69,7 +69,8 @@ import {
 } from 'lucide-react'
 import { AuthProvider, Can, useAuth } from './services/AuthContext'
 import { PersianMessages, groupsApi, identityApi, labelForModule, labelForPermission, orgChartApi, permissionsApi, platformApi, projectManagementApi, rolesApi, unwrap, usersApi } from './services/api'
-import { DEFAULT_TENANT_ID } from './services/config'
+import { DEFAULT_TENANT_ID, USE_MOCK } from './services/config'
+import MockModeBadge, { DEMO_ACCOUNTS, DEMO_PASSWORD } from './mock/MockModeBadge'
 import { useChat } from './hooks/useChat'
 import { useNotifications } from './hooks/useNotifications'
 
@@ -231,7 +232,7 @@ function Login({ onForgotPassword }) {
   const [remember, setRemember] = useState(true)
   // Core identity is e-mail based (LoginRequest.Email) and seeds this account.
   const [username, setUsername] = useState('admin@nexus.local')
-  const [password, setPassword] = useState('')
+  const [password, setPassword] = useState(USE_MOCK ? DEMO_PASSWORD : '')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
 
@@ -291,6 +292,18 @@ function Login({ onForgotPassword }) {
             <div className="login-divider"><span>یا</span></div>
             <button className="forgot-link" type="button" onClick={onForgotPassword}>رمز عبور خود را فراموش کرده‌اید؟</button>
           </form>
+
+          {USE_MOCK && (
+            <div className="demo-accounts">
+              <span>حساب‌های نمایشی - برای ورود سریع کلیک کنید</span>
+              <div>
+                {DEMO_ACCOUNTS.map((account) => (
+                  <button type="button" key={account.email} onClick={() => { setUsername(account.email); setPassword(DEMO_PASSWORD); setError('') }}>{account.label}</button>
+                ))}
+              </div>
+              <small>رمز همه حساب‌ها: {DEMO_PASSWORD}</small>
+            </div>
+          )}
         </div>
       </section>
     </main>
@@ -3087,6 +3100,7 @@ export default function App() {
   return (
     <AuthProvider>
       <AppRoutes />
+      <MockModeBadge />
     </AuthProvider>
   )
 }

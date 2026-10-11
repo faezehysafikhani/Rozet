@@ -1,5 +1,6 @@
-import { API_BASE_URL } from './config'
+import { API_BASE_URL, USE_MOCK } from './config'
 import { AuthTokenStore, refreshAccessToken } from './authStore'
+import { mockRequest } from '../mock/mockServer'
 
 // Called when the Core rejects the session and a refresh cannot rescue it.
 let onUnauthorized = null
@@ -47,6 +48,16 @@ async function rawRequest(endpoint, options, token) {
  * Returns { isSuccess, value, error, status } - it never throws.
  */
 export async function apiRequest(endpoint, options = {}, { anonymous = false, retry = true } = {}) {
+  // Demo mode: answer from localStorage instead of the network (see src/mock).
+  if (USE_MOCK) {
+    const result = await mockRequest(endpoint, options, { anonymous })
+    if (result.status === 401 && !anonymous) {
+      AuthTokenStore.clear()
+      if (onUnauthorized) onUnauthorized()
+    }
+    return result
+  }
+
   try {
     let token = anonymous ? null : AuthTokenStore.getAccessToken()
 

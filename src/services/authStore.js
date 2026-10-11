@@ -1,4 +1,4 @@
-import { API_BASE_URL } from './config'
+import { API_BASE_URL, USE_MOCK } from './config'
 
 // Storage keys are deliberately identical to the Core reference client so both front-ends
 // can share a browser profile without stepping on each other.
@@ -91,6 +91,8 @@ export const AuthTokenStore = {
 
 // Raw refresh call. Kept outside apiRequest so the refresh itself can never recurse.
 export async function refreshAccessToken() {
+  // Mock tokens never expire, so there is nothing to refresh (and no server to ask).
+  if (USE_MOCK) return false
   const refreshToken = AuthTokenStore.getRefreshToken()
   if (!refreshToken) return false
 
