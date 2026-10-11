@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex, nofollow" />
+  <title>کارت‌های QR</title>
+  <link rel="icon" href="data:," />
+  <style>
+    @font-face { font-family: "Vazirmatn"; src: url("fonts/Vazirmatn.woff2") format("woff2"); font-weight: 100 900; }
+    * { box-sizing: border-box; margin: 0; }
+    body { font-family: "Vazirmatn", sans-serif; background: #f4f4f6; color: #222; padding: 20px; line-height: 1.8; }
+    .bar { max-width: 760px; margin: 0 auto 20px; background: #fff; padding: 16px; border-radius: 14px; box-shadow: 0 2px 10px rgba(0,0,0,.06); }
+    .bar label { font-weight: 600; display: block; margin-bottom: 6px; }
+    .bar input { width: 100%; direction: ltr; font: inherit; padding: 8px 10px; border: 1px solid #ccc; border-radius: 8px; }
+    .bar p { font-size: .88rem; color: #666; margin-top: 8px; }
+    button { font: inherit; cursor: pointer; border: 0; border-radius: 999px; padding: 8px 18px; background: #222; color: #fff; margin-top: 10px; }
+    .cards { max-width: 760px; margin: 0 auto; display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
+    .pc { border-radius: 22px; padding: 18px; text-align: center; color: var(--ink); background: linear-gradient(160deg, var(--bg1), var(--bg2)); border: 3px solid var(--accent); break-inside: avoid; }
+    .pc .fl { width: 90px; margin: 0 auto -6px; }
+    .pc .fl svg { width: 100%; height: auto; }
+    .pc h2 { font-size: 1.15rem; margin: 4px 0 0; }
+    .pc .tag { font-size: .85rem; color: var(--soft); margin-bottom: 8px; }
+    .qr { display: inline-block; background: #fff; padding: 10px; border-radius: 14px; }
+    .qr svg { width: 170px; height: 170px; display: block; }
+    .pc .scan { margin-top: 8px; font-size: .9rem; font-weight: 600; }
+    .pc button { background: var(--accent); font-size: .85rem; padding: 5px 14px; margin-top: 8px; }
+    @media print {
+      body { background: #fff; padding: 0; }
+      .bar, .pc button { display: none; }
+      .cards { grid-template-columns: repeat(2, 1fr); gap: 12mm; }
+      .pc { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    }
+  </style>
+</head>
+<body>
+  <div class="bar">
+    <label for="base">آدرس سایت (بعد از آپلود، همین رو با آدرس واقعی عوض کن)</label>
+    <input id="base" />
+    <p>QRها همین الان با آدرس بالا ساخته می‌شن. هر وقت آدرس رو عوض کنی، خودکار دوباره ساخته می‌شن.
+       بعد «چاپ» رو بزن، یا برای هر کارت «دانلود PNG» رو بگیر.</p>
+    <button onclick="window.print()">چاپ همه‌ی کارت‌ها</button>
+  </div>
+  <div class="cards" id="cards"></div>
+
+  <script src="vendor/qrcode.js"></script>
+  <script src="data.js"></script>
+  <script src="flower.js"></script>
+  <script>
+    const baseEl = document.getElementById("base");
+    baseEl.value = new URL("./", location.href).href;
+    const cardsEl = document.getElementById("cards");
+
+    function linkFor(p) {
+      let b = baseEl.value.trim();
+      if (!b.endsWith("/")) b += "/";
+      return b + "?k=" + p.slug;
+    }
+
+    function render() {
+      cardsEl.innerHTML = "";
+      PEOPLE.forEach((p) => {
+        const qr = qrcode(0, "M");
+        qr.addData(linkFor(p));
+        qr.make();
+        const t = p.theme;
+        const el = document.createElement("div");
+        el.className = "pc";
+        el.style.cssText = `--bg1:${t.bg1};--bg2:${t.bg2};--ink:${t.ink};--soft:${t.soft};--accent:${t.accent}`;
+        el.innerHTML = `
+          <div class="fl">${flowerSVG(p, { animate: false })}</div>
+          <h2>${p.name} جان، یه چیزی برات دارم 🎁</h2>
+          <div class="tag">دوربین گوشیت رو بگیر روی کد</div>
+          <div class="qr">${qr.createSvgTag({ cellSize: 6, margin: 0, scalable: true })}</div>
+          <div class="scan">اسکنم کن!</div>
+          <button>دانلود PNG</button>`;
+        el.querySelector("button").onclick = () => download(qr, p);
+        cardsEl.appendChild(el);
+      });
+    }
+
+    function download(qr, p) {
+      const n = qr.getModuleCount(), cell = 20, pad = 40, size = n * cell + pad * 2;
+      const c = document.createElement("canvas");
+      c.width = c.height = size;
+      const g = c.getContext("2d");
+      g.fillStyle = "#fff";
+      g.fillRect(0, 0, size, size);
+      g.fillStyle = "#000";
+      for (let r = 0; r < n; r++)
+        for (let k = 0; k < n; k++)
+          if (qr.isDark(r, k)) g.fillRect(pad + k * cell, pad + r * cell, cell, cell);
+      const a = document.createElement("a");
+      a.download = `qr-${p.id}.png`;
+      a.href = c.toDataURL("image/png");
+      a.click();
+    }
+
+    baseEl.addEventListener("input", render);
+    render();
+  </script>
+</body>
+</html>

@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="robots" content="noindex, nofollow" />
+  <meta name="theme-color" content="#fff0f6" />
+  <title>یه چیزی برات دارم 🎁</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E🌷%3C/text%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="petals" aria-hidden="true"></div>
+  <canvas id="fx" aria-hidden="true"></canvas>
+  <button id="mute" class="mute" aria-label="قطع و وصل صدا" hidden>🔊</button>
+
+  <main id="app">
+    <!-- لینک نامعتبر یا بدون QR -->
+    <section class="stage" id="landing">
+      <div class="landing-emoji">💌</div>
+      <h1>این هدیه شخصیه!</h1>
+      <p>برای باز کردنش، QR کدی که روی کارتت هست رو اسکن کن.</p>
+    </section>
+
+    <!-- جعبه‌ی کادو -->
+    <section class="stage" id="gift">
+      <p class="to">برای <b id="toName"></b></p>
+      <button id="box" class="box" aria-label="باز کردن هدیه">
+        <svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <ellipse cx="100" cy="186" rx="64" ry="8" fill="rgba(0,0,0,.14)" />
+          <circle class="burst" cx="100" cy="100" r="90" />
+          <g class="body">
+            <rect x="40" y="100" width="120" height="80" rx="7" class="c-body" />
+            <rect x="90" y="100" width="20" height="80" class="c-ribbon" />
+          </g>
+          <g class="lid">
+            <rect x="30" y="76" width="140" height="30" rx="7" class="c-lid" />
+            <rect x="90" y="76" width="20" height="30" class="c-ribbon" />
+            <path d="M100,76 C66,34 46,66 100,76Z" class="c-ribbon" />
+            <path d="M100,76 C134,34 154,66 100,76Z" class="c-ribbon" />
+            <circle cx="100" cy="76" r="7" class="c-knot" />
+          </g>
+        </svg>
+      </button>
+      <p class="hint">برای باز کردن، روی هدیه بزن 🎁</p>
+    </section>
+
+    <!-- گل و پیام -->
+    <section class="stage" id="bloom">
+      <div id="bigFlower" class="big-flower"></div>
+      <article id="card" class="card"></article>
+    </section>
+
+    <!-- باغ -->
+    <section class="stage" id="garden">
+      <h2>باغِ ما 🌷</h2>
+      <p class="sub">هر گل یه نفره، و هر نفر یه دنیا.</p>
+      <div id="field" class="field"></div>
+      <p class="finale">روز دختر مبارک!</p>
+      <button id="backToCard" class="btn ghost">بازگشت به پیام</button>
+    </section>
+  </main>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <script src="data.js"></script>
+  <script src="flower.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
