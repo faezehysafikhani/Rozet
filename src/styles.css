@@ -384,6 +384,44 @@ button { cursor: pointer; }
 
 
 /* =========================
+   CAPTCHA
+========================= */
+
+.captcha-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.captcha-row .input-wrap {
+  flex: 1;
+  min-width: 0;
+  margin-bottom: 0;
+}
+
+.captcha-image {
+  height: 56px;
+  border: 1px solid #d8dde6;
+  border-radius: 6px;
+  background: #fff;
+}
+
+.captcha-refresh {
+  width: 56px;
+  height: 56px;
+  display: grid;
+  place-items: center;
+  border: 1px solid #d8dde6;
+  border-radius: 6px;
+  color: #56607a;
+  background: #fff;
+  cursor: pointer;
+}
+
+.captcha-refresh:hover { background: #f4f6fb; }
+
+/* =========================
    ERROR
 ========================= */
 

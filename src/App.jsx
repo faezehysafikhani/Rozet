@@ -33,19 +33,16 @@ import {
   MessageCircle,
   MoreHorizontal,
   Network,
-  PackageCheck,
   Plus,
   Paperclip,
   Pencil,
   Presentation,
-  ReceiptText,
   RefreshCw,
   Search,
   Send,
   Settings,
   Shield,
   ShieldCheck,
-  ShoppingBag,
   Target,
   Trash2,
   TrendingUp,
@@ -72,6 +69,7 @@ import { PersianMessages, groupsApi, identityApi, labelForModule, labelForPermis
 import { DEFAULT_TENANT_ID } from './services/config'
 import { useChat } from './hooks/useChat'
 import { useNotifications } from './hooks/useNotifications'
+import { useDashboard } from './hooks/useDashboard'
 
 // A sidebar entry is a container for several sections, so it is shown when ANY of the
 // permissions below was granted - not just one hard-coded permission. Entries not listed
@@ -209,13 +207,6 @@ function menuItemIsVisible(item, canReach) {
   return canReach(menuPermissions[item.label])
 }
 
-const stats = [
-  { label: 'فروش این ماه', value: '۲۸۴,۵۰۰,۰۰۰', unit: 'تومان', change: '۱۲٪ رشد', icon: TrendingUp, tone: 'gold' },
-  { label: 'سفارش‌های فعال', value: '۲۴', unit: 'سفارش', change: '۸ سفارش جدید', icon: PackageCheck, tone: 'blue' },
-  { label: 'مشتریان جدید', value: '۳۸', unit: 'مشتری', change: 'این ماه', icon: UsersRound, tone: 'cyan' },
-  { label: 'فاکتورهای باز', value: '۱۷', unit: 'فاکتور', change: 'نیازمند بررسی', icon: ReceiptText, tone: 'violet' },
-]
-
 function Brand({ compact = false }) {
   return (
     <div className={`brand ${compact ? 'brand--compact' : ''}`}>
@@ -229,19 +220,37 @@ function Login({ onForgotPassword }) {
   const { signIn } = useAuth()
   const [showPassword, setShowPassword] = useState(false)
   const [remember, setRemember] = useState(true)
-  // Core identity is e-mail based (LoginRequest.Email) and seeds this account.
-  const [username, setUsername] = useState('admin@nexus.local')
+  // The Core signs in with a username or a mobile number (LoginRequest.Identifier), not an e-mail.
+  const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+  // After a failed attempt the Core wants a CAPTCHA with the next one; each attempt uses it up.
+  const [captcha, setCaptcha] = useState(null)
+  const [captchaAnswer, setCaptchaAnswer] = useState('')
+
+  async function loadCaptcha() {
+    const result = await identityApi.captcha()
+    const challenge = unwrap(result)
+    if (challenge?.captchaId) {
+      setCaptcha({ id: challenge.captchaId, image: challenge.imageDataUrl })
+      setCaptchaAnswer('')
+    } else {
+      setCaptcha(null)
+      setError(PersianMessages.error(result.error))
+    }
+  }
 
   async function submit(event) {
     event.preventDefault()
     setBusy(true)
     setError('')
-    const result = await signIn(username.trim(), password)
+    const result = await signIn(username.trim(), password, captcha ? { id: captcha.id, answer: captchaAnswer.trim() } : null)
+    if (!result.ok) {
+      setError(result.error)
+      if (result.captchaRequired || captcha) await loadCaptcha()
+    }
     setBusy(false)
-    if (!result.ok) setError(result.error)
   }
 
   return (
@@ -263,10 +272,10 @@ function Login({ onForgotPassword }) {
           </div>
 
           <form onSubmit={submit}>
-            <label htmlFor="username">نام کاربری (ایمیل)</label>
+            <label htmlFor="username">نام کاربری یا شماره موبایل</label>
             <div className="input-wrap">
               <UserRound size={20} />
-              <input id="username" type="email" value={username} onChange={(event) => { setUsername(event.target.value); setError('') }} autoComplete="username" placeholder="نام کاربری یا ایمیل" required />
+              <input id="username" type="text" value={username} onChange={(event) => { setUsername(event.target.value); setError('') }} autoComplete="username" placeholder="نام کاربری یا شماره موبایل" required />
             </div>
 
             <div className="password-label">
@@ -279,6 +288,20 @@ function Login({ onForgotPassword }) {
                 {showPassword ? <EyeOff size={19} /> : <Eye size={19} />}
               </button>
             </div>
+
+            {captcha && (
+              <>
+                <label htmlFor="captcha">کد امنیتی</label>
+                <div className="captcha-row">
+                  <div className="input-wrap">
+                    <ShieldCheck size={20} />
+                    <input id="captcha" value={captchaAnswer} onChange={(event) => { setCaptchaAnswer(event.target.value); setError('') }} autoComplete="off" maxLength={16} placeholder="کد داخل تصویر" required />
+                  </div>
+                  <img className="captcha-image" src={captcha.image} alt="تصویر کد امنیتی" />
+                  <button className="captcha-refresh" type="button" onClick={loadCaptcha} aria-label="دریافت کد امنیتی جدید"><RefreshCw size={18} /></button>
+                </div>
+              </>
+            )}
 
             <label className="check-row">
               <input type="checkbox" checked={remember} onChange={(event) => setRemember(event.target.checked)} />
@@ -2970,6 +2993,114 @@ function NotificationBell() {
   )
 }
 
+const CHART_STATUS_ORDER = ['Draft', 'Active', 'OnHold', 'Completed', 'Archived']
+
+function statusKey(value) {
+  return typeof value === 'number' ? CHART_STATUS_ORDER[value] : value
+}
+
+/** Main dashboard: the caller's numbers and the organisation's, read from the Core. */
+function DashboardHome({ onOpenProjects }) {
+  const { user } = useAuth()
+  const { loading, error, mine, summary, projects, canMine, canAll, canProjects } = useDashboard()
+
+  const today = new Date().toLocaleDateString('fa-IR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
+  const name = user?.displayName || [user?.firstName, user?.lastName].filter(Boolean).join(' ')
+
+  const cards = summary
+    ? [
+        { label: 'کل پروژه‌ها', value: summary.projectCount, unit: 'پروژه', note: 'همه پروژه‌های سازمان', icon: FolderOpen, tone: 'gold' },
+        { label: 'پروژه‌های در جریان', value: summary.runningProjectCount, unit: 'پروژه', note: mine ? `از این تعداد ${Number(mine.myRunningProjectCount).toLocaleString('fa-IR')} پروژه با شما است` : 'فعال یا متوقف', icon: TrendingUp, tone: 'blue' },
+        { label: 'کل اقدام‌ها', value: summary.actionCount, unit: 'اقدام', note: 'همه اقدام‌های سازمان', icon: ListTodo, tone: 'cyan' },
+        { label: 'اقدام‌های در جریان', value: summary.runningActionCount, unit: 'اقدام', note: mine ? `از این تعداد ${Number(mine.myRunningActionCount).toLocaleString('fa-IR')} اقدام با شما است` : 'باز یا در حال انجام', icon: CheckCircle2, tone: 'violet' },
+      ]
+    : mine
+      ? [
+          { label: 'پروژه‌های در جریان من', value: mine.myRunningProjectCount, unit: 'پروژه', note: 'پروژه‌هایی که مالک یا مدیر آن هستید', icon: TrendingUp, tone: 'blue' },
+          { label: 'اقدام‌های در جریان من', value: mine.myRunningActionCount, unit: 'اقدام', note: 'اقدام‌هایی که مسئول یا مالک آن هستید', icon: CheckCircle2, tone: 'violet' },
+        ]
+      : []
+
+  // Organisation-wide counts when the caller may see them, otherwise what their own list contains.
+  const byStatus = summary
+    ? summary.projectsByStatus.map(({ key, count }) => [key, count])
+    : Object.entries(projects.reduce((map, project) => {
+        const key = statusKey(project.status)
+        map[key] = (map[key] || 0) + 1
+        return map
+      }, {}))
+  const bars = CHART_STATUS_ORDER
+    .map((key) => [key, byStatus.find(([k]) => k === key)?.[1] || 0])
+    .filter(([key, count]) => count > 0 || key !== 'Archived')
+  const max = Math.max(1, ...bars.map(([, count]) => count))
+  const ticks = [max, Math.round((max * 2) / 3), Math.round(max / 3), 0]
+
+  const recent = [...projects]
+    .sort((a, b) => String(b.createdAtUtc || '').localeCompare(String(a.createdAtUtc || '')))
+    .slice(0, 5)
+
+  const noAccess = !canMine && !canAll && !canProjects
+
+  return (
+    <>
+      <section className="welcome-banner">
+        <div><span>{today}</span><h1>سلام{name ? `، ${name}` : ''} 👋</h1><p>خلاصه‌ای از وضعیت پروژه‌ها و اقدام‌های مجموعه شما را آماده کرده‌ایم.</p></div>
+        <button><FileChartColumn size={19} /> مشاهده گزارش کامل</button>
+      </section>
+
+      {noAccess && <p className="data-state">برای مشاهده داشبورد به دسترسی «مشاهده داشبورد شخصی» یا «مشاهده فهرست پروژه‌ها» نیاز دارید.</p>}
+      {!noAccess && loading && <p className="data-state">در حال دریافت اطلاعات داشبورد...</p>}
+      {!noAccess && !loading && error && <p className="data-state data-state--error">{error}</p>}
+
+      {cards.length > 0 && (
+        <section className="stats-grid">
+          {cards.map(({ label, value, unit, note, icon: Icon, tone }) => (
+            <article className="stat-card" key={label}>
+              <div className={`stat-icon ${tone}`}><Icon size={24} /></div>
+              <span>{label}</span>
+              <div className="stat-value"><strong>{Number(value).toLocaleString('fa-IR')}</strong><small>{unit}</small></div>
+              <p>{note}</p>
+            </article>
+          ))}
+        </section>
+      )}
+
+      {(canProjects || canAll) && (
+        <section className="dashboard-grid">
+          <article className="panel sales-panel">
+            <div className="panel-header"><div><h3>وضعیت پروژه‌ها</h3><p>{summary ? 'تعداد پروژه‌های سازمان به تفکیک وضعیت' : 'تعداد پروژه‌های قابل مشاهده برای شما به تفکیک وضعیت'}</p></div></div>
+            <div className="chart-area">
+              <div className="chart-labels">{ticks.map((tick, index) => <span key={index}>{tick.toLocaleString('fa-IR')}</span>)}</div>
+              <div className="bars">
+                {bars.map(([key, count]) => (
+                  <div className="bar-column" key={key} title={`${enumLabel(key, projectStatusLabels)}: ${count.toLocaleString('fa-IR')}`}>
+                    <div style={{ height: `${(count / max) * 100}%` }} />
+                    <span>{enumLabel(key, projectStatusLabels)} ({count.toLocaleString('fa-IR')})</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </article>
+          <article className="panel activity-panel">
+            <div className="panel-header"><div><h3>پروژه‌های اخیر</h3><p>آخرین پروژه‌های ثبت‌شده</p></div><button onClick={onOpenProjects}>مشاهده همه</button></div>
+            {recent.length ? (
+              <ul>
+                {recent.map((project) => (
+                  <li key={project.id}>
+                    <span className="activity-icon blue"><FolderOpen size={17} /></span>
+                    <div><strong>{projectDisplayName(project)}</strong><p>{[project.code, enumLabel(project.type, projectTypeLabels)].filter(Boolean).join(' · ')}</p></div>
+                    <time>{formatDateOnly(project.createdAtUtc)}</time>
+                  </li>
+                ))}
+              </ul>
+            ) : !loading && <p className="data-state">هنوز پروژه‌ای ثبت نشده است.</p>}
+          </article>
+        </section>
+      )}
+    </>
+  )
+}
+
 function Dashboard() {
   const { user, signOut } = useAuth()
   const [active, setActive] = useState(dashboardLabel)
@@ -2994,41 +3125,7 @@ function Dashboard() {
 
         <main className="dashboard-content">
           {active === dashboardLabel ? (
-            <>
-              <section className="welcome-banner">
-                <div><span>شنبه، ۳۱ مرداد ۱۴۰۵</span><h1>سلام، روز خوبی داشته باشید 👋</h1><p>خلاصه‌ای از وضعیت امروز مجموعه شما را آماده کرده‌ایم.</p></div>
-                <button><FileChartColumn size={19} /> مشاهده گزارش کامل</button>
-              </section>
-              <section className="stats-grid">
-                {stats.map(({ label, value, unit, change, icon: Icon, tone }) => (
-                  <article className="stat-card" key={label}>
-                    <div className={`stat-icon ${tone}`}><Icon size={24} /></div>
-                    <span>{label}</span>
-                    <div className="stat-value"><strong>{value}</strong><small>{unit}</small></div>
-                    <p>{change}</p>
-                  </article>
-                ))}
-              </section>
-              <section className="dashboard-grid">
-                <article className="panel sales-panel">
-                  <div className="panel-header"><div><h3>روند فروش</h3><p>مقایسه فروش ۶ ماه اخیر</p></div><select aria-label="بازه گزارش"><option>۶ ماه اخیر</option><option>سال جاری</option></select></div>
-                  <div className="chart-area">
-                    <div className="chart-labels"><span>۳۰۰م</span><span>۲۰۰م</span><span>۱۰۰م</span><span>۰</span></div>
-                    <div className="bars">
-                      {[42, 61, 52, 73, 66, 91].map((height, index) => <div className="bar-column" key={index}><div style={{ height: `${height}%` }} /><span>{['اسفند','فروردین','اردیبهشت','خرداد','تیر','مرداد'][index]}</span></div>)}
-                    </div>
-                  </div>
-                </article>
-                <article className="panel activity-panel">
-                  <div className="panel-header"><div><h3>آخرین فعالیت‌ها</h3><p>رویدادهای اخیر سامانه</p></div><button>مشاهده همه</button></div>
-                  <ul>
-                    <li><span className="activity-icon blue"><ShoppingBag size={17} /></span><div><strong>سفارش جدید ثبت شد</strong><p>سفارش شماره #۲۴۸۱</p></div><time>۱۰ دقیقه پیش</time></li>
-                    <li><span className="activity-icon gold"><UsersRound size={17} /></span><div><strong>مشتری جدید اضافه شد</strong><p>شرکت بازرگانی آریا</p></div><time>۴۵ دقیقه پیش</time></li>
-                    <li><span className="activity-icon green"><ReceiptText size={17} /></span><div><strong>فاکتور پرداخت شد</strong><p>فاکتور شماره #۱۰۳۲</p></div><time>۲ ساعت پیش</time></li>
-                  </ul>
-                </article>
-              </section>
-            </>
+            <DashboardHome onOpenProjects={() => setActive(projectSubmenus[0].label)} />
           ) : taskSubmenus.some((item) => item.label === active) ? (
             <TaskManagement active={active} data={projectData} />
           ) : projectSubmenus.some((item) => item.label === active) ? (

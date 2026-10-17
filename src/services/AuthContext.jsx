@@ -5,6 +5,16 @@ import { startRealtime, stopRealtime } from './signalr'
 
 const AuthContext = createContext(null)
 
+// Core error codes of the sign-in endpoint (ProblemDetails.title).
+const CAPTCHA_CODES = ['unauthorized.captcha_required', 'captcha.required', 'captcha.invalid']
+const LOGIN_ERRORS = {
+  'unauthorized.captcha_required': 'نام کاربری یا رمز عبور نادرست است. برای تلاش بعدی کد امنیتی را وارد کنید.',
+  'captcha.required': 'برای ادامه، کد امنیتی را وارد کنید.',
+  'captcha.invalid': 'کد امنیتی نادرست یا منقضی شده است.',
+  'too_many_requests': 'تعداد تلاش‌ها زیاد است؛ کمی بعد دوباره تلاش کنید.',
+  'account.disabled': 'این حساب غیرفعال شده است؛ با مدیر سامانه تماس بگیرید.',
+}
+
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(() => AuthTokenStore.getUser())
   // Two sets, deliberately:
@@ -26,8 +36,10 @@ export function AuthProvider({ children }) {
   }, [])
 
   const signOut = useCallback(async () => {
-    // The Core exposes no logout endpoint; the session is token-based, so clearing the
-    // client state plus dropping the hub connections is the complete logout.
+    // The Core revokes the refresh token on logout; the call is best-effort, because the
+    // local session must end even when the Core cannot be reached.
+    const refreshToken = AuthTokenStore.getRefreshToken()
+    if (refreshToken) await identityApi.logout(refreshToken)
     await stopRealtime()
     clearSession()
   }, [clearSession])
@@ -75,10 +87,20 @@ export function AuthProvider({ children }) {
     return () => { cancelled = true }
   }, [applySession, clearSession])
 
-  const signIn = useCallback(async (email, password, tenantSlug) => {
-    const result = await identityApi.login(email, password, tenantSlug)
+  /**
+   * identifier: username or mobile number. After a failed attempt the Core wants a CAPTCHA
+   * with the next one: the result then says captchaRequired and the caller supplies
+   * `captcha` = { id, answer } on the retry.
+   */
+  const signIn = useCallback(async (identifier, password, captcha, tenantSlug) => {
+    const result = await identityApi.login(identifier, password, tenantSlug, captcha)
     if (!result.isSuccess) {
-      return { ok: false, error: PersianMessages.error(result.error) }
+      const message = LOGIN_ERRORS[result.code]
+      return {
+        ok: false,
+        error: message || PersianMessages.error(result.error),
+        captchaRequired: CAPTCHA_CODES.includes(result.code),
+      }
     }
 
     const auth = result.value

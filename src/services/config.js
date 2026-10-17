@@ -1,8 +1,8 @@
-// Single source of truth for the Core base URL.
-// Mirrors the reference client shipped inside the Core (src/services/api.ts).
+// Single source of truth for the Core base URL: the Rozet.Api host of the Core
+// (branch feature/rozet-api). The default is its local launch profile.
 export const API_BASE_URL = (
   (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_BASE_URL) ||
-  'https://192.168.100.64:8282'
+  'http://localhost:5151'
 ).replace(/\/+$/, '')
 
 // The Core seeds this tenant on first run (DefaultDataSeeder).
