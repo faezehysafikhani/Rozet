@@ -182,6 +182,17 @@ export const permissionsApi = {
   listGrouped: () => api.get('/api/identity/permissions'),
 }
 
+export const organizationApi = {
+  // Units a project can belong to (organization_units.view). Creating one needs organization_units.create.
+  units: () => api.get('/api/organization/units?activeOnly=true'),
+  createUnit: (tenantId, name) => api.post('/api/organization/units', { tenantId, name }),
+}
+
+export const calendarApi = {
+  // Work calendars a project can be scheduled on (work_calendars.view).
+  list: () => api.get('/api/calendar/work-calendars'),
+}
+
 export const portfolioApi = {
   // The projects the caller may see (Portfolio.View); archived ones only on request.
   projects: ({ status, search, includeArchived = false } = {}) => {

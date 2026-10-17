@@ -65,7 +65,7 @@ import {
   LockKeyhole,
 } from 'lucide-react'
 import { AuthProvider, Can, useAuth } from './services/AuthContext'
-import { PersianMessages, groupsApi, identityApi, labelForModule, labelForPermission, orgChartApi, permissionsApi, platformApi, projectManagementApi, rolesApi, unwrap, usersApi } from './services/api'
+import { PersianMessages, calendarApi, groupsApi, identityApi, labelForModule, labelForPermission, orgChartApi, organizationApi, permissionsApi, platformApi, projectManagementApi, rolesApi, unwrap, usersApi } from './services/api'
 import { DEFAULT_TENANT_ID } from './services/config'
 import { useChat } from './hooks/useChat'
 import { useNotifications } from './hooks/useNotifications'
@@ -713,7 +713,10 @@ const creationTitles = {
 }
 
 const creationInitialState = (kind, data) => ({
-  project: { name: '', code: '', type: '1', startDate: '', endDate: '', cost: '', goal: '', description: '' },
+  project: {
+    name: '', code: '', type: '1', managerUserId: '', ownerUserId: '', organizationUnitId: '', workCalendarId: '',
+    startDate: '', endDate: '', cost: '', goal: '', requirements: '', constraints: '', assumptions: '', description: '',
+  },
   task: { title: '', description: '', responsibleUserId: '', approverUserId: '', dueDate: '', priority: '1', sprintNumber: '' },
   activity: { name: '', description: '', responsibleUserId: '', approverUserId: '', startDate: '', endDate: '', durationDays: '', manHours: '', weight: '1' },
   progress: { statusDescription: '', registerDate: todayInputValue(), plannedProgress: '0', actualProgress: '0', delayReasons: '' },
@@ -726,6 +729,53 @@ const creationInitialState = (kind, data) => ({
   governance: { title: '', userId: '', personnelNumber: '', phone: '', email: '', serviceLocation: '' },
 }[kind] || {})
 
+// The Core's project rules (Rozet.Api turns on charter validation and unique names), checked here first
+// so the user is told what is missing before anything is sent. The Core repeats every check.
+const PLACEHOLDER_TEXTS = ['test', 'تست', 'asdf', 'qwer', '1234', '123456', 'aaaa', 'bbbb', 'xxxx', '....', '---']
+const meaninglessText = (text) => {
+  const trimmed = String(text || '').trim()
+  return trimmed.length < 4 || PLACEHOLDER_TEXTS.includes(trimmed.toLowerCase())
+}
+const PROJECT_TEXT_FIELDS = [
+  ['goal', 'هدف پروژه', true],
+  ['requirements', 'نیازمندی‌ها', true],
+  ['constraints', 'محدودیت‌ها', false],
+  ['assumptions', 'مفروضات', false],
+  ['description', 'توضیحات', false],
+]
+
+function validateProjectForm(form) {
+  if (!form.name.trim()) return 'نام پروژه را وارد کنید.'
+  if (!form.managerUserId) return 'مدیر پروژه را انتخاب کنید.'
+  if (!form.organizationUnitId) return 'واحد سازمانی پروژه را انتخاب کنید.'
+  if (!form.startDate) return 'تاریخ شروع را وارد کنید.'
+  if (!form.endDate) return 'تاریخ پایان را وارد کنید.'
+  if (form.endDate < form.startDate) return 'تاریخ پایان نباید قبل از تاریخ شروع باشد.'
+  for (const [key, label, required] of PROJECT_TEXT_FIELDS) {
+    const text = form[key].trim()
+    if (required && !text) return `«${label}» را وارد کنید.`
+    if (text && meaninglessText(text)) return `متن «${label}» معنادار نیست؛ آن را با چند کلمه‌ی واقعی توضیح دهید.`
+  }
+  return ''
+}
+
+// Core error codes (ProblemDetails.title) of POST /api/project-management/projects.
+const PROJECT_ERRORS = {
+  'project.name_exists': 'پروژه‌ای با این نام قبلاً ثبت شده است.',
+  'project.charter.name_required': 'نام پروژه را وارد کنید.',
+  'project.charter.manager_required': 'مدیر پروژه را انتخاب کنید.',
+  'project.charter.unit_required': 'واحد سازمانی پروژه را انتخاب کنید.',
+  'project.charter.start_date_required': 'تاریخ شروع را وارد کنید.',
+  'project.charter.end_date_required': 'تاریخ پایان را وارد کنید.',
+  'project.charter.goal_required': '«هدف پروژه» را وارد کنید.',
+  'project.charter.requirements_required': '«نیازمندی‌ها» را وارد کنید.',
+  ...Object.fromEntries(PROJECT_TEXT_FIELDS.map(([key, label]) => [
+    `project.charter.${key}_meaningless`,
+    `متن «${label}» معنادار نیست؛ آن را با چند کلمه‌ی واقعی توضیح دهید.`,
+  ])),
+  conflict: 'پروژه‌ای با این کد قبلاً ثبت شده است.',
+}
+
 function CreateProjectItemModal({ kind, data, onClose }) {
   const [form, setForm] = useState(() => creationInitialState(kind, data))
   const [busy, setBusy] = useState(false)
@@ -733,11 +783,64 @@ function CreateProjectItemModal({ kind, data, onClose }) {
   const selectedProjectId = data.selectedProjectId
   const set = (key, value) => setForm((current) => ({ ...current, [key]: value }))
 
+  // A project needs an organisation unit (required) and may use a work calendar (optional).
+  const { can } = useAuth()
+  const [units, setUnits] = useState([])
+  const [calendars, setCalendars] = useState([])
+  const [newUnitName, setNewUnitName] = useState('')
+  const [creatingUnit, setCreatingUnit] = useState(false)
+  const canListUnits = can('organization_units.view')
+  const canCreateUnit = can('organization_units.create')
+  const canListCalendars = can('work_calendars.view')
+
+  useEffect(() => {
+    if (kind !== 'project') return undefined
+    let cancelled = false
+    ;(async () => {
+      const [unitResult, calendarResult] = await Promise.all([
+        canListUnits ? organizationApi.units() : null,
+        canListCalendars ? calendarApi.list() : null,
+      ])
+      if (cancelled) return
+      setUnits(unitResult ? arrayPayload(unitResult) : [])
+      const calendarList = calendarResult ? arrayPayload(calendarResult) : []
+      setCalendars(calendarList)
+      // The tenant's default calendar is what a project normally uses.
+      const fallback = calendarList.find((item) => item.isDefault)
+      if (fallback) setForm((current) => (current.workCalendarId ? current : { ...current, workCalendarId: fallback.id }))
+    })()
+    return () => { cancelled = true }
+  }, [kind, canListUnits, canListCalendars])
+
+  const createUnit = async () => {
+    const name = newUnitName.trim()
+    if (!name) return
+    setCreatingUnit(true)
+    setError('')
+    const result = await organizationApi.createUnit(data.tenantId, name)
+    setCreatingUnit(false)
+    if (!result.isSuccess) {
+      setError(PersianMessages.error(result.error))
+      return
+    }
+    const unit = unwrap(result)
+    setUnits((current) => [...current, unit])
+    set('organizationUnitId', unit.id)
+    setNewUnitName('')
+  }
+
   const submit = async (event) => {
     event.preventDefault()
     if (kind !== 'project' && !selectedProjectId) {
       setError('ابتدا یک پروژه انتخاب کنید.')
       return
+    }
+    if (kind === 'project') {
+      const problem = validateProjectForm(form)
+      if (problem) {
+        setError(problem)
+        return
+      }
     }
     if (kind === 'kpi' && !form.deliverableId) {
       setError('برای تعریف KPI ابتدا باید یک خروجی پروژه بسازید.')
@@ -753,21 +856,21 @@ function CreateProjectItemModal({ kind, data, onClose }) {
     const result = await ({
       project: () => projectManagementApi.createProject({
         tenantId: data.tenantId,
-        name: form.name,
-        code: form.code,
+        name: form.name.trim(),
+        code: emptyToNull(form.code.trim()),
         type: Number(form.type),
-        managerUserId: null,
-        ownerUserId: null,
-        organizationUnitId: null,
-        workCalendarId: null,
-        startDate: emptyToNull(form.startDate),
-        endDate: emptyToNull(form.endDate),
+        managerUserId: form.managerUserId,
+        ownerUserId: emptyToNull(form.ownerUserId),
+        organizationUnitId: form.organizationUnitId,
+        workCalendarId: emptyToNull(form.workCalendarId),
+        startDate: form.startDate,
+        endDate: form.endDate,
         cost: numberOrNull(form.cost),
-        goal: emptyToNull(form.goal),
-        requirements: null,
-        constraints: null,
-        assumptions: null,
-        description: emptyToNull(form.description),
+        goal: form.goal.trim(),
+        requirements: form.requirements.trim(),
+        constraints: emptyToNull(form.constraints.trim()),
+        assumptions: emptyToNull(form.assumptions.trim()),
+        description: emptyToNull(form.description.trim()),
         charter: null,
       }),
       task: () => projectManagementApi.createAgileTask({
@@ -861,7 +964,7 @@ function CreateProjectItemModal({ kind, data, onClose }) {
     }[kind])()
     setBusy(false)
     if (!result.isSuccess) {
-      setError(PersianMessages.error(result.error))
+      setError((kind === 'project' && PROJECT_ERRORS[result.code]) || PersianMessages.error(result.error))
       return
     }
     data.refresh()
@@ -878,13 +981,41 @@ function CreateProjectItemModal({ kind, data, onClose }) {
         </header>
         <div className="ue-body"><div className="ue-grid">
           {kind === 'project' && <>
-            <FormField label="نام پروژه"><input value={form.name} onChange={(event) => set('name', event.target.value)} required /></FormField>
-            <FormField label="کد پروژه"><input value={form.code} onChange={(event) => set('code', event.target.value)} required /></FormField>
+            <FormField label="نام پروژه *"><input value={form.name} onChange={(event) => set('name', event.target.value)} required /></FormField>
+            <FormField label="کد پروژه"><input value={form.code} onChange={(event) => set('code', event.target.value)} placeholder="خالی بماند تا خودکار ساخته شود (P0001)" /></FormField>
             <FormField label="نوع پروژه"><select value={form.type} onChange={(event) => set('type', event.target.value)}><option value="1">چابک</option><option value="0">آبشاری</option></select></FormField>
+            <FormField label="مدیر پروژه *"><UserSelect data={data} value={form.managerUserId} onChange={(value) => set('managerUserId', value)} required /></FormField>
+            <FormField label="مالک پروژه"><UserSelect data={data} value={form.ownerUserId} onChange={(value) => set('ownerUserId', value)} /></FormField>
+            <FormField label="واحد سازمانی *">
+              <select value={form.organizationUnitId} onChange={(event) => set('organizationUnitId', event.target.value)} required disabled={!canListUnits}>
+                <option value="">{canListUnits ? 'انتخاب کنید' : 'نیازمند دسترسی مشاهده واحدهای سازمانی'}</option>
+                {units.map((unit) => <option key={unit.id} value={unit.id}>{unit.path || unit.name}</option>)}
+              </select>
+            </FormField>
+            {canListUnits && !units.length && (
+              <div className="ue-field" style={{ gridColumn: '1 / -1' }}>
+                <span>هنوز واحد سازمانی تعریف نشده است.{canCreateUnit ? ' نام اولین واحد را وارد کنید:' : ' از مدیر سامانه بخواهید یک واحد سازمانی تعریف کند.'}</span>
+                {canCreateUnit && (
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <input value={newUnitName} onChange={(event) => setNewUnitName(event.target.value)} placeholder="مثلاً معاونت فناوری" />
+                    <button type="button" className="ue-save" onClick={createUnit} disabled={creatingUnit || !newUnitName.trim()}>{creatingUnit ? 'در حال ثبت...' : 'ایجاد واحد'}</button>
+                  </div>
+                )}
+              </div>
+            )}
+            <FormField label="تقویم کاری">
+              <select value={form.workCalendarId} onChange={(event) => set('workCalendarId', event.target.value)} disabled={!canListCalendars}>
+                <option value="">{canListCalendars ? 'بدون تقویم' : 'نیازمند دسترسی مشاهده تقویم'}</option>
+                {calendars.map((calendar) => <option key={calendar.id} value={calendar.id}>{calendar.name}{calendar.isDefault ? ' (پیش‌فرض)' : ''}</option>)}
+              </select>
+            </FormField>
+            <FormField label="تاریخ شروع *"><input type="date" value={form.startDate} onChange={(event) => set('startDate', event.target.value)} required /></FormField>
+            <FormField label="تاریخ پایان *"><input type="date" min={form.startDate || undefined} value={form.endDate} onChange={(event) => set('endDate', event.target.value)} required /></FormField>
             <FormField label="هزینه اولیه"><input type="number" min="0" value={form.cost} onChange={(event) => set('cost', event.target.value)} /></FormField>
-            <FormField label="تاریخ شروع"><input type="date" value={form.startDate} onChange={(event) => set('startDate', event.target.value)} /></FormField>
-            <FormField label="تاریخ پایان"><input type="date" value={form.endDate} onChange={(event) => set('endDate', event.target.value)} /></FormField>
-            <FormField label="هدف پروژه" wide><textarea rows="2" value={form.goal} onChange={(event) => set('goal', event.target.value)} /></FormField>
+            <FormField label="هدف پروژه *" wide><textarea rows="2" value={form.goal} onChange={(event) => set('goal', event.target.value)} required /></FormField>
+            <FormField label="نیازمندی‌ها *" wide><textarea rows="2" value={form.requirements} onChange={(event) => set('requirements', event.target.value)} required /></FormField>
+            <FormField label="محدودیت‌ها" wide><textarea rows="2" value={form.constraints} onChange={(event) => set('constraints', event.target.value)} /></FormField>
+            <FormField label="مفروضات" wide><textarea rows="2" value={form.assumptions} onChange={(event) => set('assumptions', event.target.value)} /></FormField>
             <FormField label="توضیحات" wide><textarea rows="2" value={form.description} onChange={(event) => set('description', event.target.value)} /></FormField>
           </>}
           {kind === 'task' && <>
