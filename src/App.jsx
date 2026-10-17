@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { createPortal } from 'react-dom'
 import {
   Bell,
   BookOpen,
@@ -66,7 +65,7 @@ import {
   LockKeyhole,
 } from 'lucide-react'
 import { AuthProvider, Can, useAuth } from './services/AuthContext'
-import { PersianMessages, actionsApi, groupsApi, identityApi, labelForModule, labelForPermission, orgChartApi, permissionsApi, platformApi, projectManagementApi, rolesApi, unwrap, usersApi } from './services/api'
+import { PersianMessages, groupsApi, identityApi, labelForModule, labelForPermission, orgChartApi, permissionsApi, platformApi, projectManagementApi, rolesApi, unwrap, usersApi } from './services/api'
 import { DEFAULT_TENANT_ID } from './services/config'
 import { useChat } from './hooks/useChat'
 import { useNotifications } from './hooks/useNotifications'
@@ -214,56 +213,6 @@ function Brand({ compact = false }) {
       <img src="/assets/rozet-logo.png" alt="لوگو گروه اقتصادی روزت" />
       {!compact && <span>سامانه مدیریت یکپارچه</span>}
     </div>
-  )
-}
-
-function Modal({ title, subtitle, icon: Icon, onClose, children, footer, className = '' }) {
-  const dialogRef = useRef(null)
-  const titleId = useMemo(() => `modal-title-${Math.random().toString(36).slice(2)}`, [])
-
-  useEffect(() => {
-    const previousOverflow = document.body.style.overflow
-    const previousFocus = document.activeElement
-    document.body.style.overflow = 'hidden'
-    const dialog = dialogRef.current
-    const focusable = dialog?.querySelector('input:not([disabled]), select:not([disabled]), textarea:not([disabled]), button:not([disabled]), [tabindex]:not([tabindex="-1"])')
-    ;(focusable || dialog)?.focus()
-
-    const handleKeyDown = (event) => {
-      if (event.key === 'Escape') {
-        event.preventDefault()
-        onClose()
-        return
-      }
-      if (event.key !== 'Tab' || !dialog) return
-      const nodes = [...dialog.querySelectorAll('input:not([disabled]), select:not([disabled]), textarea:not([disabled]), button:not([disabled]), [tabindex]:not([tabindex="-1"])')]
-      if (!nodes.length) return
-      const first = nodes[0]
-      const last = nodes[nodes.length - 1]
-      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus() }
-      if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus() }
-    }
-    document.addEventListener('keydown', handleKeyDown)
-    return () => {
-      document.body.style.overflow = previousOverflow
-      document.removeEventListener('keydown', handleKeyDown)
-      previousFocus?.focus?.()
-    }
-  }, [])
-
-  return createPortal(
-    <div className="ue-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-      <section ref={dialogRef} className={`ue-modal ${className}`} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1}>
-        <header className="ue-head">
-          {Icon && <span className="modal-head-icon"><Icon size={19} /></span>}
-          <div className="ue-head-title"><strong id={titleId}>{title}</strong>{subtitle && <small>{subtitle}</small>}</div>
-          <button type="button" className="ue-close" onClick={onClose} aria-label="بستن پنجره"><X size={19} /></button>
-        </header>
-        <div className="ue-body">{children}</div>
-        {footer && <footer className="ue-foot">{footer}</footer>}
-      </section>
-    </div>,
-    document.body,
   )
 }
 
@@ -491,8 +440,8 @@ function Sidebar({ active, onSelect, open, onClose }) {
   return (
     <>
       <button className={`sidebar-scrim ${open ? 'is-open' : ''}`} onClick={onClose} aria-label="بستن منو" />
-      <aside className={`sidebar ${open ? 'is-open' : ''}`} aria-hidden={!open} inert={!open}>
-        <div className="sidebar-top"><Brand /><button className="sidebar-close" onClick={onClose} aria-label="بستن منوی کناری"><X size={21} /></button></div>
+      <aside className={`sidebar ${open ? 'is-open' : ''}`}>
+        <div className="sidebar-top"><Brand /><button className="sidebar-close" onClick={onClose}><X size={21} /></button></div>
         <div className="sidebar-account">
           <span className="avatar">{initialsOf(user?.displayName || user?.email)}</span>
           <div>
@@ -548,7 +497,6 @@ const enumLabel = (value, labels, fallback = 'نامشخص') => labels[value] ??
 const projectStatusLabels = { 0: 'پیش‌نویس', 1: 'فعال', 2: 'متوقف', 3: 'تکمیل شده', 4: 'آرشیو', Draft: 'پیش‌نویس', Active: 'فعال', OnHold: 'متوقف', Completed: 'تکمیل شده', Archived: 'آرشیو' }
 const projectTypeLabels = { 0: 'آبشاری', 1: 'چابک', Waterfall: 'آبشاری', Agile: 'چابک' }
 const agileStatusLabels = { 0: 'برای انجام', 1: 'در حال انجام', 2: 'تکمیل شده', ToDo: 'برای انجام', InProgress: 'در حال انجام', Done: 'تکمیل شده' }
-const actionStatusLabels = { 0: 'باز', 1: 'در حال انجام', 2: 'انجام شده', 3: 'لغو شده', Open: 'باز', InProgress: 'در حال انجام', Done: 'انجام شده', Cancelled: 'لغو شده' }
 const agilePriorityLabels = { 0: 'کم', 1: 'متوسط', 2: 'بالا', 3: 'بحرانی', Low: 'کم', Medium: 'متوسط', High: 'بالا', Critical: 'بحرانی' }
 const approvalLabels = { 0: 'ثبت اولیه', 1: 'در انتظار تأیید', 2: 'تأیید شده', 3: 'رد شده', NotSubmitted: 'ثبت اولیه', PendingApproval: 'در انتظار تأیید', Approved: 'تأیید شده', Rejected: 'رد شده' }
 const performanceLabels = { 0: 'طبق برنامه', 1: 'در معرض ریسک', 2: 'عقب‌افتاده', OnTrack: 'طبق برنامه', AtRisk: 'در معرض ریسک', Behind: 'عقب‌افتاده' }
@@ -921,15 +869,14 @@ function CreateProjectItemModal({ kind, data, onClose }) {
   }
 
   return (
-    <Modal
-      title={creationTitles[kind]}
-      subtitle={kind === 'project' ? 'ثبت در سرویس پروژه‌ها' : projectDisplayName(data.selectedProject)}
-      icon={Plus}
-      onClose={onClose}
-      className="pm-modal"
-      footer={<><span className="ue-error" role={error ? 'alert' : undefined}>{error}</span><div className="ue-foot-actions"><button className="ue-cancel" type="button" onClick={onClose}>انصراف</button><button className="ue-save" type="submit" form="project-item-form" disabled={busy}>{busy ? 'در حال ذخیره...' : 'ذخیره'}</button></div></>}
-    >
-      <form id="project-item-form" onSubmit={submit}><div className="ue-grid">
+    <div className="ue-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+      <div className="ue-backdrop">
+      <form className="ue-modal pm-modal" onSubmit={submit}>
+        <header className="ue-head">
+          <div className="ue-head-title"><strong>{creationTitles[kind]}</strong><small>{kind === 'project' ? 'ثبت در Projects API' : projectDisplayName(data.selectedProject)}</small></div>
+          <button className="ue-close" type="button" onClick={onClose}><X size={17} /></button>
+        </header>
+        <div className="ue-body"><div className="ue-grid">
           {kind === 'project' && <>
             <FormField label="نام پروژه"><input value={form.name} onChange={(event) => set('name', event.target.value)} required /></FormField>
             <FormField label="کد پروژه"><input value={form.code} onChange={(event) => set('code', event.target.value)} required /></FormField>
@@ -1014,9 +961,14 @@ function CreateProjectItemModal({ kind, data, onClose }) {
             <FormField label="ایمیل"><input type="email" value={form.email} onChange={(event) => set('email', event.target.value)} /></FormField>
             <FormField label="محل خدمت"><input value={form.serviceLocation} onChange={(event) => set('serviceLocation', event.target.value)} /></FormField>
           </>}
-        </div>
+        </div></div>
+        <footer className="ue-foot">
+          {error && <span className="ue-error">{error}</span>}
+          <div className="ue-foot-actions"><button className="ue-cancel" type="button" onClick={onClose}>انصراف</button><button className="ue-save" type="submit" disabled={busy}>{busy ? 'در حال ذخیره...' : 'ذخیره'}</button></div>
+        </footer>
       </form>
-    </Modal>
+</div>
+    </div>
   )
 }
 
@@ -1869,13 +1821,18 @@ function UserEditor({ user, roles, onClose, onSaved }) {
   ]
 
   return (
-    <Modal
-      title={`ویرایش ${displayName || user.displayName}`}
-      subtitle={`${user.email} · ${isActive ? 'فعال' : 'غیرفعال'}`}
-      icon={UserCog}
-      onClose={onClose}
-      footer={<>{error && <span className="ue-error"><TriangleAlert size={15} />{error}</span>}{!error && message && <span className="ue-ok"><CheckCircle2 size={15} />{message}</span>}{!error && !message && !canEdit && <span className="ue-hint"><LockKeyhole size={14} />فقط مشاهده — دسترسی ویرایش ندارید.</span>}<div className="ue-foot-actions"><button type="button" className="ue-cancel" onClick={onClose}>انصراف</button><button type="button" className="ue-save" onClick={save} disabled={loading || busy || (!canEdit && !canEditRoles)}>{busy ? 'در حال ذخیره...' : 'ذخیره تغییرات'}</button></div></>}
-    >
+    <div className="ue-backdrop" role="dialog" aria-modal="true">
+      <div className="ue-modal">
+        <header className="ue-head">
+          <span className="user-identity tone-0"><i>{initialsOf(displayName || user.displayName)}</i></span>
+          <div className="ue-head-title">
+            <strong>{displayName || user.displayName}</strong>
+            <small>{user.email}</small>
+          </div>
+          <span className={`user-status ${isActive ? 'active' : ''}`}><i />{isActive ? 'فعال' : 'غیرفعال'}</span>
+          <button type="button" className="ue-close" onClick={onClose} aria-label="بستن"><X size={19} /></button>
+        </header>
+
         <nav className="ue-tabs">
           {tabs.map(({ key, label, icon: Icon }) => (
             <button type="button" key={key} className={tab === key ? 'active' : ''} onClick={() => setTab(key)}>
@@ -1884,6 +1841,7 @@ function UserEditor({ user, roles, onClose, onSaved }) {
           ))}
         </nav>
 
+        <div className="ue-body">
           {loading && <p className="rz-chat__empty">در حال بارگذاری اطلاعات کاربر...</p>}
 
           {!loading && tab === 'پایه' && (
@@ -1982,7 +1940,21 @@ function UserEditor({ user, roles, onClose, onSaved }) {
               </Field>
             </>
           )}
-    </Modal>
+        </div>
+
+        <footer className="ue-foot">
+          {error && <span className="ue-error"><TriangleAlert size={15} />{error}</span>}
+          {!error && message && <span className="ue-ok"><CheckCircle2 size={15} />{message}</span>}
+          {!error && !message && !canEdit && <span className="ue-hint"><LockKeyhole size={14} />فقط مشاهده — دسترسی ویرایش ندارید.</span>}
+          <div className="ue-foot-actions">
+            <button type="button" className="ue-cancel" onClick={onClose}>انصراف</button>
+            <button type="button" className="ue-save" onClick={save} disabled={loading || busy || (!canEdit && !canEditRoles)}>
+              {busy ? 'در حال ذخیره...' : 'ذخیره تغییرات'}
+            </button>
+          </div>
+        </footer>
+      </div>
+    </div>
   )
 }
 
@@ -1990,7 +1962,8 @@ function RoleAssigner({ user, roles, onClose, onSave }) {
   const [selected, setSelected] = useState(() => roles.filter((r) => (user.roles || []).includes(r.name)).map((r) => r.id))
 
   return (
-    <Modal title="نقش‌های کاربر" subtitle={user.displayName} icon={KeyRound} onClose={onClose} className="editor-modal" footer={<div className="ue-foot-actions"><button className="ue-cancel" onClick={onClose}>انصراف</button><button className="ue-save" onClick={() => onSave(user.id, selected)}>ذخیره نقش‌ها</button></div>}>
+    <aside className="notification-drawer">
+      <header><div><KeyRound size={19} /><h3>نقش‌های کاربر</h3></div><button onClick={onClose}><X size={18} /></button></header>
       <p>{user.displayName}</p>
       <div className="notify-methods">
         <strong>نقش‌های موجود</strong>
@@ -2002,7 +1975,8 @@ function RoleAssigner({ user, roles, onClose, onSave }) {
         ))}
         {!roles.length && <p>برای مشاهده نقش‌ها به دسترسی roles.view نیاز دارید.</p>}
       </div>
-    </Modal>
+      <button className="drawer-save" onClick={() => onSave(user.id, selected)}>ذخیره نقش‌ها</button>
+    </aside>
   )
 }
 
@@ -2461,7 +2435,8 @@ function RoleEditor({ tenantId, roles, role, onClose, onSaved }) {
   }
 
   return (
-    <Modal title={role ? 'ویرایش سمت سازمانی' : 'سمت سازمانی جدید'} icon={Shield} onClose={onClose} className="editor-modal" footer={<><span className="ue-error" role={error ? 'alert' : undefined}>{error}</span><div className="ue-foot-actions"><button className="ue-cancel" onClick={onClose}>انصراف</button><button className="ue-save" onClick={save} disabled={busy || !name.trim()}>{busy ? 'در حال ذخیره...' : role ? 'ذخیره تغییرات' : 'ایجاد سمت'}</button></div></>}>
+    <aside className="notification-drawer">
+      <header><div><Shield size={19} /><h3>{role ? 'ویرایش سمت سازمانی' : 'سمت سازمانی جدید'}</h3></div><button onClick={onClose}><X size={18} /></button></header>
       <label>عنوان سمت<input value={name} onChange={(e) => setName(e.target.value)} placeholder="مثلاً مدیر پروژه" disabled={role?.isSystem} /></label>
       <label>توضیح<input value={description} onChange={(e) => setDescription(e.target.value)} disabled={role?.isSystem} /></label>
       <label>
@@ -2472,7 +2447,9 @@ function RoleEditor({ tenantId, roles, role, onClose, onSaved }) {
         </select>
       </label>
       <p className="ue-hint" style={{ margin: '0 0 4px' }}><Network size={14} />این انتخاب فقط جایگاه سمت را در چارت سازمانی تعیین می‌کند و روی دسترسی‌ها اثری ندارد.</p>
-    </Modal>
+      {error && <p className="login-error" role="alert">{error}</p>}
+      <button className="drawer-save" onClick={save} disabled={busy || !name.trim()}>{busy ? 'در حال ذخیره...' : role ? 'ذخیره تغییرات' : 'ایجاد سمت'}</button>
+    </aside>
   )
 }
 
@@ -2711,7 +2688,8 @@ function GroupEditor({ tenantId, group, onClose, onSaved }) {
   }
 
   return (
-    <Modal title={group ? 'ویرایش گروه' : 'گروه کاربری جدید'} icon={Users2} onClose={onClose} className="editor-modal" footer={<><span className="ue-error" role={error ? 'alert' : undefined}>{error}</span><div className="ue-foot-actions"><button className="ue-cancel" onClick={onClose}>انصراف</button><button className="ue-save" onClick={save} disabled={busy || !name.trim()}>{busy ? 'در حال ذخیره...' : group ? 'ذخیره تغییرات' : 'ایجاد گروه'}</button></div></>}>
+    <aside className="notification-drawer">
+      <header><div><Users2 size={19} /><h3>{group ? 'ویرایش گروه' : 'گروه کاربری جدید'}</h3></div><button onClick={onClose}><X size={18} /></button></header>
       <label>نام گروه<input value={name} onChange={(e) => setName(e.target.value)} placeholder="مثلاً تیم مالی" /></label>
       <label>توضیح<input value={description} onChange={(e) => setDescription(e.target.value)} /></label>
       {group && (
@@ -2720,7 +2698,9 @@ function GroupEditor({ tenantId, group, onClose, onSaved }) {
           <span>گروه فعال باشد (گروه غیرفعال هیچ دسترسی‌ای به اعضا نمی‌دهد)</span>
         </label>
       )}
-    </Modal>
+      {error && <p className="login-error" role="alert">{error}</p>}
+      <button className="drawer-save" onClick={save} disabled={busy || !name.trim()}>{busy ? 'در حال ذخیره...' : group ? 'ذخیره تغییرات' : 'ایجاد گروه'}</button>
+    </aside>
   )
 }
 
@@ -2893,11 +2873,14 @@ function UserCreator({ onClose, onCreated }) {
   }
 
   return (
-    <Modal title="کاربر جدید" icon={UserPlus} onClose={onClose} className="editor-modal" footer={<><span className="ue-error" role={error ? 'alert' : undefined}>{error}</span><div className="ue-foot-actions"><button className="ue-cancel" onClick={onClose}>انصراف</button><button className="ue-save" onClick={save} disabled={busy || !email.trim() || !displayName.trim() || password.length < 8}>{busy ? 'در حال ایجاد...' : 'ایجاد کاربر'}</button></div></>}>
+    <aside className="notification-drawer">
+      <header><div><UserPlus size={19} /><h3>کاربر جدید</h3></div><button onClick={onClose}><X size={18} /></button></header>
       <label>ایمیل<input type="email" value={email} onChange={(e) => setEmail(e.target.value)} /></label>
       <label>نام نمایشی<input value={displayName} onChange={(e) => setDisplayName(e.target.value)} /></label>
       <label>رمز عبور (حداقل ۸ کاراکتر)<input type="password" value={password} onChange={(e) => setPassword(e.target.value)} /></label>
-    </Modal>
+      {error && <p className="login-error" role="alert">{error}</p>}
+      <button className="drawer-save" onClick={save} disabled={busy}>{busy ? 'در حال ایجاد...' : 'ایجاد کاربر'}</button>
+    </aside>
   )
 }
 
@@ -3010,153 +2993,6 @@ function NotificationBell() {
   )
 }
 
-<<<<<<< HEAD
-function GlobalSearch({ tenantId, onSelectProject, onSelectUser }) {
-  const [query, setQuery] = useState('')
-  const [open, setOpen] = useState(false)
-  const [loading, setLoading] = useState(false)
-  const [projects, setProjects] = useState([])
-  const [users, setUsers] = useState([])
-  const [errors, setErrors] = useState([])
-  const rootRef = useRef(null)
-  const normalized = query.trim()
-
-  useEffect(() => {
-    const close = (event) => { if (!rootRef.current?.contains(event.target)) setOpen(false) }
-    document.addEventListener('mousedown', close)
-    return () => document.removeEventListener('mousedown', close)
-  }, [])
-
-  useEffect(() => {
-    let cancelled = false
-    if (normalized.length < 2) {
-      setProjects([]); setUsers([]); setErrors([]); setLoading(false)
-      return undefined
-    }
-    setLoading(true)
-    const timer = setTimeout(async () => {
-      const [projectResult, userResult] = await Promise.all([
-        projectManagementApi.projects({ tenantId, pageNumber: 1, pageSize: 8, search: normalized }),
-        usersApi.list({ tenantId, pageNumber: 1, pageSize: 8, search: normalized }),
-      ])
-      if (cancelled) return
-      setProjects(arrayPayload(projectResult))
-      setUsers(arrayPayload(userResult))
-      setErrors([
-        !projectResult.isSuccess && `پروژه‌ها: ${PersianMessages.error(projectResult.error)}`,
-        !userResult.isSuccess && `کاربران: ${PersianMessages.error(userResult.error)}`,
-      ].filter(Boolean))
-      setLoading(false)
-    }, 300)
-    return () => { cancelled = true; clearTimeout(timer) }
-  }, [normalized, tenantId])
-
-  const hasResults = projects.length || users.length
-  return (
-    <div className="global-search" ref={rootRef}>
-      <div className="search-box">
-        <Search size={19} />
-        <input value={query} onFocus={() => setOpen(true)} onChange={(event) => { setQuery(event.target.value); setOpen(true) }} placeholder="جست‌وجوی پروژه یا کاربر..." role="combobox" aria-label="جست‌وجوی پروژه یا کاربر" aria-expanded={open} aria-controls="global-search-results" aria-autocomplete="list" />
-        {query && <button type="button" onClick={() => setQuery('')} aria-label="پاک کردن جست‌وجو"><X size={14} /></button>}
-      </div>
-      {open && (
-        <div className="search-results" id="global-search-results" role="listbox" aria-label="نتایج جست‌وجو">
-          <header><strong>جست‌وجوی سامانه</strong><small>دامنه: پروژه‌ها و کاربران قابل‌دسترسی · حداکثر ۸ نتیجه از هر دسته</small></header>
-          {normalized.length < 2 && <p>حداقل دو نویسه وارد کنید.</p>}
-          {loading && <p role="status">در حال جست‌وجو...</p>}
-          {!loading && errors.map((error) => <p className="search-error" role="alert" key={error}>{error}</p>)}
-          {!loading && normalized.length >= 2 && !hasResults && errors.length < 2 && <p>نتیجه‌ای در دامنه‌های در دسترس یافت نشد.</p>}
-          {!loading && projects.map((project) => <button role="option" key={`p-${project.id}`} onClick={() => { onSelectProject(project.id); setOpen(false) }}><FolderOpen size={17} /><span><strong>{projectDisplayName(project)}</strong><small>پروژه · {project.code || compactEnumLabel(project.status, projectStatusLabels)}</small></span><ChevronLeft size={16} /></button>)}
-          {!loading && users.map((item) => <button role="option" key={`u-${item.id}`} onClick={() => { onSelectUser(item.id); setOpen(false) }}><UserRound size={17} /><span><strong>{item.displayName || item.email}</strong><small>کاربر · {item.email}</small></span><ChevronLeft size={16} /></button>)}
-        </div>
-      )}
-    </div>
-  )
-}
-
-function useMainDashboard(tenantId) {
-  const [state, setState] = useState({ loading: true, error: '', summary: null, projects: [], actions: [], actionsError: '', detailErrors: [] })
-
-  useEffect(() => {
-    let cancelled = false
-    ;(async () => {
-      setState((current) => ({ ...current, loading: true, error: '', detailErrors: [] }))
-      const summaryResult = await projectManagementApi.myDashboard(tenantId)
-      if (cancelled) return
-      if (!summaryResult.isSuccess) {
-        setState({ loading: false, error: PersianMessages.error(summaryResult.error), summary: null, projects: [], actions: [], actionsError: '', detailErrors: [] })
-        return
-      }
-      const summary = unwrap(summaryResult)
-      const [projectResults, actionsResult] = await Promise.all([
-        Promise.all((summary?.myProjectIds || []).map((id) => projectManagementApi.project(id))),
-        actionsApi.list({ tenantId }),
-      ])
-      if (cancelled) return
-      const actionIds = new Set(summary?.myActionIds || [])
-      const detailErrors = []
-      if (projectResults.some((result) => !result.isSuccess)) detailErrors.push('جزئیات بعضی پروژه‌های شما دریافت نشد.')
-      const actionsError = actionsResult.isSuccess ? '' : PersianMessages.error(actionsResult.error)
-      if (actionsError) detailErrors.push(`موعد اقدامات: ${actionsError}`)
-      setState({
-        loading: false,
-        error: '',
-        summary,
-        projects: projectResults.map((result) => unwrap(result)).filter(Boolean),
-        actions: arrayPayload(actionsResult).filter((item) => actionIds.has(item.id)),
-        actionsError,
-        detailErrors,
-      })
-    })()
-    return () => { cancelled = true }
-  }, [tenantId])
-
-  return state
-}
-
-function MainDashboard({ tenantId, onOpenProjects, onOpenTasks }) {
-  const data = useMainDashboard(tenantId)
-  const today = new Date(); today.setHours(0, 0, 0, 0)
-  const runningActions = data.actions.filter((item) => ['باز', 'در حال انجام'].includes(enumLabel(item.status, actionStatusLabels)))
-  const datedActions = runningActions.filter((item) => item.endDate).map((item) => ({ ...item, dueDate: new Date(`${String(item.endDate).slice(0, 10)}T00:00:00`) })).sort((a, b) => a.dueDate - b.dueDate)
-  const overdue = datedActions.filter((item) => item.dueDate < today)
-  const upcomingAll = datedActions.filter((item) => item.dueDate >= today)
-  const upcoming = upcomingAll.slice(0, 5)
-  const statusCounts = Object.entries(data.projects.reduce((counts, project) => {
-    const label = compactEnumLabel(project.status, projectStatusLabels)
-    counts[label] = (counts[label] || 0) + 1
-    return counts
-  }, {}))
-  const maxStatus = Math.max(1, ...statusCounts.map(([, count]) => count))
-
-  if (data.loading) return <section className="dashboard-state" role="status"><RefreshCw className="spin" size={24} /><p>در حال دریافت داشبورد واقعی شما...</p></section>
-  if (data.error) return <section className="dashboard-state dashboard-state--error"><TriangleAlert size={28} /><h2>داشبورد دریافت نشد</h2><p>{data.error}</p></section>
-
-  return (
-    <div className="main-dashboard">
-      <header className="dashboard-hero">
-        <div><span>{new Date().toLocaleDateString('fa-IR', { weekday: 'long', day: 'numeric', month: 'long' })}</span><h1>مرکز کار من</h1><p>نمای واقعی پروژه‌ها و اقدامات منتسب به حساب شما</p></div>
-        <div className="dashboard-scope"><ShieldCheck size={18} /><span>دامنه شخصی</span></div>
-      </header>
-      {data.detailErrors.map((error) => <p className="dashboard-warning" role="alert" key={error}><TriangleAlert size={16} />{error}</p>)}
-      <section className="dashboard-kpis">
-        <button onClick={onOpenProjects}><span className="dashboard-kpi-icon navy"><FolderOpen /></span><small>پروژه‌های جاری من</small><strong>{Number(data.summary?.myRunningProjectCount ?? 0).toLocaleString('fa-IR')}</strong><em>از Reporting API</em></button>
-        <button onClick={onOpenTasks}><span className="dashboard-kpi-icon blue"><ListTodo /></span><small>اقدامات جاری من</small><strong>{Number(data.summary?.myRunningActionCount ?? 0).toLocaleString('fa-IR')}</strong><em>از Reporting API</em></button>
-        <article><span className="dashboard-kpi-icon red"><TriangleAlert /></span><small>عقب‌افتاده</small><strong>{data.actionsError ? '—' : overdue.length.toLocaleString('fa-IR')}</strong><em>{data.actionsError ? 'داده دریافت نشد' : 'بر اساس موعد اقدامات من'}</em></article>
-        <article><span className="dashboard-kpi-icon green"><CalendarDays /></span><small>دارای موعد پیش رو</small><strong>{data.actionsError ? '—' : upcomingAll.length.toLocaleString('fa-IR')}</strong><em>{data.actionsError ? 'داده دریافت نشد' : 'اقدامات جاری موعددار'}</em></article>
-      </section>
-      <section className="dashboard-panels">
-        <article className="dashboard-panel">
-          <header><div><h2>وضعیت پروژه‌های من</h2><p>توزیع {data.projects.length.toLocaleString('fa-IR')} پروژه منتسب به شما</p></div><button onClick={onOpenProjects}>مشاهده پروژه‌ها <ChevronLeft size={15} /></button></header>
-          {!statusCounts.length ? <div className="dashboard-empty"><FolderOpen size={25} /><p>پروژه‌ای به حساب شما منتسب نشده است.</p></div> : <div className="status-bars">{statusCounts.map(([label, count]) => <div key={label}><span>{label}</span><i><b style={{ width: `${(count / maxStatus) * 100}%` }} /></i><strong>{count.toLocaleString('fa-IR')}</strong></div>)}</div>}
-        </article>
-        <article className="dashboard-panel">
-          <header><div><h2>موعدهای نزدیک</h2><p>اقدامات جاری منتسب به شما</p></div><button onClick={onOpenTasks}>مشاهده وظایف <ChevronLeft size={15} /></button></header>
-          {data.actionsError ? <div className="dashboard-empty dashboard-empty--error"><TriangleAlert size={25} /><p>دادهٔ موعدها دریافت نشد؛ این وضعیت با صفر یکسان نیست.</p></div> : !upcoming.length ? <div className="dashboard-empty"><CheckCircle2 size={25} /><p>اقدام جاری با موعد آینده وجود ندارد.</p></div> : <ul className="due-list">{upcoming.map((item) => <li key={item.id}><span className="due-date"><b>{item.dueDate.toLocaleDateString('fa-IR', { day: 'numeric' })}</b><small>{item.dueDate.toLocaleDateString('fa-IR', { month: 'short' })}</small></span><div><strong>{item.title}</strong><small>{enumLabel(item.status, actionStatusLabels)}</small></div></li>)}</ul>}
-        </article>
-      </section>
-    </div>
-=======
 const CHART_STATUS_ORDER = ['Draft', 'Active', 'OnHold', 'Completed', 'Archived']
 
 function statusKey(value) {
@@ -3262,38 +3098,26 @@ function DashboardHome({ onOpenProjects }) {
         </section>
       )}
     </>
->>>>>>> 27c46d8c81bea5cbad66dc76c28c3b73f7f43051
   )
 }
 
 function Dashboard() {
   const { user, signOut } = useAuth()
   const [active, setActive] = useState(dashboardLabel)
-  const [sidebarOpen, setSidebarOpen] = useState(() => window.matchMedia('(min-width: 821px)').matches)
+  const [sidebarOpen, setSidebarOpen] = useState(false)
   const projectData = useProjectManagementData()
-
-  useEffect(() => {
-    const media = window.matchMedia('(max-width: 820px)')
-    const sync = (event) => setSidebarOpen(!event.matches)
-    media.addEventListener('change', sync)
-    return () => media.removeEventListener('change', sync)
-  }, [])
 
   return (
     <div className="app-shell" dir="rtl">
       <Sidebar active={active} onSelect={setActive} open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
-      <div className={`app-main ${sidebarOpen ? 'sidebar-is-open' : ''}`}>
+      <div className="app-main">
         <header className="topbar">
           <div className="topbar-title">
-            <button className="mobile-menu" onClick={() => setSidebarOpen((value) => !value)} aria-label={sidebarOpen ? 'بستن منوی کناری' : 'باز کردن منوی کناری'} aria-expanded={sidebarOpen}><Menu size={22} /></button>
+            <button className="mobile-menu" onClick={() => setSidebarOpen(true)}><Menu size={22} /></button>
             <div><span>صفحه اصلی</span><strong>{active}</strong></div>
           </div>
           <div className="topbar-actions">
-            <GlobalSearch
-              tenantId={projectData.tenantId}
-              onSelectProject={(id) => { projectData.setSelectedProjectId(id); setActive('فهرست پروژه‌ها') }}
-              onSelectUser={() => setActive('مدیریت کاربران')}
-            />
+            <label className="search-box"><Search size={19} /><input placeholder="جست‌وجو در سامانه..." /></label>
             <NotificationBell />
             <TopbarUserMenu onProfile={() => setActive(userProfileLabel)} onSignOut={signOut} />
           </div>
@@ -3301,11 +3125,7 @@ function Dashboard() {
 
         <main className="dashboard-content">
           {active === dashboardLabel ? (
-<<<<<<< HEAD
-            <MainDashboard tenantId={projectData.tenantId} onOpenProjects={() => setActive('فهرست پروژه‌ها')} onOpenTasks={() => setActive('فهرست وظایف')} />
-=======
             <DashboardHome onOpenProjects={() => setActive(projectSubmenus[0].label)} />
->>>>>>> 27c46d8c81bea5cbad66dc76c28c3b73f7f43051
           ) : taskSubmenus.some((item) => item.label === active) ? (
             <TaskManagement active={active} data={projectData} />
           ) : projectSubmenus.some((item) => item.label === active) ? (

@@ -322,12 +322,6 @@ export const projectManagementApi = {
     api.get(`/api/reporting/projects/${projectId}`),
 }
 
-export const actionsApi = {
-  list: ({ tenantId, projectId } = {}) =>
-    api.get(`/api/actions/?${projectQuery({ tenantId, projectId })}`),
-  detail: (id) => api.get(`/api/actions/${id}`),
-}
-
 // Core returns Result<T> for these; unwrap to the payload.
 export const unwrap = (result, fallback = null) => {
   if (!result?.isSuccess) return fallback
