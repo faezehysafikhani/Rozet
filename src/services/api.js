@@ -15,7 +15,9 @@ export const PersianMessages = {
     const text = String(message).toLowerCase()
     if (text.includes('not a participant')) return 'شما عضو این گفت‌وگو نیستید.'
     if (text.includes('access denied')) return 'به این گفت‌وگو دسترسی ندارید.'
-    if (text.includes('invalid email or password')) return 'ایمیل یا رمز عبور نادرست است.'
+    if (text.includes('invalid username') || text.includes('invalid email or password')) return 'نام کاربری یا رمز عبور نادرست است.'
+    if (text.includes('disabled')) return 'این حساب غیرفعال شده است؛ با مدیر سامانه تماس بگیرید.'
+    if (text.includes('too many') || text.includes('429')) return 'تعداد تلاش‌ها زیاد است؛ کمی بعد دوباره تلاش کنید.'
     if (text.includes('unauthorized') || text.includes('authentication is required') || text.includes('401'))
       return 'برای انجام این عملیات ابتدا وارد شوید.'
     if (text.includes('forbidden') || text.includes('403')) return 'شما دسترسی لازم برای این عملیات را ندارید.'
@@ -72,17 +74,20 @@ export async function apiRequest(endpoint, options = {}, { anonymous = false, re
 
     if (!response.ok) {
       let error = `خطای سرور (${response.status})`
+      let code = null
+      const text = await response.text().catch(() => '')
       try {
-        const body = await response.json()
-        // Two shapes reach here: a ProblemDetails { title, detail } from ToApiResult(),
-        // and a raw Result<T> { isSuccess, error: { code, message } } from the chat module.
+        const body = JSON.parse(text)
+        // Two shapes reach here: a ProblemDetails { title, detail } from ToApiResult()
+        // (title carries the Core's error code, e.g. "captcha.required"), and a raw
+        // Result<T> { isSuccess, error: { code, message } } from the chat module.
         const raw = body.detail || body.error || body.message || body.title
         error = (raw && typeof raw === 'object' ? raw.message || raw.code : raw) || error
+        code = (body.error && typeof body.error === 'object' ? body.error.code : body.title) || null
       } catch {
-        const text = await response.text().catch(() => '')
         if (text) error = text
       }
-      return { isSuccess: false, error, status: response.status }
+      return { isSuccess: false, error, code, status: response.status }
     }
 
     if (response.status === 204) return { isSuccess: true, value: null, status: 204 }
@@ -108,8 +113,18 @@ export const api = {
  * ------------------------------------------------------------------ */
 
 export const identityApi = {
-  login: (email, password, tenantSlug) =>
-    api.post('/api/identity/auth/login', { email, password, tenantSlug: tenantSlug || null }, { anonymous: true }),
+  // identifier is a username or a mobile number (not an e-mail). After a failed attempt the Core
+  // asks for a CAPTCHA: send the id and the typed answer back with the next attempt.
+  login: (identifier, password, tenantSlug, captcha) =>
+    api.post('/api/identity/auth/login', {
+      identifier,
+      password,
+      tenantSlug: tenantSlug || null,
+      captchaId: captcha?.id || null,
+      captchaAnswer: captcha?.answer || null,
+    }, { anonymous: true }),
+  captcha: () => api.post('/api/identity/auth/captcha', undefined, { anonymous: true }),
+  logout: (refreshToken) => api.post('/api/identity/auth/logout', { refreshToken }, { anonymous: true }),
   refresh: (refreshToken) => api.post('/api/identity/auth/refresh', { refreshToken }, { anonymous: true }),
   me: () => api.get('/api/identity/auth/me'),
   forgotPassword: (email, tenantSlug) =>
@@ -165,6 +180,26 @@ export const orgChartApi = {
 
 export const permissionsApi = {
   listGrouped: () => api.get('/api/identity/permissions'),
+}
+
+export const portfolioApi = {
+  // The projects the caller may see (Portfolio.View); archived ones only on request.
+  projects: ({ status, search, includeArchived = false } = {}) => {
+    const query = new URLSearchParams()
+    if (status) query.set('status', status)
+    if (search) query.set('search', search)
+    if (includeArchived) query.set('includeArchived', 'true')
+    const qs = query.toString()
+    return api.get(`/api/portfolio/projects${qs ? `?${qs}` : ''}`)
+  },
+}
+
+export const reportingApi = {
+  // Own dashboard (Reporting.View).
+  me: () => api.get('/api/reporting/me'),
+  // Organisation-wide summary (Reporting.ViewAll).
+  summary: (organizationUnitId) =>
+    api.get(`/api/reporting/summary${organizationUnitId ? `?organizationUnitId=${organizationUnitId}` : ''}`),
 }
 
 export const platformApi = {
