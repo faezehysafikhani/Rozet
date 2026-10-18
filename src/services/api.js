@@ -108,6 +108,54 @@ export const api = {
   delete: (url, opts) => apiRequest(url, { method: 'DELETE' }, opts),
 }
 
+export const knowledgeApi = {
+  list: ({ search, documentType, subjectType, subjectId } = {}) => {
+    const query = new URLSearchParams()
+
+    if (search?.trim()) query.set('search', search.trim())
+
+    if (documentType !== undefined && documentType !== null && documentType !== '') {
+      query.set('documentType', String(documentType))
+    }
+
+    if (subjectType?.trim()) query.set('subjectType', subjectType.trim())
+    if (subjectId?.trim()) query.set('subjectId', subjectId.trim())
+
+    const suffix = query.toString()
+    return api.get(`/api/knowledge/documents/${suffix ? `?${suffix}` : ''}`)
+  },
+
+  upload: ({ file, title, description, documentType }) => {
+    const query = new URLSearchParams({
+      title: title.trim(),
+      description: (description || '').trim(),
+      documentType: String(documentType),
+    })
+
+    const formData = new FormData()
+    formData.append('file', file)
+
+    return apiRequest(
+      `/api/knowledge/documents/?${query.toString()}`,
+      {
+        method: 'POST',
+        body: formData,
+      },
+    )
+  },
+
+  addLink: (documentId, payload) =>
+    api.post(`/api/knowledge/documents/${documentId}/links`, payload),
+
+  removeLink: (documentId, { subjectType, subjectId }) => {
+    const query = new URLSearchParams({ subjectType, subjectId })
+
+    return api.delete(
+      `/api/knowledge/documents/${documentId}/links?${query.toString()}`,
+    )
+  },
+}
+
 /* ------------------------------------------------------------------ *
  * Endpoint map - every call below targets an EXISTING Core endpoint.  *
  * ------------------------------------------------------------------ */
