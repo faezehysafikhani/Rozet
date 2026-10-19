@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { CalendarClock, CheckCircle2, ChevronDown, ChevronLeft, CircleAlert, Flag, Gauge, ListPlus, Pencil, Plus, Send, Settings2, Trash2, TrendingUp, X } from 'lucide-react'
 import { useAuth } from '../../../services/AuthContext'
 import { useConfirm } from '../../../components/ConfirmDialog'
@@ -17,7 +17,7 @@ import './schedule.css'
  * add / edit / delete (with sub-activities), a predecessor with its type and lag, actual progress, approval,
  * weighting settings and writing the calculated dates back.
  */
-export default function SchedulePanel({ data }) {
+export default function SchedulePanel({ data, externalReloadKey = 0 }) {
   const { can } = useAuth()
   const project = data.selectedProject
   const canView = can('WaterfallActivities.View')
@@ -32,6 +32,10 @@ export default function SchedulePanel({ data }) {
   const [collapsed, setCollapsed] = useState(() => new Set())
   const [dialog, setDialog] = useState(null) // { kind: 'create' | 'edit' | 'progress' | 'settings', id?, parentId? }
   const [notice, setNotice] = useState(null)
+
+  // The plan was changed elsewhere (an MS Project import): read it again.
+  const seenKey = useRef(externalReloadKey)
+  useEffect(() => { if (seenKey.current !== externalReloadKey) { seenKey.current = externalReloadKey; reload() } }, [externalReloadKey, reload])
 
   const byId = useMemo(() => rowById(rows), [rows])
   const shown = useMemo(() => visibleRows(rows, collapsed), [rows, collapsed])

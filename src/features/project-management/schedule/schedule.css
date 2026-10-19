@@ -29,9 +29,6 @@ button.sch-toggle:hover { background: #e9edf3; }
 .sch-pred { direction: ltr; text-align: right; color: #626c7e; white-space: nowrap; }
 .sch-assumed { margin-inline-start: 2px; color: #b8860b; cursor: help; }
 
-.sch-modal { width: min(820px, 100%); }
-.sch-modal-sm { width: min(480px, 100%); }
-.sch-modal form, .sch-modal-sm form { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
 .sch-check { display: flex; align-items: center; gap: 8px; color: #4c5568; }
 .sch-check input { width: 16px; height: 16px; }
 

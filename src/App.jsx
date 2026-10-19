@@ -72,6 +72,7 @@ import { useNotifications } from './hooks/useNotifications'
 import DocumentsPage from './features/project-management/documents/DocumentsPage'
 import CalendarPage from './features/project-management/calendar/CalendarPage'
 import ProjectsSection from './features/project-management/projects/ProjectsSection'
+import PlanToolsPanel from './features/project-management/baselines/PlanToolsPanel'
 import SchedulePanel from './features/project-management/schedule/SchedulePanel'
 import { useDashboard } from './hooks/useDashboard'
 
@@ -1100,10 +1101,12 @@ function KanbanBoard({ data }) {
 }
 
 function ProjectPlanning({ data }) {
+  const [planVersion, setPlanVersion] = useState(0)
   return (
     <>
       <ProjectsSection data={data} />
-      <SchedulePanel data={data} />
+      <SchedulePanel data={data} externalReloadKey={planVersion} />
+      <PlanToolsPanel data={data} onPlanChanged={() => { setPlanVersion((value) => value + 1); data.refresh() }} />
     </>
   )
 }

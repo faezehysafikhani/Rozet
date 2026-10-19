@@ -75,6 +75,12 @@ export const pmApi = {
       create: (payload) => api.post(`${BASE}/waterfall/baselines`, payload),
       remove: (id) => api.delete(`${BASE}/waterfall/baselines/${id}`),
     },
+    /** S-curve points saved by hand: the only recorded history of actual progress (one per date; saving the same date again refreshes it). */
+    progressSnapshots: {
+      list: (projectId) => api.get(`${BASE}/waterfall/progress-snapshots${query({ projectId })}`),
+      create: (payload) => api.post(`${BASE}/waterfall/progress-snapshots`, payload),
+      remove: (id) => api.delete(`${BASE}/waterfall/progress-snapshots/${id}`),
+    },
     sCurve: (projectId, stepDays) => api.get(`${BASE}/waterfall/s-curve${query({ projectId, stepDays })}`),
     settings: {
       get: (projectId) => api.get(`${BASE}/waterfall/settings${query({ projectId })}`),

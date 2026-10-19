@@ -1,0 +1,4 @@
+.sch-modal { width: min(820px, 100%); }
+.sch-modal-sm { width: min(480px, 100%); }
+.sch-modal form, .sch-modal-sm form { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+.sch-modal-xl { width: min(1040px, 100%); }
