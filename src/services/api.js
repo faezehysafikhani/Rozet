@@ -13,6 +13,80 @@ export const PersianMessages = {
     // Failed Result<T> bodies carry an Error object ({ code, message }), not a string.
     if (typeof message === 'object') message = message.message || message.detail || message.code || ''
     const text = String(message).toLowerCase()
+    // Contracts, addenda, invoices and payments.
+    if (text.includes('contract that is pending approval cannot be')) return 'قراردادی که در انتظار تأیید است نمی‌تواند ویرایش یا حذف شود.'
+    if (text.includes('contract with approved or pending addenda cannot be deleted')) return 'قراردادی که الحاقیه‌ی تأییدشده یا در انتظار تأیید دارد حذف نمی‌شود.'
+    if (text.includes('contract with invoices cannot be deleted')) return 'قراردادی که صورت‌وضعیت دارد حذف نمی‌شود.'
+    if (text.includes('terminated contract cannot be amended')) return 'قرارداد فسخ‌شده الحاقیه نمی‌گیرد.'
+    if (text.includes('terminated contract cannot be invoiced')) return 'برای قرارداد فسخ‌شده صورت‌وضعیت ثبت نمی‌شود.'
+    if (text.includes('addenda can only be added to an approved contract')) return 'الحاقیه فقط به قراردادِ تأییدشده اضافه می‌شود.'
+    if (text.includes('invoices can only be raised against an approved contract')) return 'صورت‌وضعیت فقط برای قراردادِ تأییدشده ثبت می‌شود.'
+    if (text.includes('only an approved contract can leave draft')) return 'قرارداد تا تأیید نشده در وضعیت پیش‌نویس می‌ماند.'
+    if (text.includes('addendum that is pending approval or approved cannot be')) return 'الحاقیه‌ی در انتظار تأیید یا تأییدشده ویرایش یا حذف نمی‌شود.'
+    if (text.includes('invoice that is pending approval or approved cannot be edited')) return 'صورت‌وضعیتِ در انتظار تأیید یا تأییدشده ویرایش نمی‌شود.'
+    if (text.includes('invoice that is pending approval, approved or paid cannot be deleted')) return 'صورت‌وضعیتِ در انتظار تأیید، تأییدشده یا پرداخت‌شده حذف نمی‌شود.'
+    if (text.includes('payments can only be recorded against an approved invoice')) return 'پرداخت فقط برای صورت‌وضعیتِ تأییدشده ثبت می‌شود.'
+    if (text.includes('addendum has already been submitted')) return 'این الحاقیه قبلاً برای تأیید ارسال شده است.'
+    if (text.includes('contract has already been submitted')) return 'این قرارداد قبلاً برای تأیید ارسال شده است.'
+    if (text.includes('invoice has already been submitted')) return 'این صورت‌وضعیت قبلاً برای تأیید ارسال شده است.'
+    if (text.includes('addendum would reduce the contract below the amount already invoiced')) return 'این الحاقیه مبلغ قرارداد را از مبلغ صورت‌حساب‌شده کمتر می‌کند.'
+    if (text.includes('amount of an approved contract can only change through an addendum')) return 'مبلغ قراردادِ تأییدشده فقط با الحاقیه تغییر می‌کند.'
+    if (text.includes('contract already has an invoice with this number')) return 'در این قرارداد صورت‌وضعیتی با این شماره هست.'
+    if (text.includes('invoice would take the total invoiced above the contract amount')) return 'جمع صورت‌وضعیت‌ها از مبلغ قرارداد بیشتر می‌شود.'
+    if (text.includes('project already has a contract with this number')) return 'در این پروژه قراردادی با این شماره هست.'
+    if (text.includes('addendum not found')) return 'الحاقیه پیدا نشد.'
+    // Change requests.
+    if (text.includes('describe the impact on scope')) return 'پیش از ارسال، اثر تغییر بر دامنه را بنویسید.'
+    if (text.includes('only a draft or a rejected change request can be edited')) return 'فقط درخواستِ پیش‌نویس یا ردشده ویرایش می‌شود.'
+    if (text.includes('only a draft change request can be submitted')) return 'فقط درخواستِ پیش‌نویس برای تصمیم ارسال می‌شود.'
+    if (text.includes('only a draft change request can be deleted')) return 'فقط درخواستِ پیش‌نویس حذف می‌شود؛ بقیه را لغو کنید.'
+    if (text.includes('only an approved change request can be marked as implemented')) return 'فقط درخواستِ تأییدشده اجراشده ثبت می‌شود.'
+    if (text.includes('this change request cannot be cancelled now')) return 'این درخواست در وضعیت فعلی لغو نمی‌شود.'
+    if (text.includes('the change request must be an approved one of this project')) return 'فقط درخواست تغییرِ تأییدشده‌ی همین پروژه را می‌شود انتخاب کرد.'
+    if (text.includes('change request not found')) return 'درخواست تغییر پیدا نشد.'
+    if (text.includes('the contract is not one of this project')) return 'این قرارداد مال همین پروژه نیست.'
+    // Suppliers, evaluations, links, milestones and obligations.
+    if (text.includes('a supplier with this name already exists')) return 'تأمین‌کننده‌ای با این نام هست.'
+    if (text.includes('a supplier with contracts cannot be deleted')) return 'تأمین‌کننده‌ای که قرارداد دارد حذف نمی‌شود.'
+    if (text.includes('the supplier is inactive')) return 'این تأمین‌کننده غیرفعال است.'
+    if (text.includes('supplier not found')) return 'تأمین‌کننده پیدا نشد.'
+    if (text.includes('every score is from')) return 'هر امتیاز باید از ۱ تا ۵ باشد.'
+    if (text.includes('the end of the period cannot be before its start')) return 'انتهای دوره نمی‌تواند قبل از ابتدای آن باشد.'
+    if (text.includes("the contract is not one of this supplier")) return 'این قرارداد مال همین تأمین‌کننده نیست.'
+    if (text.includes('this is already linked here')) return 'این مورد قبلاً همین‌جا پیوند خورده است.'
+    if (text.includes('milestone not found')) return 'نقطه‌ی عطف پیدا نشد.'
+    if (text.includes('obligation not found')) return 'تعهد پیدا نشد.'
+    if (text.includes('contract not found')) return 'قرارداد پیدا نشد.'
+    if (text.includes('invoice not found')) return 'صورت‌وضعیت پیدا نشد.'
+    if (text.includes('addendum must change the amount')) return 'الحاقیه باید مبلغ یا مدت (یا هر دو) را تغییر دهد.'
+    if (text.includes('end date cannot be before the start date')) return 'تاریخ پایان نمی‌تواند قبل از تاریخ شروع باشد.'
+    if (text.includes('extension must be within')) return 'تمدید حداکثر ۳۶٬۵۰۰ روز است.'
+    if (text.includes('the other party is required')) return 'طرف قرارداد را وارد کنید.'
+    if (text.includes('paid amount must be between 0 and the invoice amount')) return 'مبلغ پرداخت‌شده باید بین صفر و مبلغ صورت‌وضعیت باشد.'
+    if (text.includes('payment date cannot be before the invoice date')) return 'تاریخ پرداخت نمی‌تواند قبل از تاریخ صورت‌وضعیت باشد.'
+    if (text.includes('payment date is required')) return 'تاریخ پرداخت را وارد کنید.'
+    if (text.includes('contract number is required')) return 'شماره‌ی قرارداد را وارد کنید (حداکثر ۱۰۰ نویسه).'
+    if (text.includes('invoice number is required')) return 'شماره‌ی صورت‌وضعیت را وارد کنید (حداکثر ۱۰۰ نویسه).'
+    if (text.includes('the amount must be')) return 'مبلغ باید بالاتر از صفر و در محدوده‌ی مجاز (ریال) باشد.'
+    if (text.includes('the amount change must be within')) return 'تغییر مبلغ از حد مجاز بیشتر است.'
+    // Risks, stakeholders and the project team.
+    if (text.includes('risk that is pending approval cannot be deleted')) return 'ریسکی که در انتظار تأیید است حذف نمی‌شود.'
+    if (text.includes('stakeholder that is pending approval cannot be deleted')) return 'ذینفعی که در انتظار تأیید است حذف نمی‌شود.'
+    if (text.includes('earlier report for this risk is still waiting')) return 'گزارش قبلی این ریسک هنوز منتظر بررسی است.'
+    if (text.includes('only an approved risk has a response')) return 'فقط برای ریسکِ تأییدشده می‌توان گزارش پاسخ ثبت کرد.'
+    if (text.includes('response already has that status')) return 'پاسخ ریسک هم‌اکنون همین وضعیت را دارد.'
+    if (text.includes('settings are not available in this deployment')) return 'این بخش در این نسخه از سامانه فعال نیست.'
+    if (text.includes('risk not found')) return 'ریسک پیدا نشد.'
+    if (text.includes('stakeholder not found')) return 'ذینفع پیدا نشد.'
+    if (text.includes('already a member of the project')) return 'این کاربر قبلاً عضو پروژه است.'
+    if (text.includes('project member not found')) return 'عضو پروژه پیدا نشد.'
+    if (text.includes('governance role not found')) return 'نقش حاکمیتی پیدا نشد.'
+    if (text.includes('description is required')) return 'شرح را وارد کنید.'
+    if (text.includes('name is required')) return 'نام را وارد کنید.'
+    if (text.includes('title is required')) return 'عنوان را وارد کنید.'
+    if (text.includes('colour must be green, yellow or red')) return 'رنگ هر خانه باید سبز، زرد یا قرمز باشد.'
+    if (text.includes('colour for each of the nine cells')) return 'برای هر نُه خانه‌ی ماتریس یک رنگ تعیین کنید.'
+    if (text.includes('definition for each of the six bands')) return 'برای هر شش سطح (احتمال و اثر) یک تعریف بنویسید.'
     if (text.includes('not a participant')) return 'شما عضو این گفت‌وگو نیستید.'
     if (text.includes('access denied')) return 'به این گفت‌وگو دسترسی ندارید.'
     if (text.includes('invalid username') || text.includes('invalid email or password')) return 'نام کاربری یا رمز عبور نادرست است.'
@@ -307,19 +381,154 @@ export const projectManagementApi = {
   risks: (projectId) =>
     api.get(`/api/project-management/risks?${projectQuery({ projectId })}`),
   createRisk: (payload) => api.post('/api/project-management/risks', payload),
+  updateRisk: (id, payload) => api.put(`/api/project-management/risks/${id}`, payload),
+  deleteRisk: (id) => api.delete(`/api/project-management/risks/${id}`),
+  submitRisk: (id) => api.post(`/api/project-management/risks/${id}/submit-for-approval`),
+  // Where answering the risk stands (Planning / InProgress / OnHold / Completed = 0..3).
+  setRiskResponseStatus: (id, status) => api.put(`/api/project-management/risks/${id}/response-status`, { status }),
+  // The project's own wording of the six bands and colours of the 3x3 matrix (empty list = back to default).
+  riskSettings: (projectId) => api.get(`/api/project-management/risks/settings?${projectQuery({ projectId })}`),
+  saveRiskSettings: (payload) => api.put('/api/project-management/risks/settings', payload),
+  // Reports on the answer to an approved risk (RiskResponse.Submit); a report waits for verification.
+  riskResponseSubmissions: (riskId) => api.get(`/api/project-management/risks/response-submissions?${projectQuery({ riskId })}`),
+  submitRiskResponse: (payload) => api.post('/api/project-management/risks/response-submissions', payload),
   stakeholders: (projectId) =>
     api.get(`/api/project-management/stakeholders?${projectQuery({ projectId })}`),
   createStakeholder: (payload) => api.post('/api/project-management/stakeholders', payload),
+  updateStakeholder: (id, payload) => api.put(`/api/project-management/stakeholders/${id}`, payload),
+  deleteStakeholder: (id) => api.delete(`/api/project-management/stakeholders/${id}`),
+  submitStakeholder: (id) => api.post(`/api/project-management/stakeholders/${id}/submit-for-approval`),
+  stakeholderSettings: (projectId) => api.get(`/api/project-management/stakeholders/settings?${projectQuery({ projectId })}`),
+  saveStakeholderSettings: (payload) => api.put('/api/project-management/stakeholders/settings', payload),
   teamMembers: (projectId) =>
     api.get(`/api/project-management/team/members?${projectQuery({ projectId })}`),
   addTeamMember: (payload) => api.post('/api/project-management/team/members', payload),
+  updateTeamMember: (id, payload) => api.put(`/api/project-management/team/members/${id}`, payload),
+  removeTeamMember: (id) => api.delete(`/api/project-management/team/members/${id}`),
+  // The whole team in one go: people left out are removed, new ones join without a role title.
+  setTeam: (payload) => api.put('/api/project-management/team/members/set', payload),
+  // The users the caller may put on this project's team.
+  availableTeamUsers: (projectId) => api.get(`/api/project-management/team/members/available-users?${projectQuery({ projectId })}`),
   governanceRoles: (projectId) =>
     api.get(`/api/project-management/team/governance-roles?${projectQuery({ projectId })}`),
   createGovernanceRole: (payload) => api.post('/api/project-management/team/governance-roles', payload),
+  updateGovernanceRole: (id, payload) => api.put(`/api/project-management/team/governance-roles/${id}`, payload),
+  deleteGovernanceRole: (id) => api.delete(`/api/project-management/team/governance-roles/${id}`),
   myDashboard: (tenantId) =>
     api.get(`/api/reporting/me?${projectQuery({ tenantId })}`),
   projectDashboard: (projectId) =>
     api.get(`/api/reporting/projects/${projectId}`),
+}
+
+/**
+ * Contracts, their addenda and invoices (project_contracts). Money is whole rials. Nothing counts as money until it is
+ * approved, and the Core refuses edits to anything pending or approved - the screens mirror those rules but the Core decides.
+ */
+const contractsBase = '/api/project-management/contracts'
+export const contractsApi = {
+  // Every contract of the projects, each with its addenda and invoices, in one call: [{ contract, addenda, invoices }].
+  forProjects: (projectIds) => api.post(`${contractsBase}/for-projects`, { projectIds }),
+  summary: (projectId) => api.get(`${contractsBase}/summary?${projectQuery({ projectId })}`),
+  create: (payload) => api.post(contractsBase, payload),
+  update: (id, payload) => api.put(`${contractsBase}/${id}`, payload),
+  // Draft = 0, Active = 1, Completed = 2, Terminated = 3; only an approved contract can leave Draft.
+  setStatus: (id, status) => api.put(`${contractsBase}/${id}/status`, { status }),
+  remove: (id) => api.delete(`${contractsBase}/${id}`),
+  submit: (id) => api.post(`${contractsBase}/${id}/submit-for-approval`),
+  createAddendum: (contractId, payload) => api.post(`${contractsBase}/${contractId}/addenda`, payload),
+  updateAddendum: (contractId, id, payload) => api.put(`${contractsBase}/${contractId}/addenda/${id}`, payload),
+  deleteAddendum: (contractId, id) => api.delete(`${contractsBase}/${contractId}/addenda/${id}`),
+  submitAddendum: (contractId, id) => api.post(`${contractsBase}/${contractId}/addenda/${id}/submit-for-approval`),
+  createInvoice: (contractId, payload) => api.post(`${contractsBase}/${contractId}/invoices`, payload),
+  updateInvoice: (contractId, id, payload) => api.put(`${contractsBase}/${contractId}/invoices/${id}`, payload),
+  deleteInvoice: (contractId, id) => api.delete(`${contractsBase}/${contractId}/invoices/${id}`),
+  submitInvoice: (contractId, id) => api.post(`${contractsBase}/${contractId}/invoices/${id}/submit-for-approval`),
+  // paidAmount is the invoice's TOTAL paid so far (not an increment); paymentDate is the date of the latest payment.
+  recordPayment: (contractId, id, { paidAmount, paymentDate }) =>
+    api.put(`${contractsBase}/${contractId}/invoices/${id}/payment`, { paidAmount, paymentDate }),
+  // Milestones (NotStarted = 0, InProgress = 1, Completed = 2) and obligations (party Supplier = 0, Employer = 1; status Open = 0,
+  // Fulfilled = 1, Breached = 2) of a contract. Reading needs Contracts.View, changing them Contracts.Edit.
+  milestones: (contractId) => api.get(`${contractsBase}/${contractId}/milestones`),
+  createMilestone: (contractId, payload) => api.post(`${contractsBase}/${contractId}/milestones`, payload),
+  updateMilestone: (contractId, id, payload) => api.put(`${contractsBase}/${contractId}/milestones/${id}`, payload),
+  deleteMilestone: (contractId, id) => api.delete(`${contractsBase}/${contractId}/milestones/${id}`),
+  obligations: (contractId) => api.get(`${contractsBase}/${contractId}/obligations`),
+  createObligation: (contractId, payload) => api.post(`${contractsBase}/${contractId}/obligations`, payload),
+  updateObligation: (contractId, id, payload) => api.put(`${contractsBase}/${contractId}/obligations/${id}`, payload),
+  deleteObligation: (contractId, id) => api.delete(`${contractsBase}/${contractId}/obligations/${id}`),
+  // Links from the contract, one of its milestones or one of its obligations to a project document (kind 0) or an action (kind 1).
+  // subjectType: Contract = 0, Milestone = 1, Obligation = 2 (subjectId is the milestone's / obligation's id; omit it for the contract).
+  // The title is the target's name, kept as it was when linked.
+  links: (contractId) => api.get(`${contractsBase}/${contractId}/links`),
+  createLink: (contractId, payload) => api.post(`${contractsBase}/${contractId}/links`, payload),
+  deleteLink: (contractId, id) => api.delete(`${contractsBase}/${contractId}/links/${id}`),
+}
+
+/**
+ * Change requests of a project (kept with the contracts). Type: Scope = 0, Schedule = 1, Cost = 2, Quality = 3, Other = 4;
+ * priority: Low = 0 ... Urgent = 3; status: Draft = 0, PendingApproval = 1, Approved = 2, Rejected = 3, Implemented = 4, Cancelled = 5.
+ * scheduleImpactDays and costImpact (rials) are negative for a saving; scopeImpact is required before submitting.
+ */
+const changeRequestsBase = '/api/project-management/change-requests'
+export const changeRequestsApi = {
+  list: (projectId) => api.get(`${changeRequestsBase}?${projectQuery({ projectId })}`),
+  // Counts, approved impact against the project's budget and duration, pending decisions, and addenda made without an approved change.
+  dashboard: (projectId) => api.get(`${changeRequestsBase}/dashboard?${projectQuery({ projectId })}`),
+  create: (payload) => api.post(changeRequestsBase, payload),
+  update: (id, payload) => api.put(`${changeRequestsBase}/${id}`, payload),
+  remove: (id) => api.delete(`${changeRequestsBase}/${id}`),
+  submit: (id) => api.post(`${changeRequestsBase}/${id}/submit`),
+  implement: (id, { date, note }) => api.post(`${changeRequestsBase}/${id}/implement`, { date, note }),
+  cancel: (id, note) => api.post(`${changeRequestsBase}/${id}/cancel`, { note }),
+}
+
+/**
+ * The approvals Workflow started for some subjects of one kind, with their steps and decisions (needs Workflow.View). An item with no
+ * approval chain configured has none: it was approved as soon as it was submitted. Instance status: InProgress = 0, Approved = 1, Rejected = 2.
+ */
+export const workflowApi = {
+  forSubjects: (subjectType, subjectIds) => api.post('/api/workflow/approval-center/for-subjects', { subjectType, subjectIds }),
+}
+
+/** Actions of a project (the Actions module), to link them to a contract as evidence. */
+export const actionsApi = {
+  list: (projectId) => api.get(`/api/actions?${projectQuery({ projectId })}`),
+}
+
+/**
+ * Suppliers (contractors, suppliers, consultants), kept once per tenant; a contract points at one. Category: Contractor = 0,
+ * Supplier = 1, Consultant = 2, Other = 3; status: Active = 0, Inactive = 1. The list carries each supplier's figures
+ * (approved contracts only); get adds its contracts. A supplier with contracts cannot be deleted.
+ */
+const suppliersBase = '/api/project-management/suppliers'
+export const suppliersApi = {
+  list: () => api.get(suppliersBase),
+  // Every supplier across all projects with its figures, late items, scores and attention reasons (names such as 'LowScore').
+  dashboard: () => api.get(`${suppliersBase}/dashboard`),
+  get: (id) => api.get(`${suppliersBase}/${id}`),
+  create: (payload) => api.post(suppliersBase, payload),
+  update: (id, payload) => api.put(`${suppliersBase}/${id}`, payload),
+  remove: (id) => api.delete(`${suppliersBase}/${id}`),
+  // Periodic evaluations: four scores 1-5 (quality, timeliness, compliance, cooperation) for a period, optionally for one contract.
+  // metrics is what the records say about that period (milestones due / late, obligations due / missed), shown before scoring.
+  evaluations: (id) => api.get(`${suppliersBase}/${id}/evaluations`),
+  evaluationMetrics: (id, { from, to, contractId }) => api.get(`${suppliersBase}/${id}/evaluation-metrics?${projectQuery({ from, to, contractId })}`),
+  createEvaluation: (id, payload) => api.post(`${suppliersBase}/${id}/evaluations`, payload),
+  updateEvaluation: (id, evaluationId, payload) => api.put(`${suppliersBase}/${id}/evaluations/${evaluationId}`, payload),
+  deleteEvaluation: (id, evaluationId) => api.delete(`${suppliersBase}/${id}/evaluations/${evaluationId}`),
+}
+
+/** Cost against progress of one project (earned value) and the physical S-curve. */
+export const costReportApi = {
+  // Reporting.ViewAll sees any project; others see the projects they are a team member of, and need Contracts.View.
+  // Budget = Project.Cost, actual cost = approved invoices; indexes are null when they cannot be worked out.
+  performance: (projectId, asOf) =>
+    api.get(`/api/reporting/projects/${projectId}/performance${asOf ? `?asOf=${asOf}` : ''}`),
+  // PV / EV / AC over time (money), same access as performance.
+  costCurve: (projectId, stepDays) =>
+    api.get(`/api/reporting/projects/${projectId}/cost-curve${stepDays ? `?stepDays=${stepDays}` : ''}`),
+  sCurve: (projectId, stepDays) =>
+    api.get(`/api/project-management/waterfall/s-curve?${projectQuery({ projectId, stepDays })}`),
 }
 
 // Core returns Result<T> for these; unwrap to the payload.

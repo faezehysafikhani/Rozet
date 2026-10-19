@@ -1,13 +1,16 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import {
   Bell,
   BookOpen,
   Boxes,
   Building2,
+  CalendarCheck,
   CalendarDays,
   CalendarRange,
   ChartNoAxesCombined,
   CheckCircle2,
+  ClipboardCheck,
   CheckCheck,
   CheckSquare2,
   ChevronLeft,
@@ -62,9 +65,17 @@ import {
   SlidersHorizontal,
   Smile,
   LockKeyhole,
+  ChevronDown,
+  CircleAlert,
+  Download,
+  Grid3x3,
+  LoaderCircle,
+  MessageSquareText,
+  RotateCcw,
+  Trash2,
 } from 'lucide-react'
 import { AuthProvider, Can, useAuth } from './services/AuthContext'
-import { PersianMessages, groupsApi, identityApi, labelForModule, labelForPermission, orgChartApi, permissionsApi, platformApi, projectManagementApi, rolesApi, unwrap, usersApi } from './services/api'
+import { PersianMessages, actionsApi, changeRequestsApi, contractsApi, costReportApi, groupsApi, identityApi, labelForModule, labelForPermission, orgChartApi, permissionsApi, platformApi, projectManagementApi, rolesApi, suppliersApi, unwrap, usersApi, workflowApi } from './services/api'
 import { DEFAULT_TENANT_ID } from './services/config'
 import { useChat } from './hooks/useChat'
 import { useNotifications } from './hooks/useNotifications'
@@ -544,6 +555,12 @@ function projectDisplayName(project) {
 
 
 
+const approvalLabels = { 0: 'ثبت اولیه', 1: 'در انتظار تأیید', 2: 'تأیید شده', 3: 'رد شده', NotSubmitted: 'ثبت اولیه', PendingApproval: 'در انتظار تأیید', Approved: 'تأیید شده', Rejected: 'رد شده' }
+
+function todayInputValue() {
+  return new Date().toISOString().slice(0, 10)
+}
+
 function emptyToNull(value) {
   return value === undefined || value === null || value === '' ? null : value
 }
@@ -686,11 +703,11 @@ function FormField({ label, children, wide = false }) {
   return <label className="ue-field" style={wide ? { gridColumn: '1 / -1' } : undefined}><span>{label}</span>{children}</label>
 }
 
-function UserSelect({ data, value, onChange, required = false }) {
+function UserSelect({ data, value, onChange, required = false, users }) {
   return (
     <select value={value || ''} onChange={(event) => onChange(event.target.value)} required={required}>
       <option value="">انتخاب نشده</option>
-      {data.users.map((item) => <option key={item.id} value={item.id}>{item.displayName || item.email}</option>)}
+      {(users || data.users).map((item) => <option key={item.id} value={item.id}>{item.displayName || item.email}</option>)}
     </select>
   )
 }
@@ -704,6 +721,21 @@ const creationTitles = {
   governance: 'تعریف نقش حاکمیتی',
 }
 
+const editTitles = {
+  risk: 'ویرایش ریسک',
+  stakeholder: 'ویرایش ذینفع',
+  member: 'ویرایش نقش عضو پروژه',
+  governance: 'ویرایش نقش حاکمیتی',
+}
+
+// The form of an existing record (risks, stakeholders, team members and governance roles can be edited).
+const editInitialState = (kind, item) => ({
+  risk: { description: item.description || '', probabilityScore: String(item.probabilityScore), severityScore: String(item.severityScore), impactScore: String(item.impactScore), responsePlan: item.responsePlan || '', riskOwnerUserId: item.riskOwnerUserId || '' },
+  stakeholder: { name: item.name || '', isInternal: String(Boolean(item.isInternal)), expectations: item.expectations || '', notes: item.notes || '', power: String(item.power), interest: String(item.interest), engagementStrategy: item.engagementStrategy || '', requirements: item.requirements || '' },
+  member: { userId: item.userId, roleTitle: item.roleTitle || '' },
+  governance: { title: item.title || '', userId: item.userId || '', personnelNumber: item.personnelNumber || '', phone: item.phone || '', email: item.email || '', serviceLocation: item.serviceLocation || '' },
+}[kind])
+
 const creationInitialState = (kind, data) => ({
   task: { title: '', description: '', responsibleUserId: '', approverUserId: '', dueDate: '', priority: '1', sprintNumber: '' },
   activity: { name: '', description: '', responsibleUserId: '', approverUserId: '', startDate: '', endDate: '', durationDays: '', manHours: '', weight: '1' },
@@ -713,12 +745,25 @@ const creationInitialState = (kind, data) => ({
   governance: { title: '', userId: '', personnelNumber: '', phone: '', email: '', serviceLocation: '' },
 }[kind] || {})
 
-function CreateProjectItemModal({ kind, data, onClose }) {
-  const [form, setForm] = useState(() => creationInitialState(kind, data))
+function CreateProjectItemModal({ kind, data, item = null, onClose }) {
+  const [form, setForm] = useState(() => (item ? editInitialState(kind, item) : creationInitialState(kind, data)))
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [teamCandidates, setTeamCandidates] = useState(null)
   const selectedProjectId = data.selectedProjectId
   const set = (key, value) => setForm((current) => ({ ...current, [key]: value }))
+
+  // A new team member is picked from the users the Core allows on this project's team (not everyone already on it).
+  useEffect(() => {
+    if (kind !== 'member' || item) return undefined
+    let cancelled = false
+    projectManagementApi.availableTeamUsers(selectedProjectId).then((result) => {
+      if (cancelled) return
+      const onTeam = new Set(data.teamMembers.map((member) => member.userId))
+      setTeamCandidates((result.isSuccess ? arrayPayload(result) : data.users).filter((person) => !onTeam.has(person.id)))
+    })
+    return () => { cancelled = true }
+  }, [kind, item, selectedProjectId])
 
   const submit = async (event) => {
     event.preventDefault()
@@ -754,40 +799,44 @@ function CreateProjectItemModal({ kind, data, onClose }) {
         manHours: numberOrNull(form.manHours),
         weight: Number(form.weight || 1),
       }),
-      risk: () => projectManagementApi.createRisk({
-        ...base,
-        description: form.description,
-        probabilityScore: Number(form.probabilityScore),
-        severityScore: Number(form.severityScore),
-        impactScore: Number(form.impactScore),
-        responsePlan: emptyToNull(form.responsePlan),
-        riskOwnerUserId: emptyToNull(form.riskOwnerUserId),
-      }),
-      stakeholder: () => projectManagementApi.createStakeholder({
-        ...base,
-        name: form.name,
-        isInternal: form.isInternal === 'true',
-        expectations: emptyToNull(form.expectations),
-        notes: emptyToNull(form.notes),
-        power: Number(form.power),
-        interest: Number(form.interest),
-        engagementStrategy: emptyToNull(form.engagementStrategy),
-        requirements: emptyToNull(form.requirements),
-      }),
-      member: () => projectManagementApi.addTeamMember({
-        ...base,
-        userId: form.userId,
-        roleTitle: emptyToNull(form.roleTitle),
-      }),
-      governance: () => projectManagementApi.createGovernanceRole({
-        ...base,
-        title: form.title,
-        userId: emptyToNull(form.userId),
-        personnelNumber: emptyToNull(form.personnelNumber),
-        phone: emptyToNull(form.phone),
-        email: emptyToNull(form.email),
-        serviceLocation: emptyToNull(form.serviceLocation),
-      }),
+      risk: () => {
+        const fields = {
+          description: form.description.trim(),
+          probabilityScore: Number(form.probabilityScore),
+          severityScore: Number(form.severityScore),
+          impactScore: Number(form.impactScore),
+          responsePlan: emptyToNull(form.responsePlan.trim()),
+          riskOwnerUserId: emptyToNull(form.riskOwnerUserId),
+        }
+        return item ? projectManagementApi.updateRisk(item.id, fields) : projectManagementApi.createRisk({ ...base, ...fields })
+      },
+      stakeholder: () => {
+        const fields = {
+          name: form.name.trim(),
+          isInternal: form.isInternal === 'true',
+          expectations: emptyToNull(form.expectations.trim()),
+          notes: emptyToNull(form.notes.trim()),
+          power: Number(form.power),
+          interest: Number(form.interest),
+          engagementStrategy: emptyToNull(form.engagementStrategy.trim()),
+          requirements: emptyToNull(form.requirements.trim()),
+        }
+        return item ? projectManagementApi.updateStakeholder(item.id, fields) : projectManagementApi.createStakeholder({ ...base, ...fields })
+      },
+      member: () => (item
+        ? projectManagementApi.updateTeamMember(item.id, { roleTitle: emptyToNull(form.roleTitle.trim()) })
+        : projectManagementApi.addTeamMember({ ...base, userId: form.userId, roleTitle: emptyToNull(form.roleTitle.trim()) })),
+      governance: () => {
+        const fields = {
+          title: form.title.trim(),
+          userId: emptyToNull(form.userId),
+          personnelNumber: emptyToNull(form.personnelNumber.trim()),
+          phone: emptyToNull(form.phone.trim()),
+          email: emptyToNull(form.email.trim()),
+          serviceLocation: emptyToNull(form.serviceLocation.trim()),
+        }
+        return item ? projectManagementApi.updateGovernanceRole(item.id, fields) : projectManagementApi.createGovernanceRole({ ...base, ...fields })
+      },
     }[kind])()
     setBusy(false)
     if (!result.isSuccess) {
@@ -799,11 +848,10 @@ function CreateProjectItemModal({ kind, data, onClose }) {
   }
 
   return (
-    <div className="ue-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-      <div className="ue-backdrop">
+    <ModalPortal><div className="ue-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
       <form className="ue-modal pm-modal" onSubmit={submit}>
         <header className="ue-head">
-          <div className="ue-head-title"><strong>{creationTitles[kind]}</strong><small>{projectDisplayName(data.selectedProject)}</small></div>
+          <div className="ue-head-title"><strong>{item ? editTitles[kind] : creationTitles[kind]}</strong><small>{kind === 'project' ? 'ثبت در Projects API' : projectDisplayName(data.selectedProject)}</small></div>
           <button className="ue-close" type="button" onClick={onClose}><X size={17} /></button>
         </header>
         <div className="ue-body"><div className="ue-grid">
@@ -828,9 +876,9 @@ function CreateProjectItemModal({ kind, data, onClose }) {
             <FormField label="توضیحات" wide><textarea rows="2" value={form.description} onChange={(event) => set('description', event.target.value)} /></FormField>
           </>}
           {kind === 'risk' && <>
-            <FormField label="احتمال"><input type="number" min="1" max="5" value={form.probabilityScore} onChange={(event) => set('probabilityScore', event.target.value)} required /></FormField>
-            <FormField label="شدت"><input type="number" min="1" max="5" value={form.severityScore} onChange={(event) => set('severityScore', event.target.value)} required /></FormField>
-            <FormField label="اثر"><input type="number" min="1" max="5" value={form.impactScore} onChange={(event) => set('impactScore', event.target.value)} required /></FormField>
+            <FormField label="احتمال وقوع"><select value={form.probabilityScore} onChange={(event) => set('probabilityScore', event.target.value)}>{riskScoreOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></FormField>
+            <FormField label="اثر"><select value={form.impactScore} onChange={(event) => set('impactScore', event.target.value)}>{riskScoreOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></FormField>
+            <FormField label="شدت"><select value={form.severityScore} onChange={(event) => set('severityScore', event.target.value)}>{riskScoreOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></FormField>
             <FormField label="مالک ریسک"><UserSelect data={data} value={form.riskOwnerUserId} onChange={(value) => set('riskOwnerUserId', value)} /></FormField>
             <FormField label="شرح ریسک" wide><textarea rows="2" value={form.description} onChange={(event) => set('description', event.target.value)} required /></FormField>
             <FormField label="برنامه پاسخ" wide><textarea rows="2" value={form.responsePlan} onChange={(event) => set('responsePlan', event.target.value)} /></FormField>
@@ -841,10 +889,12 @@ function CreateProjectItemModal({ kind, data, onClose }) {
             <FormField label="قدرت"><select value={form.power} onChange={(event) => set('power', event.target.value)}><option value="0">کم</option><option value="1">متوسط</option><option value="2">زیاد</option></select></FormField>
             <FormField label="علاقه"><select value={form.interest} onChange={(event) => set('interest', event.target.value)}><option value="0">کم</option><option value="1">متوسط</option><option value="2">زیاد</option></select></FormField>
             <FormField label="انتظارات" wide><textarea rows="2" value={form.expectations} onChange={(event) => set('expectations', event.target.value)} /></FormField>
-            <FormField label="استراتژی تعامل" wide><textarea rows="2" value={form.engagementStrategy} onChange={(event) => set('engagementStrategy', event.target.value)} /></FormField>
+            <FormField label="نیازمندی‌ها" wide><textarea rows="2" value={form.requirements} onChange={(event) => set('requirements', event.target.value)} /></FormField>
+            <FormField label="راهبرد تعامل (اختیاری)" wide><textarea rows="2" value={form.engagementStrategy} onChange={(event) => set('engagementStrategy', event.target.value)} placeholder="خالی بماند تا راهبرد پیش‌فرض ربع او نمایش داده شود" /></FormField>
+            <FormField label="یادداشت" wide><textarea rows="2" value={form.notes} onChange={(event) => set('notes', event.target.value)} /></FormField>
           </>}
           {kind === 'member' && <>
-            <FormField label="کاربر"><UserSelect data={data} value={form.userId} onChange={(value) => set('userId', value)} required /></FormField>
+            <FormField label="کاربر">{item ? <input value={data.userName(item.userId)} disabled readOnly /> : <UserSelect data={data} users={teamCandidates || []} value={form.userId} onChange={(value) => set('userId', value)} required />}</FormField>
             <FormField label="نقش در پروژه"><input value={form.roleTitle} onChange={(event) => set('roleTitle', event.target.value)} /></FormField>
           </>}
           {kind === 'governance' && <>
@@ -858,11 +908,10 @@ function CreateProjectItemModal({ kind, data, onClose }) {
         </div></div>
         <footer className="ue-foot">
           {error && <span className="ue-error">{error}</span>}
-          <div className="ue-foot-actions"><button className="ue-cancel" type="button" onClick={onClose}>انصراف</button><button className="ue-save" type="submit" disabled={busy}>{busy ? 'در حال ذخیره...' : 'ذخیره'}</button></div>
+          <div className="ue-foot-actions"><button className="ue-cancel" type="button" onClick={onClose}>انصراف</button><button className="ue-save" type="submit" disabled={busy}>{busy ? 'در حال ذخیره...' : item ? 'ذخیره تغییرات' : 'ذخیره'}</button></div>
         </footer>
       </form>
-</div>
-    </div>
+    </div></ModalPortal>
   )
 }
 
@@ -892,10 +941,10 @@ function normalizeTask(task, userName) {
   }
 }
 
-function TaskPageHeader({ title, description, action = 'ایجاد وظیفه جدید', actionNode, children }) {
+function TaskPageHeader({ title, description, action = 'ایجاد وظیفه جدید', actionNode, children, section = 'مدیریت وظایف' }) {
   return (
     <div className="task-page-header">
-      <div><span>مدیریت وظایف / {title}</span><h1>{title}</h1><p>{description}</p></div>
+      <div><span>{section} / {title}</span><h1>{title}</h1><p>{description}</p></div>
       <div className="task-head-actions">{children}{actionNode || (action ? <button type="button"><Plus size={18} />{action}</button> : null)}</div>
     </div>
   )
@@ -1000,24 +1049,2901 @@ function ProjectPlanning({ data }) {
   )
 }
 
+const toLatinDigits = (value) => String(value || '')
+  .replace(/[۰-۹]/g, (d) => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(d)))
+  .replace(/[٠-٩]/g, (d) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)))
+
+function toPersianDigits(value) {
+  return String(value ?? '').replace(/\d/g, (digit) => '۰۱۲۳۴۵۶۷۸۹'[digit])
+}
+
+/** Dialogs are drawn straight into <body>: inside the page content they would sit under the top bar. */
+function ModalPortal({ children }) {
+  return createPortal(children, document.body)
+}
+
+function CtlField({ label, children, hint, required, wide }) {
+  return (
+    <label className={`ue-field${wide ? ' ue-field--wide' : ''}`}>
+      <span>{label}{required && <b className="ue-required"> *</b>}</span>
+      {children}
+      {hint && <small>{hint}</small>}
+    </label>
+  )
+}
+
+function ControlDialog({ title, icon: Icon, subtitle, size, onClose, footer, children }) {
+  return (
+    <ModalPortal><div className="ue-backdrop" role="dialog" aria-modal="true" aria-label={title} onMouseDown={(e) => { if (e.target === e.currentTarget) onClose() }}>
+      <div className={`ue-modal${size === 'sm' ? ' ue-modal--sm' : ''}`}>
+        <header className="ue-head">
+          <span className="ue-head-icon"><Icon size={19} /></span>
+          <div className="ue-head-title">
+            <strong>{title}</strong>
+            {subtitle && <small>{subtitle}</small>}
+          </div>
+          <button type="button" className="ue-close" onClick={onClose} aria-label="بستن"><X size={19} /></button>
+        </header>
+        <div className="ue-body">{children}</div>
+        <footer className="ue-foot">{footer}</footer>
+      </div>
+    </div></ModalPortal>
+  )
+}
+
+/* ------------------------------------------------------------------ *
+ * «کنترل و اجرا» - risks, stakeholders and project resources, with     *
+ * everything the Core offers for them (create / edit / delete, the     *
+ * approval round, response reports, matrices and project settings).    *
+ * ------------------------------------------------------------------ */
+
+const approvalClass = { 0: 'todo', 1: 'review', 2: 'done', 3: 'rejected' }
+
+function ApprovalBadge({ status }) {
+  return <span className={`status-pill ${approvalClass[status] ?? 'todo'}`}>{enumLabel(status, approvalLabels)}</span>
+}
+
+function PageNotice({ notice, onClose }) {
+  if (!notice) return null
+  return (
+    <div className={`users-notice ctl-notice ${notice.type}`} role={notice.type === 'error' ? 'alert' : 'status'}>
+      {notice.type === 'error' ? <CircleAlert size={16} /> : <CheckCircle2 size={16} />}
+      <span>{notice.text}</span>
+      <button type="button" onClick={onClose} aria-label="بستن"><X size={15} /></button>
+    </div>
+  )
+}
+
+function ControlKpis({ items }) {
+  return (
+    <div className="task-kpis ctl-kpis">
+      {items.map(({ icon: Icon, tone, label, value, note }) => (
+        <article key={label}><span className={`task-kpi-icon ${tone}`}><Icon size={21} /></span><div><small>{label}</small><strong>{value}</strong><p>{note}</p></div></article>
+      ))}
+    </div>
+  )
+}
+
+/** Runs a Core call, then tells the page how it went and reloads the project's data. */
+async function runAction(call, successText, setNotice, refresh) {
+  const result = await call()
+  if (!result.isSuccess) { setNotice({ type: 'error', text: PersianMessages.error(result.error) }); return false }
+  setNotice({ type: 'success', text: successText })
+  refresh()
+  return true
+}
+
+/* ---- Risks ---- */
+
+const riskResponseLabels = { 0: 'در حال برنامه‌ریزی', 1: 'در حال اجرا', 2: 'متوقف', 3: 'تکمیل شده' }
+const riskLevelLabels = { green: 'کم', yellow: 'متوسط', red: 'بحرانی' }
+const riskBandLabels = { low: 'کم', medium: 'متوسط', high: 'زیاد' }
+const riskScoreOptions = [[1, '۱ - خیلی کم'], [2, '۲ - کم'], [3, '۳ - متوسط'], [4, '۴ - زیاد'], [5, '۵ - خیلی زیاد']]
+const riskBand = (score) => (score <= 2 ? 'low' : score === 3 ? 'medium' : 'high')
+// What the Core uses until a project words its own matrix: probability band, then impact band.
+const DEFAULT_MATRIX_COLORS = {
+  'low-low': 'green', 'low-medium': 'green', 'low-high': 'yellow',
+  'medium-low': 'green', 'medium-medium': 'yellow', 'medium-high': 'red',
+  'high-low': 'yellow', 'high-medium': 'red', 'high-high': 'red',
+}
+
 function RisksPage({ data }) {
-  return <><TaskPageHeader title="مدیریت ریسک" description="ریسک‌های پروژه از Risks API" actionNode={<CreateButton kind="risk" data={data} label="ثبت ریسک" />}><ProjectSelector data={data} /></TaskPageHeader><section className="task-panel task-table-panel"><DataState loading={data.loading || data.loadingDetails} error={data.error} empty={!data.risks.length}><div className="table-scroll"><table><thead><tr><th>ریسک</th><th>احتمال</th><th>شدت</th><th>اثر</th><th>RPN</th><th>مالک</th><th>برنامه پاسخ</th></tr></thead><tbody>{data.risks.map((risk) => <tr key={risk.id}><td><strong>{risk.description}</strong></td><td>{risk.probabilityScore}</td><td>{risk.severityScore}</td><td>{risk.impactScore}</td><td>{risk.rpn}</td><td>{data.userName(risk.riskOwnerUserId)}</td><td>{risk.responsePlan || '—'}</td></tr>)}</tbody></table></div></DataState></section></>
+  const { can } = useAuth()
+  const rights = { create: can('Risks.Create'), edit: can('Risks.Edit'), remove: can('Risks.Delete'), submit: can('Risks.Submit'), respond: can('RiskResponse.Submit') }
+  const [settings, setSettings] = useState(null)
+  const [settingsKey, setSettingsKey] = useState(0)
+  const [notice, setNotice] = useState(null)
+  const [editing, setEditing] = useState(null)
+  const [responseOf, setResponseOf] = useState(null)
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [search, setSearch] = useState('')
+  const [levelFilter, setLevelFilter] = useState('')
+  const [cell, setCell] = useState(null)
+
+  useEffect(() => {
+    let cancelled = false
+    setSettings(null)
+    setCell(null)
+    if (!data.selectedProjectId) return undefined
+    projectManagementApi.riskSettings(data.selectedProjectId).then((result) => { if (!cancelled) setSettings(unwrap(result)) })
+    return () => { cancelled = true }
+  }, [data.selectedProjectId, settingsKey])
+
+  const colorOf = (probability, impact) => {
+    const key = `${riskBand(probability)}-${riskBand(impact)}`
+    const found = settings?.matrixColors?.find((item) => `${item.probability}-${item.impact}` === key)
+    return found?.color || DEFAULT_MATRIX_COLORS[key]
+  }
+
+  const risks = data.risks
+  const total = risks.length
+  const critical = risks.filter((risk) => risk.level === 'red').length
+  const averageRpn = total ? Math.round(risks.reduce((sum, risk) => sum + Number(risk.rpn || 0), 0) / total) : 0
+  const inProgress = risks.filter((risk) => risk.responseStatus === 1).length
+  const countAt = (probability, impact) => risks.filter((risk) => risk.probabilityScore === probability && risk.impactScore === impact).length
+
+  const term = search.trim().toLowerCase()
+  const shown = risks.filter((risk) => (
+    (!levelFilter || risk.level === levelFilter)
+    && (!cell || (risk.probabilityScore === cell.probability && risk.impactScore === cell.impact))
+    && (!term || `${risk.description} ${risk.responsePlan || ''} ${data.userName(risk.riskOwnerUserId)}`.toLowerCase().includes(term))
+  ))
+
+  const changeResponse = (risk, status) => runAction(() => projectManagementApi.setRiskResponseStatus(risk.id, Number(status)), 'وضعیت پاسخ ریسک ذخیره شد.', setNotice, data.refresh)
+  const submitForApproval = (risk) => runAction(() => projectManagementApi.submitRisk(risk.id), 'ریسک برای تأیید ارسال شد.', setNotice, data.refresh)
+  const remove = (risk) => {
+    if (!window.confirm('این ریسک حذف شود؟')) return
+    runAction(() => projectManagementApi.deleteRisk(risk.id), 'ریسک حذف شد.', setNotice, data.refresh)
+  }
+
+  return (
+    <>
+      <TaskPageHeader
+        section="کنترل و اجرا"
+        title="مدیریت ریسک"
+        description="ثبت، ارزیابی و پیگیری ریسک‌های پروژه با ماتریس احتمال و اثر"
+        actionNode={(
+          <>
+            {rights.edit && <button type="button" className="ctl-ghost" onClick={() => setSettingsOpen(true)} disabled={!data.selectedProjectId || !settings}><SlidersHorizontal size={17} />تنظیمات ریسک</button>}
+            {rights.create && <CreateButton kind="risk" data={data} label="ثبت ریسک" disabled={!data.selectedProjectId} />}
+          </>
+        )}
+      >
+        <ProjectSelector data={data} />
+      </TaskPageHeader>
+      <PageNotice notice={notice} onClose={() => setNotice(null)} />
+      <DataState loading={data.loading} error={data.error} empty={!data.projects.length}>
+        <ControlKpis items={[
+          { icon: TriangleAlert, tone: 'navy', label: 'کل ریسک‌ها', value: toPersianDigits(total), note: 'در پروژه‌ی انتخاب‌شده' },
+          { icon: CircleAlert, tone: 'red', label: 'ریسک‌های بحرانی', value: toPersianDigits(critical), note: 'سطح قرمز ماتریس' },
+          { icon: ChartNoAxesCombined, tone: 'blue', label: 'میانگین RPN', value: toPersianDigits(averageRpn), note: 'احتمال × شدت × اثر' },
+          { icon: Clock3, tone: 'green', label: 'پاسخ در حال اجرا', value: toPersianDigits(inProgress), note: 'برنامه‌ی پاسخ فعال' },
+        ]} />
+
+        <section className="ctl-grid">
+          <div className="task-panel ctl-panel">
+            <div className="task-panel-title"><div><h3>ماتریس ریسک</h3><p>برای فیلتر کردن جدول، روی یک خانه بزنید.</p></div>{cell && <button type="button" className="ctl-link" onClick={() => setCell(null)}>حذف فیلتر</button>}</div>
+            <div className="ctl-matrix-body">
+            <div className="rm-wrap">
+              <span className="rm-axis rm-axis-y">احتمال</span>
+              <div className="rm-grid">
+                {[5, 4, 3, 2, 1].map((probability) => (
+                  <div className="rm-row" key={probability}>
+                    <b className="rm-label">{toPersianDigits(probability)}</b>
+                    {[1, 2, 3, 4, 5].map((impact) => {
+                      const count = countAt(probability, impact)
+                      const active = cell?.probability === probability && cell?.impact === impact
+                      return (
+                        <button
+                          type="button" key={impact}
+                          className={`rm-cell ${colorOf(probability, impact)}${active ? ' active' : ''}${count ? ' has' : ''}`}
+                          title={`احتمال ${toPersianDigits(probability)} × اثر ${toPersianDigits(impact)}: ${toPersianDigits(count)} ریسک`}
+                          onClick={() => setCell(active ? null : { probability, impact })}
+                        >{count ? toPersianDigits(count) : ''}</button>
+                      )
+                    })}
+                  </div>
+                ))}
+                <div className="rm-row rm-foot"><b className="rm-label" />{[1, 2, 3, 4, 5].map((impact) => <b className="rm-label" key={impact}>{toPersianDigits(impact)}</b>)}</div>
+              </div>
+              <span className="rm-axis rm-axis-x">اثر</span>
+            </div>
+            <div className="ctl-matrix-info">
+            <div className="rm-legend">
+              {['green', 'yellow', 'red'].map((color) => <span key={color}><i className={`rm-dot ${color}`} />{riskLevelLabels[color]}</span>)}
+              {settings?.isDefault === false && <em>تنظیم اختصاصی پروژه</em>}
+            </div>
+            {settings?.definitions?.length > 0 && (
+              <details className="rm-defs">
+                <summary>تعریف سطح‌ها</summary>
+                {['probability', 'impact'].map((axis) => (
+                  <div key={axis}>
+                    <h5>{axis === 'probability' ? 'احتمال' : 'اثر'}</h5>
+                    <ul>{settings.definitions.filter((item) => item.axis === axis).map((item) => <li key={item.level}><b>{riskBandLabels[item.level]}</b> <small>({item.range})</small> {item.description}</li>)}</ul>
+                  </div>
+                ))}
+              </details>
+            )}
+            </div>
+            </div>
+          </div>
+
+          <div className="task-panel task-table-panel ctl-panel ctl-table-panel">
+            <div className="task-panel-title">
+              <div><h3>فهرست ریسک‌ها</h3><p>{toPersianDigits(shown.length)} از {toPersianDigits(total)} ریسک</p></div>
+              <div className="ctl-filters">
+                <label className="ctl-search"><Search size={15} /><input type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="جستجو در ریسک‌ها..." /></label>
+                <select className="ctl-select" value={levelFilter} onChange={(e) => setLevelFilter(e.target.value)} aria-label="سطح ریسک">
+                  <option value="">همه‌ی سطح‌ها</option>
+                  <option value="red">بحرانی</option><option value="yellow">متوسط</option><option value="green">کم</option>
+                </select>
+              </div>
+            </div>
+            <DataState loading={data.loadingDetails} empty={!shown.length}>
+              <div className="table-scroll">
+                <table>
+                  <thead><tr><th>ریسک</th><th>احتمال</th><th>اثر</th><th>شدت</th><th>RPN</th><th>وضعیت پاسخ</th><th>تأیید</th><th>عملیات</th></tr></thead>
+                  <tbody>
+                    {shown.map((risk) => (
+                      <tr key={risk.id}>
+                        <td className="ctl-main">
+                          <strong>{risk.description}</strong>
+                          <small>مالک: {data.userName(risk.riskOwnerUserId)}{risk.responsePlan ? ` · پاسخ: ${risk.responsePlan}` : ''}</small>
+                        </td>
+                        <td>{toPersianDigits(risk.probabilityScore)}</td>
+                        <td>{toPersianDigits(risk.impactScore)}</td>
+                        <td>{toPersianDigits(risk.severityScore)}</td>
+                        <td><span className={`level-pill ${risk.level}`} title={riskLevelLabels[risk.level]}>{toPersianDigits(risk.rpn)}</span></td>
+                        <td>
+                          {rights.edit && risk.approvalStatus === 2
+                            ? <select className="ctl-select" value={risk.responseStatus} onChange={(e) => changeResponse(risk, e.target.value)} aria-label="وضعیت پاسخ">{Object.entries(riskResponseLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select>
+                            : <span title={risk.approvalStatus === 2 ? '' : 'وضعیت پاسخ پس از تأیید ریسک قابل تغییر است.'}>{enumLabel(risk.responseStatus, riskResponseLabels)}</span>}
+                        </td>
+                        <td><ApprovalBadge status={risk.approvalStatus} /></td>
+                        <td>
+                          <span className="row-actions">
+                            {rights.edit && <button type="button" title="ویرایش" aria-label="ویرایش" onClick={() => setEditing(risk)}><Pencil size={15} /></button>}
+                            <button type="button" title="گزارش‌های پاسخ به ریسک" aria-label="گزارش‌های پاسخ" onClick={() => setResponseOf(risk)}><MessageSquareText size={15} /></button>
+                            {rights.submit && (risk.approvalStatus === 0 || risk.approvalStatus === 3) && <button type="button" className="ok" title="ارسال برای تأیید" aria-label="ارسال برای تأیید" onClick={() => submitForApproval(risk)}><Send size={15} /></button>}
+                            {rights.remove && <button type="button" className="danger" title="حذف" aria-label="حذف" disabled={risk.approvalStatus === 1} onClick={() => remove(risk)}><Trash2 size={15} /></button>}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </DataState>
+          </div>
+        </section>
+      </DataState>
+
+      {editing && <CreateProjectItemModal kind="risk" item={editing} data={data} onClose={() => setEditing(null)} />}
+      {responseOf && (
+        <RiskResponseDialog
+          risk={responseOf} data={data} canSubmit={rights.respond && responseOf.approvalStatus === 2}
+          onClose={() => setResponseOf(null)}
+          onSaved={(result) => { setResponseOf(null); setNotice(result); data.refresh() }}
+        />
+      )}
+      {settingsOpen && settings && (
+        <RiskSettingsDialog
+          settings={settings} data={data}
+          onClose={() => setSettingsOpen(false)}
+          onSaved={(result) => { setSettingsOpen(false); setNotice(result); setSettingsKey((key) => key + 1) }}
+        />
+      )}
+    </>
+  )
+}
+
+/* Reports on how the answer to one risk is going. The Core takes them only for an approved risk,
+   and a report waits for verification before it changes the risk's response status. */
+function RiskResponseDialog({ risk, data, canSubmit, onClose, onSaved }) {
+  const [items, setItems] = useState(null)
+  const [status, setStatus] = useState(String(risk.responseStatus ?? 0))
+  const [comment, setComment] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const [reloadKey, setReloadKey] = useState(0)
+
+  useEffect(() => {
+    let cancelled = false
+    projectManagementApi.riskResponseSubmissions(risk.id).then((result) => {
+      if (cancelled) return
+      if (!result.isSuccess) setError(PersianMessages.error(result.error))
+      setItems(arrayPayload(result))
+    })
+    return () => { cancelled = true }
+  }, [risk.id, reloadKey])
+
+  async function submit(event) {
+    event.preventDefault()
+    setSaving(true)
+    setError('')
+    const result = await projectManagementApi.submitRiskResponse({ tenantId: data.tenantId, riskId: risk.id, status: Number(status), comment: emptyToNull(comment.trim()) })
+    setSaving(false)
+    if (!result.isSuccess) { setError(PersianMessages.error(result.error)); return }
+    setComment('')
+    setReloadKey((key) => key + 1)
+    onSaved({ type: 'success', text: 'گزارش پاسخ ثبت شد.' })
+  }
+
+  return (
+    <ControlDialog
+      size="sm" icon={MessageSquareText} title="گزارش‌های پاسخ به ریسک" subtitle={risk.description}
+      onClose={onClose}
+      footer={(
+        <>
+          {error && <span className="ue-error"><TriangleAlert size={15} />{error}</span>}
+          <div className="ue-foot-actions">
+            <button type="button" className="ue-cancel" onClick={onClose}>بستن</button>
+            {canSubmit && <button type="submit" form="risk-response-form" className="ue-save" disabled={saving}>{saving ? 'در حال ثبت...' : 'ثبت گزارش'}</button>}
+          </div>
+        </>
+      )}
+    >
+      {canSubmit ? (
+        <form id="risk-response-form" onSubmit={submit} className="ue-card ue-card--accent">
+          <h5 className="ue-card-title">گزارش تازه</h5>
+          <div className="ue-grid">
+            <CtlField label="وضعیت پاسخ" required><select value={status} onChange={(e) => setStatus(e.target.value)}>{Object.entries(riskResponseLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></CtlField>
+            <CtlField label="توضیح" wide><textarea rows={3} value={comment} onChange={(e) => setComment(e.target.value)} maxLength={2000} /></CtlField>
+          </div>
+        </form>
+      ) : (
+        <p className="ue-note">{risk.approvalStatus === 2 ? 'برای ثبت گزارش، دسترسی «ثبت گزارش پاسخ ریسک» لازم است.' : 'گزارش پاسخ فقط برای ریسکِ تأییدشده ثبت می‌شود.'}</p>
+      )}
+      <section className="ue-section ue-section--first">
+        <h4><History size={16} />سابقه‌ی گزارش‌ها</h4>
+        {items === null ? <p className="users-empty"><LoaderCircle size={18} className="spin" /></p>
+          : !items.length ? <p className="ue-note">هنوز گزارشی ثبت نشده است.</p>
+            : (
+              <ul className="ctl-timeline">
+                {items.map((item) => (
+                  <li key={item.id}>
+                    <div><strong>{enumLabel(item.previousStatus, riskResponseLabels)} ← {enumLabel(item.submittedStatus, riskResponseLabels)}</strong><ApprovalBadge status={item.approvalStatus} /></div>
+                    {item.comment && <p>{item.comment}</p>}
+                    <small>{data.userName(item.submittedByUserId)} · {formatDateTime(item.submittedAtUtc)}</small>
+                  </li>
+                ))}
+              </ul>
+            )}
+      </section>
+    </ControlDialog>
+  )
+}
+
+/* How a project words its six bands and colours its 3x3 matrix. */
+function RiskSettingsDialog({ settings, data, onClose, onSaved }) {
+  const [definitions, setDefinitions] = useState(() => settings.definitions.map((item) => ({ ...item })))
+  const [colors, setColors] = useState(() => {
+    const map = {}
+    for (const probability of ['low', 'medium', 'high']) for (const impact of ['low', 'medium', 'high']) {
+      map[`${probability}-${impact}`] = settings.matrixColors.find((item) => item.probability === probability && item.impact === impact)?.color || DEFAULT_MATRIX_COLORS[`${probability}-${impact}`]
+    }
+    return map
+  })
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  const setDefinition = (axis, level, key, value) => setDefinitions((current) => current.map((item) => (item.axis === axis && item.level === level ? { ...item, [key]: value } : item)))
+
+  async function save(reset) {
+    if (!reset && definitions.some((item) => !item.range.trim() || !item.description.trim())) { setError('برای هر سطح، بازه و توضیح را بنویسید.'); return }
+    setSaving(true)
+    setError('')
+    const result = await projectManagementApi.saveRiskSettings({
+      tenantId: data.tenantId,
+      projectId: data.selectedProjectId,
+      definitions: reset ? [] : definitions.map((item) => ({ ...item, range: item.range.trim(), description: item.description.trim() })),
+      matrixColors: reset ? [] : Object.entries(colors).map(([key, color]) => { const [probability, impact] = key.split('-'); return { probability, impact, color } }),
+    })
+    setSaving(false)
+    if (!result.isSuccess) { setError(PersianMessages.error(result.error)); return }
+    onSaved({ type: 'success', text: reset ? 'تنظیمات ریسک به حالت پیش‌فرض برگشت.' : 'تنظیمات ریسک ذخیره شد.' })
+  }
+
+  return (
+    <ControlDialog
+      icon={SlidersHorizontal} title="تنظیمات ریسک پروژه" subtitle={projectDisplayName(data.selectedProject)}
+      onClose={onClose}
+      footer={(
+        <>
+          {error && <span className="ue-error"><TriangleAlert size={15} />{error}</span>}
+          <div className="ue-foot-actions">
+            <button type="button" className="ue-cancel" onClick={() => save(true)} disabled={saving || settings.isDefault}><RotateCcw size={14} /> پیش‌فرض</button>
+            <button type="button" className="ue-cancel" onClick={onClose}>انصراف</button>
+            <button type="button" className="ue-save" onClick={() => save(false)} disabled={saving}>{saving ? 'در حال ذخیره...' : 'ذخیره تنظیمات'}</button>
+          </div>
+        </>
+      )}
+    >
+      <section className="ue-section ue-section--first">
+        <h4><ChartNoAxesCombined size={16} />تعریف سطح‌ها</h4>
+        <p className="ue-note">هر پروژه می‌تواند بازه و توضیح سطح‌های کم، متوسط و زیاد را به زبان خودش بنویسد.</p>
+        {['probability', 'impact'].map((axis) => (
+          <div className="ue-card" key={axis}>
+            <h5 className="ue-card-title">{axis === 'probability' ? 'احتمال' : 'اثر'}</h5>
+            {['high', 'medium', 'low'].map((level) => {
+              const item = definitions.find((d) => d.axis === axis && d.level === level)
+              return (
+                <div className="ctl-def-row" key={level}>
+                  <b>{riskBandLabels[level]}</b>
+                  <input value={item.range} onChange={(e) => setDefinition(axis, level, 'range', e.target.value)} maxLength={80} aria-label="بازه" />
+                  <input value={item.description} onChange={(e) => setDefinition(axis, level, 'description', e.target.value)} maxLength={400} aria-label="توضیح" />
+                </div>
+              )
+            })}
+          </div>
+        ))}
+      </section>
+      <section className="ue-section">
+        <h4><Grid3x3 size={16} />رنگ خانه‌های ماتریس</h4>
+        <p className="ue-note">رنگ هر ترکیب احتمال × اثر. ماتریس بالای صفحه و رنگ سطح هر ریسک از همین‌جا می‌آید.</p>
+        <div className="ctl-color-grid">
+          <span />{['low', 'medium', 'high'].map((impact) => <b key={impact}>اثر {riskBandLabels[impact]}</b>)}
+          {['high', 'medium', 'low'].map((probability) => (
+            <Fragment key={probability}>
+              <b>احتمال {riskBandLabels[probability]}</b>
+              {['low', 'medium', 'high'].map((impact) => (
+                <select key={impact} className={`ctl-color ${colors[`${probability}-${impact}`]}`} value={colors[`${probability}-${impact}`]} onChange={(e) => setColors((current) => ({ ...current, [`${probability}-${impact}`]: e.target.value }))} aria-label={`احتمال ${riskBandLabels[probability]} و اثر ${riskBandLabels[impact]}`}>
+                  <option value="green">سبز</option><option value="yellow">زرد</option><option value="red">قرمز</option>
+                </select>
+              ))}
+            </Fragment>
+          ))}
+        </div>
+      </section>
+    </ControlDialog>
+  )
+}
+
+/* ---- Stakeholders ---- */
+
+const stakeholderQuadrantLabels = { 0: 'پایش', 1: 'مطلع نگه داشتن', 2: 'راضی نگه داشتن', 3: 'مدیریت دقیق' }
+const stakeholderQuadrantKeys = { 0: 'monitor', 1: 'keepInformed', 2: 'keepSatisfied', 3: 'manageClosely' }
+// "High" is the high side of an axis; Medium and Low are the low side.
+const stakeholderQuadrantOf = (power, interest) => (power === 2 ? (interest === 2 ? 3 : 2) : (interest === 2 ? 1 : 0))
+const stakeholderLevels = [[0, 'کم'], [1, 'متوسط'], [2, 'زیاد']]
+
+function StakeholdersPage({ data }) {
+  const { can } = useAuth()
+  const rights = { create: can('Stakeholders.Create'), edit: can('Stakeholders.Edit'), remove: can('Stakeholders.Delete'), submit: can('Stakeholders.Submit') }
+  const [settings, setSettings] = useState(null)
+  const [settingsKey, setSettingsKey] = useState(0)
+  const [notice, setNotice] = useState(null)
+  const [editing, setEditing] = useState(null)
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [search, setSearch] = useState('')
+  const [cell, setCell] = useState(null)
+
+  useEffect(() => {
+    let cancelled = false
+    setSettings(null)
+    setCell(null)
+    if (!data.selectedProjectId) return undefined
+    projectManagementApi.stakeholderSettings(data.selectedProjectId).then((result) => { if (!cancelled) setSettings(unwrap(result)) })
+    return () => { cancelled = true }
+  }, [data.selectedProjectId, settingsKey])
+
+  const items = data.stakeholders
+  const manage = items.filter((item) => stakeholderQuadrantOf(item.power, item.interest) === 3).length
+  const internal = items.filter((item) => item.isInternal).length
+  const term = search.trim().toLowerCase()
+  const shown = items.filter((item) => (
+    (!cell || (item.power === cell.power && item.interest === cell.interest))
+    && (!term || `${item.name} ${item.expectations || ''} ${item.engagementStrategy || ''}`.toLowerCase().includes(term))
+  ))
+  const wording = (quadrant) => settings?.[stakeholderQuadrantKeys[quadrant]] || ''
+
+  const submitForApproval = (item) => runAction(() => projectManagementApi.submitStakeholder(item.id), 'ذینفع برای تأیید ارسال شد.', setNotice, data.refresh)
+  const remove = (item) => {
+    if (!window.confirm(`ذینفع «${item.name}» حذف شود؟`)) return
+    runAction(() => projectManagementApi.deleteStakeholder(item.id), 'ذینفع حذف شد.', setNotice, data.refresh)
+  }
+
+  return (
+    <>
+      <TaskPageHeader
+        section="کنترل و اجرا"
+        title="مدیریت ذینفعان"
+        description="شناسایی ذینفعان پروژه و تعیین راهبرد تعامل با هر یک بر اساس قدرت و علاقه"
+        actionNode={(
+          <>
+            {rights.edit && <button type="button" className="ctl-ghost" onClick={() => setSettingsOpen(true)} disabled={!data.selectedProjectId || !settings}><SlidersHorizontal size={17} />راهبردهای تعامل</button>}
+            {rights.create && <CreateButton kind="stakeholder" data={data} label="ثبت ذینفع" disabled={!data.selectedProjectId} />}
+          </>
+        )}
+      >
+        <ProjectSelector data={data} />
+      </TaskPageHeader>
+      <PageNotice notice={notice} onClose={() => setNotice(null)} />
+      <DataState loading={data.loading} error={data.error} empty={!data.projects.length}>
+        <ControlKpis items={[
+          { icon: Handshake, tone: 'navy', label: 'کل ذینفعان', value: toPersianDigits(items.length), note: 'در پروژه‌ی انتخاب‌شده' },
+          { icon: Target, tone: 'red', label: 'مدیریت دقیق', value: toPersianDigits(manage), note: 'قدرت و علاقه‌ی زیاد' },
+          { icon: Building2, tone: 'blue', label: 'داخلی', value: toPersianDigits(internal), note: 'درون سازمان' },
+          { icon: Users, tone: 'green', label: 'خارجی', value: toPersianDigits(items.length - internal), note: 'بیرون از سازمان' },
+        ]} />
+
+        <section className="ctl-grid">
+          <div className="task-panel ctl-panel">
+            <div className="task-panel-title"><div><h3>ماتریس قدرت و علاقه</h3><p>برای فیلتر کردن جدول، روی یک خانه بزنید.</p></div>{cell && <button type="button" className="ctl-link" onClick={() => setCell(null)}>حذف فیلتر</button>}</div>
+            <div className="ctl-matrix-body">
+            <div className="rm-wrap sm-wrap">
+              <span className="rm-axis rm-axis-y">قدرت</span>
+              <div className="rm-grid sm-grid">
+                {[2, 1, 0].map((power) => (
+                  <div className="rm-row" key={power}>
+                    <b className="rm-label">{stakeholderLevels[power][1]}</b>
+                    {[0, 1, 2].map((interest) => {
+                      const here = items.filter((item) => item.power === power && item.interest === interest)
+                      const active = cell?.power === power && cell?.interest === interest
+                      const quadrant = stakeholderQuadrantOf(power, interest)
+                      return (
+                        <button
+                          type="button" key={interest}
+                          className={`sm-cell q${quadrant}${active ? ' active' : ''}${here.length ? ' has' : ''}`}
+                          title={`${stakeholderQuadrantLabels[quadrant]}: ${toPersianDigits(here.length)} ذینفع`}
+                          onClick={() => setCell(active ? null : { power, interest })}
+                        >
+                          {here.slice(0, 3).map((item) => <span key={item.id}>{item.name}</span>)}
+                          {here.length > 3 && <em>+{toPersianDigits(here.length - 3)}</em>}
+                        </button>
+                      )
+                    })}
+                  </div>
+                ))}
+                <div className="rm-row rm-foot"><b className="rm-label" />{[0, 1, 2].map((interest) => <b className="rm-label" key={interest}>{stakeholderLevels[interest][1]}</b>)}</div>
+              </div>
+              <span className="rm-axis rm-axis-x">علاقه</span>
+            </div>
+            <div className="ctl-matrix-info">
+            <ul className="sm-legend">
+              {[3, 2, 1, 0].map((quadrant) => <li key={quadrant}><i className={`rm-dot q${quadrant}`} /><b>{stakeholderQuadrantLabels[quadrant]}</b>{wording(quadrant) && <small>{wording(quadrant)}</small>}</li>)}
+            </ul>
+            </div>
+            </div>
+          </div>
+
+          <div className="task-panel task-table-panel ctl-panel ctl-table-panel">
+            <div className="task-panel-title">
+              <div><h3>فهرست ذینفعان</h3><p>{toPersianDigits(shown.length)} از {toPersianDigits(items.length)} ذینفع</p></div>
+              <div className="ctl-filters"><label className="ctl-search"><Search size={15} /><input type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="جستجو در ذینفعان..." /></label></div>
+            </div>
+            <DataState loading={data.loadingDetails} empty={!shown.length}>
+              <div className="table-scroll">
+                <table>
+                  <thead><tr><th>ذینفع</th><th>قدرت</th><th>علاقه</th><th>راهبرد</th><th>تأیید</th><th>عملیات</th></tr></thead>
+                  <tbody>
+                    {shown.map((item) => {
+                      const quadrant = stakeholderQuadrantOf(item.power, item.interest)
+                      return (
+                        <tr key={item.id}>
+                          <td className="ctl-main">
+                            <strong>{item.name}<em className="ctl-tag">{item.isInternal ? 'داخلی' : 'خارجی'}</em></strong>
+                            {item.expectations && <small>انتظارات: {item.expectations}</small>}
+                          </td>
+                          <td>{compactEnumLabel(item.power, stakeholderLevelLabels)}</td>
+                          <td>{compactEnumLabel(item.interest, stakeholderLevelLabels)}</td>
+                          <td className="ctl-main"><span className={`quad-pill q${quadrant}`}>{stakeholderQuadrantLabels[quadrant]}</span><small>{item.engagementStrategy || item.strategy || ''}</small></td>
+                          <td><ApprovalBadge status={item.approvalStatus} /></td>
+                          <td>
+                            <span className="row-actions">
+                              {rights.edit && <button type="button" title="ویرایش" aria-label="ویرایش" onClick={() => setEditing(item)}><Pencil size={15} /></button>}
+                              {rights.submit && (item.approvalStatus === 0 || item.approvalStatus === 3) && <button type="button" className="ok" title="ارسال برای تأیید" aria-label="ارسال برای تأیید" onClick={() => submitForApproval(item)}><Send size={15} /></button>}
+                              {rights.remove && <button type="button" className="danger" title="حذف" aria-label="حذف" disabled={item.approvalStatus === 1} onClick={() => remove(item)}><Trash2 size={15} /></button>}
+                            </span>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </DataState>
+          </div>
+        </section>
+      </DataState>
+
+      {editing && <CreateProjectItemModal kind="stakeholder" item={editing} data={data} onClose={() => setEditing(null)} />}
+      {settingsOpen && settings && (
+        <StakeholderSettingsDialog
+          settings={settings} data={data}
+          onClose={() => setSettingsOpen(false)}
+          onSaved={(result) => { setSettingsOpen(false); setNotice(result); setSettingsKey((key) => key + 1) }}
+        />
+      )}
+    </>
+  )
+}
+
+/* The wording a project uses for each engagement quadrant; a blank text puts it back on the default. */
+function StakeholderSettingsDialog({ settings, data, onClose, onSaved }) {
+  const [form, setForm] = useState({ manageClosely: settings.manageClosely, keepSatisfied: settings.keepSatisfied, keepInformed: settings.keepInformed, monitor: settings.monitor })
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const quadrants = [[3, 'manageClosely'], [2, 'keepSatisfied'], [1, 'keepInformed'], [0, 'monitor']]
+
+  async function save(reset) {
+    setSaving(true)
+    setError('')
+    const result = await projectManagementApi.saveStakeholderSettings({
+      tenantId: data.tenantId, projectId: data.selectedProjectId,
+      ...(reset ? { manageClosely: '', keepSatisfied: '', keepInformed: '', monitor: '' } : form),
+    })
+    setSaving(false)
+    if (!result.isSuccess) { setError(PersianMessages.error(result.error)); return }
+    onSaved({ type: 'success', text: reset ? 'راهبردها به حالت پیش‌فرض برگشت.' : 'راهبردهای تعامل ذخیره شد.' })
+  }
+
+  return (
+    <ControlDialog
+      size="sm" icon={SlidersHorizontal} title="راهبردهای تعامل با ذینفعان" subtitle={projectDisplayName(data.selectedProject)}
+      onClose={onClose}
+      footer={(
+        <>
+          {error && <span className="ue-error"><TriangleAlert size={15} />{error}</span>}
+          <div className="ue-foot-actions">
+            <button type="button" className="ue-cancel" onClick={() => save(true)} disabled={saving || settings.isDefault}><RotateCcw size={14} /> پیش‌فرض</button>
+            <button type="button" className="ue-cancel" onClick={onClose}>انصراف</button>
+            <button type="button" className="ue-save" onClick={() => save(false)} disabled={saving}>{saving ? 'در حال ذخیره...' : 'ذخیره'}</button>
+          </div>
+        </>
+      )}
+    >
+      <p className="ue-note">این متن‌ها زیر هر ذینفع، بر اساس ربع قدرت و علاقه‌اش نمایش داده می‌شوند (مگر برای او راهبرد جداگانه نوشته شده باشد).</p>
+      <div className="ue-card">
+        <div className="ue-grid">
+          {quadrants.map(([quadrant, key]) => (
+            <CtlField key={key} label={stakeholderQuadrantLabels[quadrant]} wide>
+              <textarea rows={2} value={form[key]} onChange={(e) => setForm((current) => ({ ...current, [key]: e.target.value }))} maxLength={400} />
+            </CtlField>
+          ))}
+        </div>
+      </div>
+    </ControlDialog>
+  )
+}
+
+/* ---- Resources: the project team, who carries how much, and its governance roles ---- */
+
+const taskDone = (task) => task.status === 2 || task.status === 'Done'
+
+/** What each person of the selected project carries, from the work that names them as responsible. */
+function buildWorkload(data) {
+  const projectTasks = data.tasks.filter((task) => task.projectId === data.selectedProjectId)
+  const onTeam = new Set(data.teamMembers.map((member) => member.userId))
+  const roleOf = new Map(data.teamMembers.map((member) => [member.userId, member.roleTitle]))
+  const rows = new Map()
+  const rowOf = (userId) => {
+    if (!rows.has(userId)) rows.set(userId, { userId, onTeam: onTeam.has(userId), roleTitle: roleOf.get(userId) || '', activities: 0, manHours: 0, tasksOpen: 0, tasksDone: 0, storyPoints: 0, deliverables: 0, risks: 0 })
+    return rows.get(userId)
+  }
+  data.teamMembers.forEach((member) => rowOf(member.userId))
+  let unassigned = { activities: 0, tasks: 0, deliverables: 0 }
+  for (const activity of data.activities) {
+    if (!activity.responsibleUserId) { unassigned.activities += 1; continue }
+    const row = rowOf(activity.responsibleUserId)
+    row.activities += 1
+    row.manHours += Number(activity.manHours || 0)
+  }
+  for (const task of projectTasks) {
+    if (!task.responsibleUserId) { unassigned.tasks += 1; continue }
+    const row = rowOf(task.responsibleUserId)
+    if (taskDone(task)) row.tasksDone += 1
+    else { row.tasksOpen += 1; row.storyPoints += Number(task.storyPoints || 0) }
+  }
+  for (const deliverable of data.deliverables) {
+    if (!deliverable.responsibleUserId) { unassigned.deliverables += 1; continue }
+    rowOf(deliverable.responsibleUserId).deliverables += 1
+  }
+  for (const risk of data.risks) if (risk.riskOwnerUserId) rowOf(risk.riskOwnerUserId).risks += 1
+  const list = [...rows.values()].sort((a, b) => (b.manHours - a.manHours) || ((b.tasksOpen + b.activities) - (a.tasksOpen + a.activities)))
+  const load = (row) => row.manHours || row.tasksOpen + row.activities
+  const maxLoad = Math.max(0, ...list.map(load))
+  const totalManHours = list.reduce((sum, row) => sum + row.manHours, 0)
+  return { list, unassigned, maxLoad, load, totalManHours, projectTasks }
 }
 
 function ResourcesPage({ data }) {
-  return <><TaskPageHeader title="مدیریت منابع" description="منابع انسانی فعلاً از Project Team API پوشش داده می‌شود" actionNode={<CreateButton kind="member" data={data} label="افزودن عضو" />}><ProjectSelector data={data} /><CreateButton kind="governance" data={data} label="تعریف نقش حاکمیتی" /></TaskPageHeader><section className="task-panel task-table-panel"><DataState loading={data.loading || data.loadingDetails} error={data.error} empty={!data.teamMembers.length}><div className="table-scroll"><table><thead><tr><th>نام عضو</th><th>نقش پروژه</th><th>شناسه کاربر</th></tr></thead><tbody>{data.teamMembers.map((member) => <tr key={member.id}><td><span className="owner-cell"><i>{initialsOf(data.userName(member.userId)).slice(0, 1)}</i><strong>{data.userName(member.userId)}</strong></span></td><td>{member.roleTitle || '—'}</td><td>{member.userId}</td></tr>)}</tbody></table></div></DataState></section></>
+  const { can } = useAuth()
+  const rights = { members: can('ProjectTeam.ManageMembers'), governance: can('ProjectTeam.ManageGovernance') }
+  const [notice, setNotice] = useState(null)
+  const [editing, setEditing] = useState(null)
+  const [teamOpen, setTeamOpen] = useState(false)
+
+  const workload = useMemo(() => buildWorkload(data), [data.teamMembers, data.activities, data.tasks, data.deliverables, data.risks, data.selectedProjectId])
+  const unassignedTotal = workload.unassigned.activities + workload.unassigned.tasks + workload.unassigned.deliverables
+  const userOf = (userId) => data.users.find((item) => item.id === userId)
+
+  const removeMember = (member) => {
+    if (!window.confirm(`«${data.userName(member.userId)}» از تیم پروژه حذف شود؟`)) return
+    runAction(() => projectManagementApi.removeTeamMember(member.id), 'عضو از تیم پروژه حذف شد.', setNotice, data.refresh)
+  }
+  const removeRole = (role) => {
+    if (!window.confirm(`نقش «${role.title}» حذف شود؟`)) return
+    runAction(() => projectManagementApi.deleteGovernanceRole(role.id), 'نقش حاکمیتی حذف شد.', setNotice, data.refresh)
+  }
+  const vacant = data.governanceRoles.filter((role) => !role.userId).length
+  const hours = (value) => toPersianDigits(Math.round(value * 10) / 10)
+
+  return (
+    <>
+      <TaskPageHeader
+        section="کنترل و اجرا"
+        title="مدیریت منابع"
+        description="اعضای تیم پروژه، بار کاری هر نفر و نقش‌های حاکمیتی"
+        actionNode={(
+          <>
+            {rights.governance && <button type="button" className="ctl-ghost" onClick={() => setEditing({ kind: 'governance', item: null })} disabled={!data.selectedProjectId}><Plus size={17} />نقش حاکمیتی</button>}
+            {rights.members && <button type="button" className="ctl-ghost" onClick={() => setTeamOpen(true)} disabled={!data.selectedProjectId}><UsersRound size={17} />تنظیم تیم</button>}
+            {rights.members && <button type="button" onClick={() => setEditing({ kind: 'member', item: null })} disabled={!data.selectedProjectId}><Plus size={18} />افزودن عضو</button>}
+          </>
+        )}
+      >
+        <ProjectSelector data={data} />
+      </TaskPageHeader>
+      <PageNotice notice={notice} onClose={() => setNotice(null)} />
+      <DataState loading={data.loading} error={data.error} empty={!data.projects.length}>
+        <ControlKpis items={[
+          { icon: Users, tone: 'navy', label: 'اعضای تیم', value: toPersianDigits(data.teamMembers.length), note: 'در پروژه‌ی انتخاب‌شده' },
+          { icon: Clock3, tone: 'blue', label: 'نفرساعت برنامه‌ریزی‌شده', value: hours(workload.totalManHours), note: 'مجموع فعالیت‌های دارای مسئول' },
+          { icon: CircleAlert, tone: 'red', label: 'کار بدون مسئول', value: toPersianDigits(unassignedTotal), note: 'فعالیت، وظیفه و خروجی' },
+          { icon: Shield, tone: 'green', label: 'نقش‌های حاکمیتی', value: toPersianDigits(data.governanceRoles.length), note: `${toPersianDigits(vacant)} نقش بدون فرد` },
+        ]} />
+
+        {unassignedTotal > 0 && (
+          <div className="users-notice error ctl-notice" role="status">
+            <CircleAlert size={16} />
+            <span>
+              کارهای بدون مسئول:
+              {workload.unassigned.activities > 0 && ` ${toPersianDigits(workload.unassigned.activities)} فعالیت`}
+              {workload.unassigned.tasks > 0 && ` ${toPersianDigits(workload.unassigned.tasks)} وظیفه`}
+              {workload.unassigned.deliverables > 0 && ` ${toPersianDigits(workload.unassigned.deliverables)} خروجی`}
+              . برای هر کدام مسئول تعیین کنید تا بار کاری درست دیده شود.
+            </span>
+          </div>
+        )}
+
+        <section className="task-panel task-table-panel ctl-panel ctl-block">
+          <div className="task-panel-title"><div><h3>بار کاری اعضا</h3><p>بر اساس فعالیت‌ها، وظایف، خروجی‌ها و ریسک‌هایی که مسئولش هستند</p></div></div>
+          <DataState loading={data.loadingDetails} empty={!workload.list.length}>
+            <div className="table-scroll"><table>
+              <thead><tr><th>عضو</th><th>فعالیت‌ها</th><th>نفرساعت</th><th>بار کاری</th><th>وظایف باز</th><th>انجام‌شده</th><th>خروجی‌ها</th><th>ریسک‌ها</th></tr></thead>
+              <tbody>
+                {workload.list.map((row) => {
+                  const share = workload.maxLoad ? Math.round((workload.load(row) / workload.maxLoad) * 100) : 0
+                  return (
+                    <tr key={row.userId}>
+                      <td className="ctl-main">
+                        <span className="owner-cell"><i>{initialsOf(data.userName(row.userId)).slice(0, 1)}</i><strong>{data.userName(row.userId)}{!row.onTeam && <em className="ctl-tag ctl-tag--warn" title="مسئول کاری است ولی عضو تیم پروژه نیست">خارج از تیم</em>}</strong></span>
+                        {row.roleTitle && <small>{row.roleTitle}</small>}
+                      </td>
+                      <td>{toPersianDigits(row.activities)}</td>
+                      <td>{row.manHours ? hours(row.manHours) : '—'}</td>
+                      <td className="ctl-bar-cell" title={`${toPersianDigits(share)}٪ نسبت به پرکارترین عضو`}><span className="ctl-bar"><i style={{ width: `${share}%` }} /></span></td>
+                      <td>{toPersianDigits(row.tasksOpen)}{row.storyPoints > 0 && <small className="ctl-sp"> ({toPersianDigits(row.storyPoints)} امتیاز)</small>}</td>
+                      <td>{toPersianDigits(row.tasksDone)}</td>
+                      <td>{toPersianDigits(row.deliverables)}</td>
+                      <td>{toPersianDigits(row.risks)}</td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table></div>
+          </DataState>
+        </section>
+
+        <section className="task-panel task-table-panel ctl-panel ctl-block">
+          <div className="task-panel-title"><div><h3>اعضای تیم پروژه</h3><p>کسانی که روی این پروژه کار می‌کنند</p></div></div>
+          <DataState loading={data.loadingDetails} empty={!data.teamMembers.length}>
+            <div className="table-scroll"><table>
+              <thead><tr><th>عضو</th><th>نقش در پروژه</th><th>ایمیل</th><th>موبایل</th><th>وضعیت حساب</th><th>عملیات</th></tr></thead>
+              <tbody>
+                {data.teamMembers.map((member) => {
+                  const person = userOf(member.userId)
+                  return (
+                    <tr key={member.id}>
+                      <td><span className="owner-cell"><i>{initialsOf(data.userName(member.userId)).slice(0, 1)}</i><strong>{data.userName(member.userId)}</strong></span></td>
+                      <td>{member.roleTitle || '—'}</td>
+                      <td className="ltr-cell">{person?.email || '—'}</td>
+                      <td className="ltr-cell">{person?.phoneNumber ? toPersianDigits(person.phoneNumber) : '—'}</td>
+                      <td>{person ? <span className={`user-status ${person.isActive ? 'active' : ''}`}><i />{person.isActive ? 'فعال' : 'غیرفعال'}</span> : '—'}</td>
+                      <td>
+                        {rights.members && (
+                          <span className="row-actions">
+                            <button type="button" title="ویرایش نقش" aria-label="ویرایش نقش" onClick={() => setEditing({ kind: 'member', item: member })}><Pencil size={15} /></button>
+                            <button type="button" className="danger" title="حذف از تیم" aria-label="حذف از تیم" onClick={() => removeMember(member)}><Trash2 size={15} /></button>
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table></div>
+          </DataState>
+        </section>
+
+        <section className="task-panel task-table-panel ctl-panel ctl-block">
+          <div className="task-panel-title"><div><h3>نقش‌های حاکمیتی</h3><p>مسئولیت‌های راهبری و تأیید پروژه</p></div></div>
+          <DataState loading={data.loadingDetails} empty={!data.governanceRoles.length}>
+            <div className="table-scroll"><table>
+              <thead><tr><th>عنوان نقش</th><th>فرد</th><th>شماره پرسنلی</th><th>تلفن</th><th>ایمیل</th><th>محل خدمت</th><th>عملیات</th></tr></thead>
+              <tbody>
+                {data.governanceRoles.map((role) => (
+                  <tr key={role.id}>
+                    <td><strong>{role.title}</strong></td>
+                    <td>{role.userId ? data.userName(role.userId) : <span className="users-missing">بدون فرد</span>}</td>
+                    <td className="ltr-cell">{role.personnelNumber ? toPersianDigits(role.personnelNumber) : '—'}</td>
+                    <td className="ltr-cell">{role.phone ? toPersianDigits(role.phone) : '—'}</td>
+                    <td className="ltr-cell">{role.email || '—'}</td>
+                    <td>{role.serviceLocation || '—'}</td>
+                    <td>
+                      {rights.governance && (
+                        <span className="row-actions">
+                          <button type="button" title="ویرایش" aria-label="ویرایش" onClick={() => setEditing({ kind: 'governance', item: role })}><Pencil size={15} /></button>
+                          <button type="button" className="danger" title="حذف" aria-label="حذف" onClick={() => removeRole(role)}><Trash2 size={15} /></button>
+                        </span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table></div>
+          </DataState>
+        </section>
+      </DataState>
+
+      {editing && <CreateProjectItemModal kind={editing.kind} item={editing.item} data={data} onClose={() => setEditing(null)} />}
+      {teamOpen && (
+        <TeamSetDialog
+          data={data}
+          onClose={() => setTeamOpen(false)}
+          onSaved={(result) => { setTeamOpen(false); setNotice(result); data.refresh() }}
+        />
+      )}
+    </>
+  )
 }
 
-function StakeholdersPage({ data }) {
-  return <><TaskPageHeader title="مدیریت ذینفعان" description="ذینفعان پروژه از Stakeholders API" actionNode={<CreateButton kind="stakeholder" data={data} label="ثبت ذینفع" />}><ProjectSelector data={data} /></TaskPageHeader><section className="task-panel task-table-panel"><DataState loading={data.loading || data.loadingDetails} error={data.error} empty={!data.stakeholders.length}><div className="table-scroll"><table><thead><tr><th>نام</th><th>نوع</th><th>قدرت</th><th>علاقه</th><th>انتظارات</th><th>استراتژی تعامل</th></tr></thead><tbody>{data.stakeholders.map((item) => <tr key={item.id}><td><strong>{item.name}</strong></td><td>{item.isInternal ? 'داخلی' : 'خارجی'}</td><td>{compactEnumLabel(item.power, stakeholderLevelLabels)}</td><td>{compactEnumLabel(item.interest, stakeholderLevelLabels)}</td><td>{item.expectations || '—'}</td><td>{item.engagementStrategy || '—'}</td></tr>)}</tbody></table></div></DataState></section></>
+/* The whole team of the project in one go: tick who is on it. People left unticked are removed,
+   new ones join without a role title, those already on it keep theirs. */
+function TeamSetDialog({ data, onClose, onSaved }) {
+  const [candidates, setCandidates] = useState(null)
+  const [picked, setPicked] = useState(() => new Set(data.teamMembers.map((member) => member.userId)))
+  const [filter, setFilter] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    let cancelled = false
+    projectManagementApi.availableTeamUsers(data.selectedProjectId).then((result) => {
+      if (cancelled) return
+      const known = new Map()
+      for (const person of result.isSuccess ? arrayPayload(result) : data.users) known.set(person.id, person)
+      // People already on the team stay listed even when the Core no longer offers them.
+      for (const member of data.teamMembers) if (!known.has(member.userId)) known.set(member.userId, data.users.find((item) => item.id === member.userId) || { id: member.userId, displayName: data.userName(member.userId) })
+      setCandidates([...known.values()])
+    })
+    return () => { cancelled = true }
+  }, [data.selectedProjectId])
+
+  const term = filter.trim().toLowerCase()
+  const shown = (candidates || []).filter((person) => !term || `${person.displayName || ''} ${person.email || ''} ${person.username || ''}`.toLowerCase().includes(term))
+  const original = data.teamMembers.map((member) => member.userId).sort().join(',')
+  const changed = [...picked].sort().join(',') !== original
+  const removed = data.teamMembers.filter((member) => !picked.has(member.userId)).length
+  const added = [...picked].filter((id) => !data.teamMembers.some((member) => member.userId === id)).length
+
+  async function save() {
+    setSaving(true)
+    setError('')
+    const result = await projectManagementApi.setTeam({ tenantId: data.tenantId, projectId: data.selectedProjectId, userIds: [...picked] })
+    setSaving(false)
+    if (!result.isSuccess) { setError(PersianMessages.error(result.error)); return }
+    onSaved({ type: 'success', text: `تیم پروژه ذخیره شد (${toPersianDigits(added)} عضو تازه، ${toPersianDigits(removed)} حذف).` })
+  }
+
+  return (
+    <ControlDialog
+      size="sm" icon={UsersRound} title="تنظیم تیم پروژه" subtitle={projectDisplayName(data.selectedProject)}
+      onClose={onClose}
+      footer={(
+        <>
+          {error && <span className="ue-error"><TriangleAlert size={15} />{error}</span>}
+          <div className="ue-foot-actions">
+            <button type="button" className="ue-cancel" onClick={onClose}>انصراف</button>
+            <button type="button" className="ue-save" onClick={save} disabled={saving || !changed}>{saving ? 'در حال ذخیره...' : 'ذخیره تیم'}</button>
+          </div>
+        </>
+      )}
+    >
+      <div className="ue-section-head">
+        <p className="ue-note ctl-note-flex">{toPersianDigits(picked.size)} نفر انتخاب شده. حذف شدگان از تیم بیرون می‌روند.</p>
+        <label className="users-search users-search--sm"><Search size={15} /><input type="search" value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="جستجوی کاربر..." /></label>
+      </div>
+      {candidates === null ? <p className="users-empty"><LoaderCircle size={18} className="spin" /></p> : (
+        <ul className="ue-roles ctl-people">
+          {shown.map((person) => (
+            <li key={person.id}>
+              <label>
+                <input type="checkbox" checked={picked.has(person.id)} onChange={(e) => setPicked((current) => { const next = new Set(current); if (e.target.checked) next.add(person.id); else next.delete(person.id); return next })} />
+                <span className="access-check"><CheckCheck size={13} /></span>
+                <span className="access-text"><strong>{person.displayName || person.email}</strong>{(person.email || person.username) && <code>{person.email || person.username}</code>}</span>
+              </label>
+            </li>
+          ))}
+          {!shown.length && <li><p className="ue-note">کاربری پیدا نشد.</p></li>}
+        </ul>
+      )}
+    </ControlDialog>
+  )
 }
+
+/* ------------------------------------------------------------------ *
+ * Cost management (کنترل و اجرا): contracts, invoices and payments,   *
+ * the supplier view of them, contract changes (addenda), and cost     *
+ * against progress. Everything comes from the Contracts module and    *
+ * the Reporting analytics; money is whole rials and only what is      *
+ * approved counts - the Core enforces both.                           *
+ * ------------------------------------------------------------------ */
+
+const contractStatusLabels = { 0: 'پیش‌نویس', 1: 'فعال', 2: 'تکمیل‌شده', 3: 'فسخ‌شده' }
+// An approved contract stays in Draft until somebody makes it Active, so "approved" and "Draft" can both be true.
+const contractStatusText = (contract) => (contract.approvalStatus !== 2 ? 'پیش‌نویس' : contract.status === 0 ? 'تأییدشده، فعال‌نشده' : enumLabel(contract.status, contractStatusLabels))
+const healthLabels = { 0: 'نامشخص', 1: 'مطلوب', 2: 'نیازمند توجه', 3: 'بحرانی' }
+const healthClass = { 0: 'neutral', 1: 'green', 2: 'yellow', 3: 'red' }
+
+const rialsText = (value) => (value === undefined || value === null || Number.isNaN(Number(value)) ? '—' : Math.round(Number(value)).toLocaleString('fa-IR'))
+const moneyRials = (money) => Number(money?.rials ?? 0)
+// Axis labels in a left-to-right chart: 1.5B / 250M instead of a ten-digit number.
+const compactRials = (value) => {
+  const n = Number(value) || 0
+  if (n >= 1e9) return `${Math.round(n / 1e8) / 10}B`
+  if (n >= 1e6) return `${Math.round(n / 1e5) / 10}M`
+  return String(Math.round(n))
+}
+const percentText = (value) => (value === undefined || value === null ? '—' : `${Number(value).toLocaleString('fa-IR', { maximumFractionDigits: 1 })}٪`)
+const indexText = (value) => (value === undefined || value === null ? '—' : Number(value).toLocaleString('fa-IR', { maximumFractionDigits: 2 }))
+const jalaliText = (iso) => (iso ? new Date(`${String(iso).slice(0, 10)}T00:00:00`).toLocaleDateString('fa-IR') : '—')
+
+// Contracts and invoices can be changed only while nobody has been asked to approve them (or after a rejection).
+const isEditableApproval = (status) => status === 0 || status === 3
+
+/** Saves rows as a CSV file Excel opens with Persian text intact (UTF-8 with a BOM). */
+function downloadCsv(filename, header, rows) {
+  const escape = (value) => {
+    const text = value === undefined || value === null ? '' : String(value)
+    return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text
+  }
+  const body = [header, ...rows].map((row) => row.map(escape).join(',')).join('\r\n')
+  const blob = new Blob([`﻿${body}`], { type: 'text/csv;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
+}
+
+/** The contracts of some projects, each with its addenda and invoices ([{ contract, addenda, invoices }]). */
+function useContractDetails(projectIds) {
+  const [items, setItems] = useState(null)
+  const [error, setError] = useState('')
+  const [reloadKey, setReloadKey] = useState(0)
+  const key = projectIds.join(',')
+  const shownKey = useRef(key)
+
+  useEffect(() => {
+    let cancelled = false
+    if (!projectIds.length) { setItems([]); setError(''); return undefined }
+    // Another project clears the list; a reload after a save keeps showing the old rows (and any open dialog) until the new ones arrive.
+    if (shownKey.current !== key) { shownKey.current = key; setItems(null) }
+    contractsApi.forProjects(projectIds).then((result) => {
+      if (cancelled) return
+      setError(result.isSuccess ? '' : PersianMessages.error(result.error))
+      setItems(arrayPayload(result))
+    })
+    return () => { cancelled = true }
+  }, [key, reloadKey])
+
+  return { items, error, reload: () => setReloadKey((value) => value + 1) }
+}
+
+/** A whole-rial amount typed with grouping; keeps only digits (and a leading minus when allowed). */
+function AmountInput({ value, onChange, allowNegative = false, ...props }) {
+  const display = (() => {
+    if (!value || value === '-') return value
+    const negative = value.startsWith('-')
+    const digits = value.replace(/\D/g, '')
+    return `${negative ? '-' : ''}${digits ? Number(digits).toLocaleString('en-US') : ''}`
+  })()
+  return (
+    <input
+      {...props}
+      className="ltr-input"
+      inputMode="numeric"
+      value={display}
+      onChange={(event) => {
+        const typed = toLatinDigits(event.target.value).replace(/[,٬\s]/g, '')
+        const negative = allowNegative && typed.startsWith('-')
+        onChange(`${negative ? '-' : ''}${typed.replace(/\D/g, '')}`)
+      }}
+    />
+  )
+}
+
+const tomansHint = (value) => (value && value !== '-' ? `معادل ${rialsText(Math.round(Number(value) / 10))} تومان` : undefined)
 
 function CostPage({ data }) {
-  return <><TaskPageHeader title="مدیریت هزینه" description="Core فعلاً فقط Cost کلی پروژه را پوشش می‌دهد" action={null}><ProjectSelector data={data} /></TaskPageHeader><section className="empty-page"><div><WalletCards size={38} /></div><h1>{data.selectedProject?.cost ? Number(data.selectedProject.cost).toLocaleString('fa-IR') : 'هزینه ثبت نشده'}</h1><p>برای مدیریت هزینه واقعی، endpointهای بودجه، هزینه واقعی، پیش‌بینی و آیتم‌های هزینه لازم است.</p></section></>
+  const { can } = useAuth()
+  const [tab, setTab] = useState('نمای کلی')
+  const projectIds = useMemo(() => (data.selectedProjectId ? [data.selectedProjectId] : []), [data.selectedProjectId])
+  const contracts = useContractDetails(projectIds)
+  const canView = can('Contracts.View')
+  const tabs = [{ label: 'نمای کلی', icon: ChartNoAxesCombined }, { label: 'قراردادها', icon: FileText }]
+
+  return (
+    <>
+      <TaskPageHeader
+        section="کنترل و اجرا"
+        title="مدیریت هزینه"
+        description="قرارداد، صورت‌وضعیت و پرداخت پروژه در یک‌جا، و مقایسه‌ی آن با پیشرفت کار"
+        action={null}
+      >
+        <ProjectSelector data={data} />
+      </TaskPageHeader>
+      <DataState loading={data.loading} error={data.error} empty={!data.projects.length}>
+        {!canView ? (
+          <p className="data-state data-state--error">برای دیدن اطلاعات هزینه، دسترسی «مشاهده‌ی قراردادها» (Contracts.View) لازم است.</p>
+        ) : (
+          <>
+            <nav className="settings-subtabs ctl-subtabs">
+              {tabs.map(({ label, icon: Icon }) => <button key={label} type="button" className={tab === label ? 'active' : ''} onClick={() => setTab(label)}><Icon size={16} />{label}</button>)}
+            </nav>
+            {contracts.error && <div className="users-notice error ctl-notice" role="alert"><CircleAlert size={16} /><span>{contracts.error}</span></div>}
+            {tab === 'نمای کلی' && <CostOverview data={data} contracts={contracts} />}
+            {tab === 'قراردادها' && <CostContracts data={data} contracts={contracts} />}
+          </>
+        )}
+      </DataState>
+    </>
+  )
 }
 
-function UnsupportedProjectArea({ title, message }) {
-  return <section className="empty-page"><div><Boxes size={38} /></div><h1>{title}</h1><p>{message}</p></section>
+/* ---- Overview: money, health indexes, physical against financial progress, S-curve ---- */
+
+function CostOverview({ data, contracts }) {
+  const projectId = data.selectedProjectId
+  const [summary, setSummary] = useState(null)
+  const [perf, setPerf] = useState(undefined)
+  const [curve, setCurve] = useState(undefined)
+  const [costCurve, setCostCurve] = useState(undefined)
+
+  useEffect(() => {
+    let cancelled = false
+    setSummary(null); setPerf(undefined); setCurve(undefined); setCostCurve(undefined)
+    if (!projectId) return undefined
+    contractsApi.summary(projectId).then((result) => { if (!cancelled) setSummary(unwrap(result)) })
+    // The server decides who may see a project's indexes (everyone for ViewAll; a team member with Contracts.View), so just ask.
+    costReportApi.performance(projectId).then((result) => { if (!cancelled) setPerf(result.isSuccess ? unwrap(result) : null) })
+    costReportApi.costCurve(projectId).then((result) => { if (!cancelled) setCostCurve(result.isSuccess ? unwrap(result) : null) })
+    costReportApi.sCurve(projectId).then((result) => { if (!cancelled) setCurve(result.isSuccess ? unwrap(result) : null) })
+    // Contract data changing (an approval, a payment) changes the figures, so reload with the list.
+    return () => { cancelled = true }
+  }, [projectId, contracts.items])
+
+  const budget = Number(data.selectedProject?.cost ?? 0)
+  const items = contracts.items || []
+  const pendingContracts = items.filter(({ contract }) => contract.approvalStatus === 1).length
+  const draftContracts = items.filter(({ contract }) => contract.approvalStatus === 0 || contract.approvalStatus === 3).length
+  const pendingAddenda = items.flatMap(({ addenda }) => addenda).filter((item) => item.approvalStatus === 1)
+  const pendingInvoices = items.flatMap(({ invoices }) => invoices).filter((item) => item.approvalStatus === 1)
+  const contracted = moneyRials(summary?.totalContractAmount)
+  const invoiced = moneyRials(summary?.totalInvoiced)
+  const paid = moneyRials(summary?.totalPaid)
+  const financialPercent = budget > 0 && summary ? (invoiced / budget) * 100 : null
+  const physicalPercent = perf?.progressAvailable ? perf.actualProgress : null
+  const plannedPercent = perf?.progressAvailable ? perf.plannedProgress : null
+  const gap = financialPercent !== null && physicalPercent !== null ? financialPercent - physicalPercent : null
+
+  const exportOverview = () => {
+    downloadCsv(`cost-overview-${data.selectedProject?.code || 'project'}.csv`, ['شاخص', 'مقدار'], [
+      ['پروژه', projectDisplayName(data.selectedProject)],
+      ['بودجه‌ی پروژه (Project.Cost)', budget],
+      ['مبلغ قراردادها (ریال)', contracted],
+      ['صورت‌حساب‌شده (ریال)', invoiced],
+      ['پرداخت‌شده (ریال)', paid],
+      ['بدهی معوق (ریال)', moneyRials(summary?.totalOutstandingPayable)],
+      ['تعهد باقی‌مانده (ریال)', moneyRials(summary?.totalRemainingCommitment)],
+      ['پیشرفت برنامه‌ای ٪', perf?.plannedProgress ?? ''],
+      ['پیشرفت واقعی ٪', perf?.actualProgress ?? ''],
+      ['PV ارزش برنامه‌ای', perf?.plannedValue ?? ''],
+      ['EV ارزش کسب‌شده', perf?.earnedValue ?? ''],
+      ['AC هزینه‌ی واقعی', perf?.actualCost ?? ''],
+      ['SV انحراف زمان', perf?.scheduleVariance ?? ''],
+      ['CV انحراف هزینه', perf?.costVariance ?? ''],
+      ['SPI', perf?.spi ?? ''],
+      ['CPI', perf?.cpi ?? ''],
+      ['EAC پیش‌بینی هزینه‌ی نهایی', perf?.estimateAtCompletion ?? ''],
+    ])
+  }
+
+  if (contracts.items === null) return <p className="data-state">در حال دریافت اطلاعات...</p>
+
+  return (
+    <>
+      <ControlKpis items={[
+        { icon: WalletCards, tone: 'navy', label: 'بودجه‌ی پروژه', value: budget ? rialsText(budget) : '—', note: 'هزینه‌ی ثبت‌شده‌ی پروژه' },
+        { icon: FileText, tone: 'blue', label: 'مبلغ قراردادها', value: rialsText(contracted), note: `${toPersianDigits(summary?.contractCount ?? 0)} قرارداد تأییدشده` },
+        { icon: CircleDollarSign, tone: 'red', label: 'صورت‌حساب‌شده', value: rialsText(invoiced), note: `${percentText(summary?.invoicedPercent)} از قراردادها` },
+        { icon: CheckCircle2, tone: 'green', label: 'پرداخت‌شده', value: rialsText(paid), note: `${percentText(summary?.paidPercent)} از قراردادها` },
+      ]} />
+      <ControlKpis items={[
+        { icon: CircleAlert, tone: 'red', label: 'بدهی معوق', value: rialsText(moneyRials(summary?.totalOutstandingPayable)), note: 'پرداخت‌نشده' },
+        { icon: RefreshCw, tone: 'blue', label: 'تعهد باقی‌مانده', value: rialsText(moneyRials(summary?.totalRemainingCommitment)), note: 'صورت‌حساب‌نشده' },
+        { icon: Clock3, tone: 'navy', label: 'در انتظار تأیید', value: toPersianDigits(pendingContracts + pendingAddenda.length + pendingInvoices.length), note: `${toPersianDigits(pendingInvoices.length)} صورت‌وضعیت · ${toPersianDigits(pendingAddenda.length)} الحاقیه · ${toPersianDigits(pendingContracts)} قرارداد` },
+        { icon: Pencil, tone: 'green', label: 'ثبت‌شده و ارسال‌نشده', value: toPersianDigits(draftContracts), note: 'پیش‌نویس یا ردشده' },
+      ]} />
+      <p className="ue-note cost-unit">همه‌ی مبلغ‌ها به ریال است. هزینه‌ی (بودجه‌ی) پروژه را هم هنگام ثبت پروژه به ریال وارد کنید، وگرنه شاخص‌های هزینه (CPI و ...) درست نمی‌شوند.</p>
+      {(summary?.overInvoicedContracts ?? 0) > 0 && (
+        <div className="users-notice error ctl-notice" role="status"><CircleAlert size={16} /><span>{toPersianDigits(summary.overInvoicedContracts)} قرارداد بیش از مبلغ خود صورت‌حساب شده است.</span></div>
+      )}
+
+      <section className="ctl-grid">
+        <div className="task-panel ctl-panel">
+          <div className="task-panel-title"><div><h3>زمان و هزینه نسبت به پیشرفت</h3><p>ارزش کسب‌شده: پول را با کار انجام‌شده مقایسه می‌کند.</p></div><button type="button" className="ctl-link" onClick={exportOverview}><Download size={14} /> خروجی Excel</button></div>
+          {perf === undefined ? <p className="data-state">در حال محاسبه...</p> : perf === null ? (
+            <p className="ue-note">
+              شاخص‌های زمان و هزینه برای این پروژه در دسترس نیست: پروژه باید تأییدشده باشد و شما باید عضو تیم آن باشید (یا دسترسی «مشاهده‌ی گزارش‌های کل سازمان» داشته باشید). اعداد قراردادی بالا همچنان درست‌اند.
+            </p>
+          ) : (
+            <>
+              <div className="cost-health">
+                <div className={`cost-index ${healthClass[perf.health] || 'neutral'}`}><small>شاخص زمان (SPI)</small><strong>{indexText(perf.spi)}</strong><span>{perf.spi === null || perf.spi === undefined ? 'هنوز قابل محاسبه نیست' : perf.spi >= 0.95 ? 'مطابق برنامه' : perf.spi >= 0.85 ? 'کمی عقب' : 'عقب از برنامه'}</span></div>
+                <div className={`cost-index ${perf.cpi === null || perf.cpi === undefined ? 'neutral' : perf.cpi >= 0.95 ? 'green' : perf.cpi >= 0.85 ? 'yellow' : 'red'}`}><small>شاخص هزینه (CPI)</small><strong>{indexText(perf.cpi)}</strong><span>{perf.cpi === null || perf.cpi === undefined ? 'هنوز قابل محاسبه نیست' : perf.cpi >= 0.95 ? 'مطابق بودجه' : perf.cpi >= 0.85 ? 'کمی بیش‌تر از بودجه' : 'بیش از بودجه'}</span></div>
+                <div className={`cost-index ${healthClass[perf.health] || 'neutral'}`}><small>وضعیت کلی</small><strong>{healthLabels[perf.health] || '—'}</strong><span>بدترین‌ِ دو شاخص</span></div>
+              </div>
+              {!perf.progressAvailable && <p className="ue-note">پیشرفت این پروژه ثبت نشده (برنامه‌ی زمان‌بندی یا وظیفه‌ای تعریف نشده)، پس شاخص‌ها خالی‌اند.</p>}
+              <div className="table-scroll"><table className="cost-ev">
+                <tbody>
+                  <tr><th title="بودجه × درصد برنامه‌ای">ارزش برنامه‌ای (PV)</th><td>{rialsText(perf.plannedValue)}</td><th title="بودجه × درصد واقعی">ارزش کسب‌شده (EV)</th><td>{rialsText(perf.earnedValue)}</td></tr>
+                  <tr><th title="صورت‌حساب‌های تأییدشده">هزینه‌ی واقعی (AC)</th><td>{rialsText(perf.actualCost)}</td><th title="EV − AC">انحراف هزینه (CV)</th><td className={perf.costVariance < 0 ? 'neg' : ''}>{rialsText(perf.costVariance)}</td></tr>
+                  <tr><th title="EV − PV">انحراف زمان (SV)</th><td className={perf.scheduleVariance < 0 ? 'neg' : ''}>{rialsText(perf.scheduleVariance)}</td><th title="بودجه ÷ CPI">پیش‌بینی هزینه‌ی نهایی (EAC)</th><td>{rialsText(perf.estimateAtCompletion)}</td></tr>
+                  <tr><th>باقی‌مانده تا پایان (ETC)</th><td>{rialsText(perf.estimateToComplete)}</td><th title="بودجه − EAC">اختلاف نهایی (VAC)</th><td className={perf.varianceAtCompletion < 0 ? 'neg' : ''}>{rialsText(perf.varianceAtCompletion)}</td></tr>
+                  <tr><th>پایان پیش‌بینی‌شده</th><td>{jalaliText(perf.forecastEnd)}</td><th>تأخیر پیش‌بینی‌شده</th><td>{perf.forecastDelayDays === null || perf.forecastDelayDays === undefined ? '—' : `${toPersianDigits(perf.forecastDelayDays)} روز`}</td></tr>
+                </tbody>
+              </table></div>
+            </>
+          )}
+        </div>
+
+        <div className="task-panel ctl-panel">
+          <div className="task-panel-title"><div><h3>پیشرفت فیزیکی و مالی</h3><p>آیا پولی که خرج شده با کاری که انجام شده می‌خواند؟</p></div></div>
+          {[
+            { label: 'پیشرفت برنامه‌ای', value: plannedPercent, tone: 'planned' },
+            { label: 'پیشرفت فیزیکی (کار انجام‌شده)', value: physicalPercent, tone: 'physical' },
+            { label: 'پیشرفت مالی (صورت‌حساب‌شده ÷ بودجه)', value: financialPercent, tone: 'financial' },
+          ].map((row) => (
+            <div className="cost-bar-row" key={row.label}>
+              <span>{row.label}</span>
+              <div className="cost-bar"><i className={row.tone} style={{ width: `${Math.max(0, Math.min(100, row.value ?? 0))}%` }} /></div>
+              <b>{percentText(row.value)}</b>
+            </div>
+          ))}
+          {gap !== null && (
+            <p className={`cost-gap ${gap > 5 ? 'bad' : gap < -5 ? 'good' : ''}`}>
+              {gap > 5 ? `پول ${toPersianDigits(Math.round(gap))} درصد بیش از کار انجام‌شده خرج شده است.` : gap < -5 ? `کار ${toPersianDigits(Math.round(-gap))} درصد جلوتر از هزینه‌ی صورت‌حساب‌شده است.` : 'پیشرفت مالی و فیزیکی تقریباً هم‌خوان است.'}
+            </p>
+          )}
+          {budget <= 0 && <p className="ue-note">بودجه‌ی پروژه ثبت نشده است، پس پیشرفت مالی محاسبه نمی‌شود.</p>}
+          <h4 className="cost-subtitle">منحنی S پیشرفت</h4>
+          {curve === undefined ? <p className="data-state">در حال دریافت...</p> : <SCurveChart curve={curve} />}
+          <h4 className="cost-subtitle">منحنی S هزینه (PV، EV و AC)</h4>
+          {costCurve === undefined ? <p className="data-state">در حال دریافت...</p> : <CostCurveChart curve={costCurve} />}
+        </div>
+      </section>
+    </>
+  )
+}
+
+/** The money S-curve: planned value, earned value and actual cost (approved invoices) over time. */
+function CostCurveChart({ curve }) {
+  const planned = curve?.plannedValue || []
+  const earned = curve?.earnedValue || []
+  const actual = curve?.actualCost || []
+  if (!curve || (planned.length < 2 && actual.length < 1)) return <p className="ue-note">برای رسم منحنی هزینه، پروژه باید بودجه و برنامه‌ی زمان‌بندی داشته باشد (یا صورت‌حساب تأییدشده‌ای ثبت شده باشد).</p>
+  const width = 560; const height = 230
+  const pad = { left: 62, right: 12, top: 12, bottom: 30 }
+  const start = new Date(curve.projectStart).getTime()
+  const end = Math.max(new Date(curve.projectFinish).getTime(), new Date(curve.today).getTime())
+  const top = Math.max(Number(curve.budgetAtCompletion) || 0, ...planned.map((p) => p.amount), ...earned.map((p) => p.amount), ...actual.map((p) => p.amount), 1)
+  const x = (date) => pad.left + ((new Date(date).getTime() - start) / (end - start || 1)) * (width - pad.left - pad.right)
+  const y = (value) => height - pad.bottom - (Number(value) / top) * (height - pad.top - pad.bottom)
+  const line = (points) => points.map((point) => `${x(point.date).toFixed(1)},${y(point.amount).toFixed(1)}`).join(' ')
+  const todayMs = new Date(curve.today).getTime()
+  const todayX = todayMs >= start && todayMs <= end ? x(curve.today) : null
+  return (
+    <div className="cost-chart" dir="ltr">
+      <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="منحنی S هزینه">
+        {[0, 0.25, 0.5, 0.75, 1].map((tick) => (
+          <g key={tick}><line x1={pad.left} x2={width - pad.right} y1={y(top * tick)} y2={y(top * tick)} className="grid" /><text x={pad.left - 6} y={y(top * tick) + 4} textAnchor="end">{compactRials(top * tick)}</text></g>
+        ))}
+        {planned.length > 1 && <polyline points={line(planned)} className="planned" fill="none" />}
+        {earned.length > 1 && <polyline points={line(earned)} className="actual" fill="none" />}
+        {earned.map((point) => <circle key={point.date} cx={x(point.date)} cy={y(point.amount)} r="3" className="actual-dot" />)}
+        {actual.length > 1 && <polyline points={line(actual)} className="cost-ac" fill="none" />}
+        {todayX !== null && <g><line x1={todayX} x2={todayX} y1={pad.top} y2={height - pad.bottom} className="today" /><text x={todayX} y={pad.top + 9} textAnchor="middle">امروز</text></g>}
+        <text x={pad.left} y={height - 8} textAnchor="start">{jalaliText(curve.projectStart)}</text>
+        <text x={width - pad.right} y={height - 8} textAnchor="end">{jalaliText(curve.projectFinish)}</text>
+      </svg>
+      <div className="cost-legend" dir="rtl">
+        <span><i className="planned" />ارزش برنامه‌ای (PV)</span><span><i className="actual" />ارزش کسب‌شده (EV)</span><span><i className="ac" />هزینه‌ی واقعی (AC)</span>
+        {!curve.contractsAvailable && <em>ماژول قراردادها فعال نیست؛ هزینه‌ی واقعی ندارد</em>}
+      </div>
+    </div>
+  )
+}
+
+function SCurveChart({ curve }) {
+  const planned = curve?.planned || []
+  const actual = curve?.actual || []
+  if (planned.length < 2) return <p className="ue-note">برای رسم منحنی، پروژه باید برنامه‌ی زمان‌بندی (فعالیت با تاریخ) داشته باشد.</p>
+  const width = 560; const height = 230
+  const pad = { left: 38, right: 12, top: 12, bottom: 30 }
+  const start = new Date(planned[0].date).getTime()
+  const end = new Date(planned[planned.length - 1].date).getTime()
+  const x = (date) => pad.left + ((new Date(date).getTime() - start) / (end - start || 1)) * (width - pad.left - pad.right)
+  const y = (value) => height - pad.bottom - (Number(value) / 100) * (height - pad.top - pad.bottom)
+  const line = (points, valueOf) => points.map((point) => `${x(point.date).toFixed(1)},${y(valueOf(point)).toFixed(1)}`).join(' ')
+  const todayX = curve.today && new Date(curve.today).getTime() >= start && new Date(curve.today).getTime() <= end ? x(curve.today) : null
+  return (
+    <div className="cost-chart" dir="ltr">
+      <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="منحنی S پیشرفت">
+        {[0, 25, 50, 75, 100].map((tick) => (
+          <g key={tick}><line x1={pad.left} x2={width - pad.right} y1={y(tick)} y2={y(tick)} className="grid" /><text x={pad.left - 6} y={y(tick) + 4} textAnchor="end">{toPersianDigits(tick)}</text></g>
+        ))}
+        <polyline points={line(planned, (point) => point.plannedProgress)} className="planned" fill="none" />
+        {actual.length > 1 && <polyline points={line(actual, (point) => point.actualProgress)} className="actual" fill="none" />}
+        {actual.map((point) => <circle key={point.date} cx={x(point.date)} cy={y(point.actualProgress)} r="3.2" className="actual-dot" />)}
+        {todayX !== null && <g><line x1={todayX} x2={todayX} y1={pad.top} y2={height - pad.bottom} className="today" /><text x={todayX} y={pad.top + 9} textAnchor="middle">امروز</text></g>}
+        <text x={pad.left} y={height - 8} textAnchor="start">{jalaliText(planned[0].date)}</text>
+        <text x={width - pad.right} y={height - 8} textAnchor="end">{jalaliText(planned[planned.length - 1].date)}</text>
+      </svg>
+      <div className="cost-legend" dir="rtl"><span><i className="planned" />برنامه‌ای</span><span><i className="actual" />واقعی (ثبت‌شده)</span>{actual.length === 0 && <em>هنوز نقطه‌ی واقعی ثبت نشده (عکس‌برداری پیشرفت)</em>}</div>
+    </div>
+  )
+}
+
+/* ---- Contracts: list, details with addenda and invoices, payments ---- */
+
+function CostContracts({ data, contracts }) {
+  const { can } = useAuth()
+  const rights = {
+    create: can('Contracts.Create'), edit: can('Contracts.Edit'), remove: can('Contracts.Delete'), submit: can('Contracts.Submit'),
+    addenda: can('Contracts.ManageAddenda'), invoices: can('Contracts.ManageInvoices'), pay: can('Contracts.RecordPayments'),
+  }
+  const [notice, setNotice] = useState(null)
+  const [form, setForm] = useState(null)
+  const [detailId, setDetailId] = useState(null)
+  const items = contracts.items || []
+
+  const act = (call, text) => runAction(call, text, setNotice, contracts.reload)
+  const removeContract = (contract) => {
+    if (!window.confirm(`قرارداد «${contract.title}» حذف شود؟`)) return
+    act(() => contractsApi.remove(contract.id), 'قرارداد حذف شد.')
+  }
+
+  const exportContracts = () => downloadCsv(`contracts-${data.selectedProject?.code || 'project'}.csv`,
+    ['شماره', 'عنوان', 'طرف قرارداد', 'مبلغ فعلی (ریال)', 'صورت‌حساب‌شده (ریال)', 'پرداخت‌شده (ریال)', 'بدهی معوق (ریال)', 'تاریخ شروع', 'تاریخ پایان', 'وضعیت', 'تأیید'],
+    items.map(({ contract }) => [contract.contractNumber, contract.title, contract.counterparty, moneyRials(contract.summary?.currentAmount), moneyRials(contract.summary?.invoicedAmount), moneyRials(contract.summary?.paidAmount), moneyRials(contract.summary?.outstandingPayable), contract.startDateFa || '', contract.endDateFa || '', enumLabel(contract.status, contractStatusLabels), enumLabel(contract.approvalStatus, approvalLabels)]))
+  const exportInvoices = () => downloadCsv(`invoices-${data.selectedProject?.code || 'project'}.csv`,
+    ['قرارداد', 'طرف قرارداد', 'شماره صورت‌وضعیت', 'عنوان', 'تاریخ', 'بازه از', 'بازه تا', 'مبلغ (ریال)', 'پرداخت‌شده (ریال)', 'پرداخت‌نشده (ریال)', 'آخرین پرداخت', 'تأیید'],
+    items.flatMap(({ contract, invoices }) => invoices.map((invoice) => [contract.contractNumber, contract.counterparty, invoice.invoiceNumber, invoice.title || '', invoice.invoiceDateFa, invoice.periodStartDateFa || '', invoice.periodEndDateFa || '', moneyRials(invoice.amount), moneyRials(invoice.paidAmount), moneyRials(invoice.unpaidAmount), invoice.lastPaymentDateFa || '', enumLabel(invoice.approvalStatus, approvalLabels)])))
+
+  return (
+    <>
+      <PageNotice notice={notice} onClose={() => setNotice(null)} />
+      <section className="task-panel task-table-panel ctl-panel ctl-block">
+        <div className="task-panel-title">
+          <div><h3>قراردادهای پروژه</h3><p>فقط قرارداد تأییدشده می‌تواند الحاقیه و صورت‌وضعیت بگیرد؛ فقط مبلغ‌های تأییدشده در هزینه حساب می‌شوند.</p></div>
+          <div className="ctl-filters">
+            <button type="button" className="ctl-link" onClick={exportContracts} disabled={!items.length}><Download size={14} /> قراردادها</button>
+            <button type="button" className="ctl-link" onClick={exportInvoices} disabled={!items.length}><Download size={14} /> صورت‌وضعیت‌ها</button>
+            {rights.create && <button type="button" className="users-add" onClick={() => setForm({ contract: null })} disabled={!data.selectedProjectId}><Plus size={16} />قرارداد جدید</button>}
+          </div>
+        </div>
+        <DataState loading={contracts.items === null} empty={!items.length}>
+          <div className="table-scroll"><table>
+            <thead><tr><th>قرارداد</th><th>طرف قرارداد</th><th>مبلغ فعلی (ریال)</th><th>صورت‌حساب‌شده</th><th>پرداخت‌شده</th><th>پایان</th><th>وضعیت</th><th>تأیید</th><th>عملیات</th></tr></thead>
+            <tbody>
+              {items.map(({ contract }) => {
+                const summary = contract.summary || {}
+                const approved = contract.approvalStatus === 2
+                return (
+                  <tr key={contract.id}>
+                    <td className="ctl-main"><strong>{contract.title}</strong><small>شماره {contract.contractNumberFa}</small></td>
+                    <td>{contract.counterparty}</td>
+                    <td>{rialsText(moneyRials(approved ? summary.currentAmount : contract.originalAmount))}</td>
+                    <td>{approved ? <>{rialsText(moneyRials(summary.invoicedAmount))}<small className="ctl-sp"> ({percentText(summary.invoicedPercent)})</small></> : '—'}</td>
+                    <td>{approved ? <>{rialsText(moneyRials(summary.paidAmount))}<small className="ctl-sp"> ({percentText(summary.paidPercent)})</small></> : '—'}</td>
+                    <td>{summary.currentEndDateFa || contract.endDateFa || '—'}</td>
+                    <td>{contractStatusText(contract)}</td>
+                    <td><ApprovalBadge status={contract.approvalStatus} /></td>
+                    <td>
+                      <span className="row-actions">
+                        <button type="button" title="جزئیات، الحاقیه‌ها و صورت‌وضعیت‌ها" aria-label="جزئیات" onClick={() => setDetailId(contract.id)}><Eye size={15} /></button>
+                        {rights.edit && contract.approvalStatus !== 1 && <button type="button" title="ویرایش" aria-label="ویرایش" onClick={() => setForm({ contract })}><Pencil size={15} /></button>}
+                        {rights.submit && isEditableApproval(contract.approvalStatus) && <button type="button" className="ok" title="ارسال برای تأیید" aria-label="ارسال برای تأیید" onClick={() => act(() => contractsApi.submit(contract.id), 'قرارداد برای تأیید ارسال شد.')}><Send size={15} /></button>}
+                        {rights.remove && contract.approvalStatus !== 1 && <button type="button" className="danger" title="حذف" aria-label="حذف" onClick={() => removeContract(contract)}><Trash2 size={15} /></button>}
+                      </span>
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table></div>
+        </DataState>
+      </section>
+
+      {form && (
+        <ContractFormDialog
+          projectId={data.selectedProjectId} tenantId={data.tenantId} contract={form.contract}
+          onClose={() => setForm(null)}
+          onSaved={(result) => { setForm(null); setNotice(result); contracts.reload() }}
+        />
+      )}
+      {detailId && items.some(({ contract }) => contract.id === detailId) && (
+        <ContractDetailDialog
+          detail={items.find(({ contract }) => contract.id === detailId)} rights={rights} data={data}
+          onClose={() => setDetailId(null)} reload={contracts.reload}
+        />
+      )}
+    </>
+  )
+}
+
+function ContractFormDialog({ projectId, tenantId, contract, onClose, onSaved }) {
+  const isNew = !contract
+  const approved = contract?.approvalStatus === 2
+  const [form, setForm] = useState({
+    contractNumber: contract?.contractNumber || '', title: contract?.title || '', counterparty: contract?.counterparty || '', supplierId: contract?.supplierId || '', scopeOfWork: contract?.scopeOfWork || '',
+    supervisorName: contract?.supervisorName || '', beneficiaryName: contract?.beneficiaryName || '', description: contract?.description || '',
+    signDate: contract?.signDate || '', startDate: contract?.startDate || '', endDate: contract?.endDate || '',
+    amount: contract ? String(Math.round(moneyRials(contract.originalAmount))) : '',
+  })
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const [suppliers, setSuppliers] = useState([])
+  const set = (key) => (event) => setForm((current) => ({ ...current, [key]: event.target.value }))
+
+  // The party of the contract is picked from the suppliers; a name typed instead finds (or starts) the supplier of that name.
+  useEffect(() => {
+    let cancelled = false
+    suppliersApi.list().then((result) => { if (!cancelled && result.isSuccess) setSuppliers(arrayPayload(result)) })
+    return () => { cancelled = true }
+  }, [])
+  const pickableSuppliers = suppliers.filter((item) => item.status === 0 || item.id === form.supplierId)
+
+  async function submit(event) {
+    event.preventDefault()
+    if (!form.contractNumber.trim() || !form.title.trim() || (!form.supplierId && !form.counterparty.trim())) { setError('شماره، عنوان و طرف قرارداد را وارد کنید.'); return }
+    if (!form.amount || Number(form.amount) <= 0) { setError('مبلغ قرارداد (ریال) را وارد کنید.'); return }
+    if (form.startDate && form.endDate && form.endDate < form.startDate) { setError('تاریخ پایان نمی‌تواند قبل از تاریخ شروع باشد.'); return }
+    setSaving(true); setError('')
+    const fields = {
+      contractNumber: toLatinDigits(form.contractNumber.trim()), title: form.title.trim(),
+      ...(form.supplierId ? { supplierId: form.supplierId, counterparty: pickableSuppliers.find((item) => item.id === form.supplierId)?.name || form.counterparty.trim() } : { counterparty: form.counterparty.trim() }),
+      description: emptyToNull(form.description.trim()), scopeOfWork: form.scopeOfWork.trim(), signDate: emptyToNull(form.signDate), startDate: emptyToNull(form.startDate), endDate: emptyToNull(form.endDate),
+      originalAmount: Number(form.amount), supervisorName: emptyToNull(form.supervisorName.trim()), beneficiaryName: emptyToNull(form.beneficiaryName.trim()),
+    }
+    const result = isNew ? await contractsApi.create({ tenantId, projectId, ...fields }) : await contractsApi.update(contract.id, fields)
+    setSaving(false)
+    if (!result.isSuccess) { setError(PersianMessages.error(result.error)); return }
+    onSaved({ type: 'success', text: isNew ? `قرارداد «${fields.title}» ثبت شد. برای استفاده، آن را برای تأیید ارسال کنید.` : `قرارداد «${fields.title}» ذخیره شد.` })
+  }
+
+  return (
+    <ControlDialog
+      size="sm" icon={isNew ? Plus : Pencil} title={isNew ? 'قرارداد جدید' : `ویرایش «${contract.title}»`} onClose={onClose}
+      footer={(
+        <>
+          {error && <span className="ue-error"><TriangleAlert size={15} />{error}</span>}
+          <div className="ue-foot-actions"><button type="button" className="ue-cancel" onClick={onClose}>انصراف</button><button type="submit" form="contract-form" className="ue-save" disabled={saving}>{saving ? 'در حال ذخیره...' : isNew ? 'ثبت قرارداد' : 'ذخیره'}</button></div>
+        </>
+      )}
+    >
+      <form id="contract-form" onSubmit={submit} noValidate>
+        <div className="ue-card"><div className="ue-grid">
+          <CtlField label="شماره‌ی قرارداد" required><input className="ltr-input" value={form.contractNumber} onChange={set('contractNumber')} maxLength={100} autoFocus /></CtlField>
+          <CtlField label="عنوان" required><input value={form.title} onChange={set('title')} maxLength={300} /></CtlField>
+          <CtlField label="طرف قرارداد" required hint="پیمانکار، تأمین‌کننده یا مشاور؛ از فهرست انتخاب کنید یا نامِ تازه را بنویسید" wide>
+            <select value={form.supplierId} onChange={set('supplierId')}>
+              <option value="">— نام تازه (تایپی) —</option>
+              {pickableSuppliers.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+            </select>
+          </CtlField>
+          {!form.supplierId && <CtlField label="نام طرف قرارداد" wide><input value={form.counterparty} onChange={set('counterparty')} maxLength={300} /></CtlField>}
+          <CtlField label="ناظر"><input value={form.supervisorName} onChange={set('supervisorName')} maxLength={300} /></CtlField>
+          <CtlField label="بهره‌بردار"><input value={form.beneficiaryName} onChange={set('beneficiaryName')} maxLength={300} /></CtlField>
+        </div></div>
+        <div className="ue-card ue-card--accent"><div className="ue-grid">
+          <CtlField label="مبلغ قرارداد (ریال)" required hint={approved ? 'مبلغ قراردادِ تأییدشده فقط با الحاقیه تغییر می‌کند.' : tomansHint(form.amount)}>
+            <AmountInput value={form.amount} onChange={(value) => setForm((current) => ({ ...current, amount: value }))} disabled={approved} />
+          </CtlField>
+          <span />
+          <CtlField label="تاریخ امضا"><input type="date" value={form.signDate} onChange={set('signDate')} /></CtlField>
+          <CtlField label="تاریخ شروع"><input type="date" value={form.startDate} onChange={set('startDate')} /></CtlField>
+          <CtlField label="تاریخ پایان"><input type="date" value={form.endDate} onChange={set('endDate')} /></CtlField>
+          <CtlField label="محدوده‌ی کار" wide hint="آنچه پیمان شامل می‌شود"><textarea rows={3} value={form.scopeOfWork} onChange={set('scopeOfWork')} maxLength={4000} /></CtlField>
+          <CtlField label="توضیحات" wide><textarea rows={2} value={form.description} onChange={set('description')} maxLength={4000} /></CtlField>
+        </div></div>
+      </form>
+    </ControlDialog>
+  )
+}
+
+function ContractDetailDialog({ detail, rights, data, onClose, reload }) {
+  const { contract, addenda, invoices } = detail
+  const [notice, setNotice] = useState(null)
+  const [sub, setSub] = useState(null)
+  const approved = contract.approvalStatus === 2
+  const open = approved && contract.status !== 3
+  const summary = contract.summary || {}
+  const act = (call, text) => runAction(call, text, setNotice, reload)
+
+  return (
+    <ControlDialog
+      icon={FileText} title={contract.title} subtitle={`شماره ${contract.contractNumberFa} · ${contract.counterparty}`} onClose={onClose}
+      footer={<div className="ue-foot-actions"><button type="button" className="ue-cancel" onClick={onClose}>بستن</button></div>}
+    >
+      <PageNotice notice={notice} onClose={() => setNotice(null)} />
+      <div className="cost-mini">
+        <div><small>مبلغ فعلی</small><b>{rialsText(moneyRials(approved ? summary.currentAmount : contract.originalAmount))}</b></div>
+        <div><small>صورت‌حساب‌شده</small><b>{approved ? rialsText(moneyRials(summary.invoicedAmount)) : '—'}</b></div>
+        <div><small>پرداخت‌شده</small><b>{approved ? rialsText(moneyRials(summary.paidAmount)) : '—'}</b></div>
+        <div><small>بدهی معوق</small><b>{approved ? rialsText(moneyRials(summary.outstandingPayable)) : '—'}</b></div>
+        <div><small>تعهد باقی‌مانده</small><b>{approved ? rialsText(moneyRials(summary.remainingCommitment)) : '—'}</b></div>
+      </div>
+      <p className="ue-note">
+        <ApprovalBadge status={contract.approvalStatus} /> وضعیت: {contractStatusText(contract)}
+        {contract.startDateFa && ` · از ${contract.startDateFa}`}{(summary.currentEndDateFa || contract.endDateFa) && ` تا ${summary.currentEndDateFa || contract.endDateFa}`}
+        {contract.supervisorName && ` · ناظر: ${contract.supervisorName}`}{contract.beneficiaryName && ` · بهره‌بردار: ${contract.beneficiaryName}`}
+        {approved && rights.edit && (
+          <> · <select className="ctl-select" value={contract.status} aria-label="وضعیت قرارداد" onChange={(e) => act(() => contractsApi.setStatus(contract.id, Number(e.target.value)), 'وضعیت قرارداد ذخیره شد.')}>
+            {contract.status === 0 && <option value={0} disabled>فعال‌نشده</option>}
+            {[1, 2, 3].map((value) => <option key={value} value={value}>{contractStatusLabels[value]}</option>)}
+          </select></>
+        )}
+      </p>
+      {!approved && <p className="ue-note">الحاقیه و صورت‌وضعیت فقط بعد از تأیید قرارداد ثبت می‌شود.</p>}
+      {contract.scopeOfWork && <p className="ue-note"><strong>محدوده‌ی کار:</strong> {contract.scopeOfWork}</p>}
+      <ContractCommitments contract={contract} canEdit={rights.edit} />
+
+      <section className="ue-section">
+        <div className="ue-section-head"><h4><RefreshCw size={16} />الحاقیه‌ها</h4>{rights.addenda && open && <button type="button" className="ctl-link" onClick={() => setSub({ kind: 'addendum', item: null })}><Plus size={14} /> الحاقیه‌ی جدید</button>}</div>
+        {!addenda.length ? <p className="ue-note">الحاقیه‌ای ثبت نشده است.</p> : (
+          <div className="table-scroll"><table className="cost-sub">
+            <thead><tr><th>#</th><th>عنوان</th><th>تغییر مبلغ</th><th>تمدید</th><th>تأیید</th><th /></tr></thead>
+            <tbody>{addenda.map((item) => (
+              <tr key={item.id}>
+                <td>{toPersianDigits(item.number)}</td><td>{item.title}<small className="ctl-sp"> {item.addendumDateFa || ''}</small></td>
+                <td className={item.amountChange < 0 ? 'neg' : ''}>{item.amountChange > 0 ? '+' : ''}{rialsText(item.amountChange)}</td>
+                <td>{item.extensionDays ? `${toPersianDigits(item.extensionDays)} روز` : '—'}</td><td><ApprovalBadge status={item.approvalStatus} /></td>
+                <td>{rights.addenda && isEditableApproval(item.approvalStatus) && (
+                  <span className="row-actions">
+                    <button type="button" title="ویرایش" aria-label="ویرایش" onClick={() => setSub({ kind: 'addendum', item })}><Pencil size={15} /></button>
+                    <button type="button" className="ok" title="ارسال برای تأیید" aria-label="ارسال برای تأیید" onClick={() => act(() => contractsApi.submitAddendum(contract.id, item.id), 'الحاقیه برای تأیید ارسال شد.')}><Send size={15} /></button>
+                    <button type="button" className="danger" title="حذف" aria-label="حذف" onClick={() => window.confirm('این الحاقیه حذف شود؟') && act(() => contractsApi.deleteAddendum(contract.id, item.id), 'الحاقیه حذف شد.')}><Trash2 size={15} /></button>
+                  </span>
+                )}</td>
+              </tr>
+            ))}</tbody>
+          </table></div>
+        )}
+      </section>
+
+      <section className="ue-section">
+        <div className="ue-section-head"><h4><CircleDollarSign size={16} />صورت‌وضعیت‌ها و پرداخت‌ها</h4>{rights.invoices && open && <button type="button" className="ctl-link" onClick={() => setSub({ kind: 'invoice', item: null })}><Plus size={14} /> صورت‌وضعیت جدید</button>}</div>
+        {!invoices.length ? <p className="ue-note">صورت‌وضعیتی ثبت نشده است.</p> : (
+          <div className="table-scroll"><table className="cost-sub">
+            <thead><tr><th>شماره</th><th>مبلغ</th><th>پرداخت‌شده</th><th>مانده</th><th>تأیید</th><th /></tr></thead>
+            <tbody>{invoices.map((item) => (
+              <tr key={item.id}>
+                <td>{item.invoiceNumberFa}<small className="ctl-sp"> {item.title || ''} {item.invoiceDateFa}</small></td>
+                <td>{rialsText(moneyRials(item.amount))}</td>
+                <td>{rialsText(moneyRials(item.paidAmount))}{item.lastPaymentDateFa && <small className="ctl-sp"> ({item.lastPaymentDateFa})</small>}</td>
+                <td>{rialsText(moneyRials(item.unpaidAmount))}</td><td><ApprovalBadge status={item.approvalStatus} /></td>
+                <td><span className="row-actions">
+                  {rights.pay && item.approvalStatus === 2 && <button type="button" className="ok" title="ثبت پرداخت" aria-label="ثبت پرداخت" onClick={() => setSub({ kind: 'payment', item })}><WalletCards size={15} /></button>}
+                  {rights.invoices && isEditableApproval(item.approvalStatus) && (
+                    <>
+                      <button type="button" title="ویرایش" aria-label="ویرایش" onClick={() => setSub({ kind: 'invoice', item })}><Pencil size={15} /></button>
+                      <button type="button" className="ok" title="ارسال برای تأیید" aria-label="ارسال برای تأیید" onClick={() => act(() => contractsApi.submitInvoice(contract.id, item.id), 'صورت‌وضعیت برای تأیید ارسال شد.')}><Send size={15} /></button>
+                      <button type="button" className="danger" title="حذف" aria-label="حذف" onClick={() => window.confirm('این صورت‌وضعیت حذف شود؟') && act(() => contractsApi.deleteInvoice(contract.id, item.id), 'صورت‌وضعیت حذف شد.')}><Trash2 size={15} /></button>
+                    </>
+                  )}
+                </span></td>
+              </tr>
+            ))}</tbody>
+          </table></div>
+        )}
+      </section>
+
+      {sub?.kind === 'addendum' && <AddendumFormDialog contract={contract} tenantId={data.tenantId} item={sub.item} onClose={() => setSub(null)} onSaved={(result) => { setSub(null); setNotice(result); reload() }} />}
+      {sub?.kind === 'invoice' && <InvoiceFormDialog contract={contract} tenantId={data.tenantId} item={sub.item} onClose={() => setSub(null)} onSaved={(result) => { setSub(null); setNotice(result); reload() }} />}
+      {sub?.kind === 'payment' && <PaymentDialog contract={contract} invoice={sub.item} onClose={() => setSub(null)} onSaved={(result) => { setSub(null); setNotice(result); reload() }} />}
+    </ControlDialog>
+  )
+}
+
+const milestoneStatusLabels = { 0: 'شروع‌نشده', 1: 'در حال انجام', 2: 'انجام‌شده' }
+const obligationStatusLabels = { 0: 'باز', 1: 'ایفا شده', 2: 'نقض شده' }
+const obligationPartyLabels = { 0: 'طرف قرارداد', 1: 'کارفرما' }
+
+/** The milestones and obligations of one contract, read when the dialog opens and again after each change. */
+function ContractCommitments({ contract, canEdit }) {
+  const [milestones, setMilestones] = useState(null)
+  const [obligations, setObligations] = useState(null)
+  const [links, setLinks] = useState([])
+  const [reloadKey, setReloadKey] = useState(0)
+  const [notice, setNotice] = useState(null)
+  const [sub, setSub] = useState(null)
+  const reload = () => setReloadKey((value) => value + 1)
+
+  useEffect(() => {
+    let cancelled = false
+    contractsApi.milestones(contract.id).then((result) => { if (!cancelled) setMilestones(result.isSuccess ? arrayPayload(result) : []) })
+    contractsApi.obligations(contract.id).then((result) => { if (!cancelled) setObligations(result.isSuccess ? arrayPayload(result) : []) })
+    contractsApi.links(contract.id).then((result) => { if (!cancelled) setLinks(result.isSuccess ? arrayPayload(result) : []) })
+    return () => { cancelled = true }
+  }, [contract.id, reloadKey])
+
+  const act = (call, text) => runAction(call, text, setNotice, reload)
+  const done = (result) => { setSub(null); setNotice(result); reload() }
+  const linksOf = (subjectType, subjectId) => links.filter((link) => link.subjectType === subjectType && link.subjectId === subjectId)
+  const linkButton = (subjectType, subject) => canEdit && <button type="button" title="پیوند سند یا اقدام" aria-label="پیوند سند یا اقدام" onClick={() => setSub({ kind: 'link', subjectType, subject })}><Paperclip size={15} /></button>
+  const linkChips = (subjectType, subjectId) => {
+    const own = linksOf(subjectType, subjectId)
+    return own.length > 0 && (
+      <span className="ctl-links">
+        {own.map((link) => (
+          <span key={link.id} className="ctl-chip" title={link.note || undefined}>
+            {link.kind === 0 ? 'سند' : 'اقدام'}: {link.title}
+            {canEdit && <button type="button" aria-label="حذف پیوند" title="حذف پیوند" onClick={() => window.confirm('این پیوند حذف شود؟') && act(() => contractsApi.deleteLink(contract.id, link.id), 'پیوند حذف شد.')}><X size={12} /></button>}
+          </span>
+        ))}
+      </span>
+    )
+  }
+
+  return (
+    <>
+      <PageNotice notice={notice} onClose={() => setNotice(null)} />
+      <section className="ue-section">
+        <div className="ue-section-head"><h4><CalendarCheck size={16} />نقاط عطف</h4>{canEdit && <button type="button" className="ctl-link" onClick={() => setSub({ kind: 'milestone', item: null })}><Plus size={14} /> نقطه‌ی عطف تازه</button>}</div>
+        {milestones === null ? <p className="ue-note">در حال بارگذاری...</p> : !milestones.length ? <p className="ue-note">نقطه‌ی عطفی ثبت نشده است.</p> : (
+          <div className="table-scroll"><table className="cost-sub">
+            <thead><tr><th>عنوان</th><th>سررسید</th><th>وضعیت</th><th>انجام</th><th /></tr></thead>
+            <tbody>{milestones.map((item) => (
+              <tr key={item.id}>
+                <td>{item.title}{item.description && <small className="ctl-sp"> {item.description}</small>}{linkChips(1, item.id)}</td>
+                <td className={item.isOverdue ? 'neg' : ''}>{item.dueDateFa}{item.isOverdue && <small className="ctl-sp"> معوق</small>}</td>
+                <td>{enumLabel(item.status, milestoneStatusLabels)}</td>
+                <td>{item.completedDateFa || '—'}</td>
+                <td>{canEdit && (
+                  <span className="row-actions">
+                    {linkButton(1, item)}
+                    <button type="button" title="ویرایش" aria-label="ویرایش" onClick={() => setSub({ kind: 'milestone', item })}><Pencil size={15} /></button>
+                    <button type="button" className="danger" title="حذف" aria-label="حذف" onClick={() => window.confirm('این نقطه‌ی عطف حذف شود؟') && act(() => contractsApi.deleteMilestone(contract.id, item.id), 'نقطه‌ی عطف حذف شد.')}><Trash2 size={15} /></button>
+                  </span>
+                )}</td>
+              </tr>
+            ))}</tbody>
+          </table></div>
+        )}
+      </section>
+
+      <section className="ue-section">
+        <div className="ue-section-head"><h4><ClipboardCheck size={16} />تعهدات</h4>{canEdit && <button type="button" className="ctl-link" onClick={() => setSub({ kind: 'obligation', item: null })}><Plus size={14} /> تعهد تازه</button>}</div>
+        {obligations === null ? <p className="ue-note">در حال بارگذاری...</p> : !obligations.length ? <p className="ue-note">تعهدی ثبت نشده است.</p> : (
+          <div className="table-scroll"><table className="cost-sub">
+            <thead><tr><th>عنوان</th><th>بر عهده‌ی</th><th>سررسید</th><th>وضعیت</th><th /></tr></thead>
+            <tbody>{obligations.map((item) => (
+              <tr key={item.id}>
+                <td>{item.title}{item.description && <small className="ctl-sp"> {item.description}</small>}{linkChips(2, item.id)}</td>
+                <td>{enumLabel(item.party, obligationPartyLabels)}</td>
+                <td className={item.isOverdue ? 'neg' : ''}>{item.dueDateFa || '—'}{item.isOverdue && <small className="ctl-sp"> معوق</small>}</td>
+                <td>{enumLabel(item.status, obligationStatusLabels)}{item.fulfilledDateFa && <small className="ctl-sp"> {item.fulfilledDateFa}</small>}</td>
+                <td>{canEdit && (
+                  <span className="row-actions">
+                    {linkButton(2, item)}
+                    <button type="button" title="ویرایش" aria-label="ویرایش" onClick={() => setSub({ kind: 'obligation', item })}><Pencil size={15} /></button>
+                    <button type="button" className="danger" title="حذف" aria-label="حذف" onClick={() => window.confirm('این تعهد حذف شود؟') && act(() => contractsApi.deleteObligation(contract.id, item.id), 'تعهد حذف شد.')}><Trash2 size={15} /></button>
+                  </span>
+                )}</td>
+              </tr>
+            ))}</tbody>
+          </table></div>
+        )}
+      </section>
+
+      <section className="ue-section">
+        <div className="ue-section-head"><h4><Paperclip size={16} />اسناد و پیوست‌های قرارداد</h4>{canEdit && <button type="button" className="ctl-link" onClick={() => setSub({ kind: 'link', subjectType: 0, subject: contract })}><Plus size={14} /> پیوند تازه</button>}</div>
+        {!linksOf(0, contract.id).length ? <p className="ue-note">سند یا اقدامی به این قرارداد پیوند نخورده است.</p> : <p className="ue-note">{linkChips(0, contract.id)}</p>}
+      </section>
+
+      {sub?.kind === 'link' && <LinkFormDialog contract={contract} subjectType={sub.subjectType} subject={sub.subject} onClose={() => setSub(null)} onSaved={done} />}
+      {sub?.kind === 'milestone' && <MilestoneFormDialog contract={contract} item={sub.item} onClose={() => setSub(null)} onSaved={done} />}
+      {sub?.kind === 'obligation' && <ObligationFormDialog contract={contract} item={sub.item} onClose={() => setSub(null)} onSaved={done} />}
+    </>
+  )
+}
+
+/** Links a project document or an action to the contract, or to one of its milestones or obligations (as evidence). */
+function LinkFormDialog({ contract, subjectType, subject, onClose, onSaved }) {
+  const [kind, setKind] = useState('0')
+  const [options, setOptions] = useState(null)
+  const [targetId, setTargetId] = useState('')
+  const [note, setNote] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    let cancelled = false
+    setOptions(null); setTargetId('')
+    const load = kind === '0' ? projectManagementApi.documents(contract.projectId) : actionsApi.list(contract.projectId)
+    load.then((result) => {
+      if (cancelled) return
+      const items = result.isSuccess ? arrayPayload(result) : []
+      setOptions(items.map((item) => ({ id: item.id, title: kind === '0' ? (item.description || item.fileName || 'سند') : (item.title || 'اقدام') })))
+    })
+    return () => { cancelled = true }
+  }, [kind, contract.projectId])
+
+  async function submit(event) {
+    event.preventDefault()
+    const target = (options || []).find((item) => item.id === targetId)
+    if (!target) { setError(kind === '0' ? 'یک سند را انتخاب کنید.' : 'یک اقدام را انتخاب کنید.'); return }
+    setSaving(true); setError('')
+    const result = await contractsApi.createLink(contract.id, {
+      kind: Number(kind), targetId: target.id, title: target.title, subjectType, subjectId: subjectType === 0 ? null : subject.id, note: emptyToNull(note.trim()),
+    })
+    setSaving(false)
+    if (!result.isSuccess) { setError(PersianMessages.error(result.error)); return }
+    onSaved({ type: 'success', text: 'پیوند ثبت شد.' })
+  }
+
+  return (
+    <ControlDialog
+      size="sm" icon={Paperclip} title="پیوند سند یا اقدام" subtitle={subjectType === 0 ? contract.title : subject.title} onClose={onClose}
+      footer={(
+        <>
+          {error && <span className="ue-error"><TriangleAlert size={15} />{error}</span>}
+          <div className="ue-foot-actions"><button type="button" className="ue-cancel" onClick={onClose}>انصراف</button><button type="submit" form="link-form" className="ue-save" disabled={saving}>{saving ? 'در حال ذخیره...' : 'ثبت پیوند'}</button></div>
+        </>
+      )}
+    >
+      <form id="link-form" onSubmit={submit} noValidate>
+        <div className="ue-card"><div className="ue-grid">
+          <CtlField label="نوع"><select value={kind} onChange={(e) => setKind(e.target.value)}><option value="0">سند پروژه</option><option value="1">اقدام</option></select></CtlField>
+          <CtlField label={kind === '0' ? 'سند' : 'اقدام'} required wide hint="از موارد همین پروژه">
+            <select value={targetId} onChange={(e) => setTargetId(e.target.value)} disabled={options === null}>
+              <option value="">{options === null ? 'در حال بارگذاری...' : options.length ? '— انتخاب کنید —' : 'موردی در این پروژه نیست'}</option>
+              {(options || []).map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}
+            </select>
+          </CtlField>
+          <CtlField label="یادداشت" wide><input value={note} onChange={(e) => setNote(e.target.value)} maxLength={1000} /></CtlField>
+        </div></div>
+      </form>
+    </ControlDialog>
+  )
+}
+
+function MilestoneFormDialog({ contract, item, onClose, onSaved }) {
+  const [form, setForm] = useState({
+    title: item?.title || '', description: item?.description || '', dueDate: item?.dueDate || '',
+    status: String(item?.status ?? 0), completedDate: item?.completedDate || '',
+  })
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const set = (key) => (event) => setForm((current) => ({ ...current, [key]: event.target.value }))
+
+  async function submit(event) {
+    event.preventDefault()
+    if (!form.title.trim() || !form.dueDate) { setError('عنوان و سررسید را وارد کنید.'); return }
+    setSaving(true); setError('')
+    const payload = {
+      title: form.title.trim(), description: emptyToNull(form.description.trim()), dueDate: form.dueDate,
+      status: Number(form.status), completedDate: form.status === '2' ? emptyToNull(form.completedDate) : null,
+    }
+    const result = item ? await contractsApi.updateMilestone(contract.id, item.id, payload) : await contractsApi.createMilestone(contract.id, payload)
+    setSaving(false)
+    if (!result.isSuccess) { setError(PersianMessages.error(result.error)); return }
+    onSaved({ type: 'success', text: item ? 'نقطه‌ی عطف ذخیره شد.' : 'نقطه‌ی عطف ثبت شد.' })
+  }
+
+  return (
+    <ControlDialog
+      size="sm" icon={item ? Pencil : Plus} title={item ? `ویرایش «${item.title}»` : 'نقطه‌ی عطف تازه'} onClose={onClose}
+      footer={(
+        <>
+          {error && <span className="ue-error"><TriangleAlert size={15} />{error}</span>}
+          <div className="ue-foot-actions"><button type="button" className="ue-cancel" onClick={onClose}>انصراف</button><button type="submit" form="milestone-form" className="ue-save" disabled={saving}>{saving ? 'در حال ذخیره...' : 'ذخیره'}</button></div>
+        </>
+      )}
+    >
+      <form id="milestone-form" onSubmit={submit} noValidate>
+        <div className="ue-card"><div className="ue-grid">
+          <CtlField label="عنوان" required wide><input value={form.title} onChange={set('title')} maxLength={300} autoFocus /></CtlField>
+          <CtlField label="سررسید" required><input type="date" value={form.dueDate} onChange={set('dueDate')} /></CtlField>
+          <CtlField label="وضعیت"><select value={form.status} onChange={set('status')}>{Object.entries(milestoneStatusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></CtlField>
+          {form.status === '2' && <CtlField label="تاریخ انجام" hint="خالی بماند، امروز ثبت می‌شود"><input type="date" value={form.completedDate} onChange={set('completedDate')} /></CtlField>}
+          <CtlField label="توضیحات" wide><textarea rows={2} value={form.description} onChange={set('description')} maxLength={2000} /></CtlField>
+        </div></div>
+      </form>
+    </ControlDialog>
+  )
+}
+
+function ObligationFormDialog({ contract, item, onClose, onSaved }) {
+  const [form, setForm] = useState({
+    title: item?.title || '', description: item?.description || '', party: String(item?.party ?? 0), dueDate: item?.dueDate || '',
+    status: String(item?.status ?? 0), fulfilledDate: item?.fulfilledDate || '',
+  })
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const set = (key) => (event) => setForm((current) => ({ ...current, [key]: event.target.value }))
+
+  async function submit(event) {
+    event.preventDefault()
+    if (!form.title.trim()) { setError('عنوان تعهد را وارد کنید.'); return }
+    setSaving(true); setError('')
+    const payload = {
+      title: form.title.trim(), description: emptyToNull(form.description.trim()), party: Number(form.party), dueDate: emptyToNull(form.dueDate),
+      status: Number(form.status), fulfilledDate: form.status === '1' ? emptyToNull(form.fulfilledDate) : null,
+    }
+    const result = item ? await contractsApi.updateObligation(contract.id, item.id, payload) : await contractsApi.createObligation(contract.id, payload)
+    setSaving(false)
+    if (!result.isSuccess) { setError(PersianMessages.error(result.error)); return }
+    onSaved({ type: 'success', text: item ? 'تعهد ذخیره شد.' : 'تعهد ثبت شد.' })
+  }
+
+  return (
+    <ControlDialog
+      size="sm" icon={item ? Pencil : Plus} title={item ? `ویرایش «${item.title}»` : 'تعهد تازه'} onClose={onClose}
+      footer={(
+        <>
+          {error && <span className="ue-error"><TriangleAlert size={15} />{error}</span>}
+          <div className="ue-foot-actions"><button type="button" className="ue-cancel" onClick={onClose}>انصراف</button><button type="submit" form="obligation-form" className="ue-save" disabled={saving}>{saving ? 'در حال ذخیره...' : 'ذخیره'}</button></div>
+        </>
+      )}
+    >
+      <form id="obligation-form" onSubmit={submit} noValidate>
+        <div className="ue-card"><div className="ue-grid">
+          <CtlField label="عنوان" required wide><input value={form.title} onChange={set('title')} maxLength={300} autoFocus /></CtlField>
+          <CtlField label="بر عهده‌ی"><select value={form.party} onChange={set('party')}>{Object.entries(obligationPartyLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></CtlField>
+          <CtlField label="سررسید" hint="اختیاری"><input type="date" value={form.dueDate} onChange={set('dueDate')} /></CtlField>
+          <CtlField label="وضعیت"><select value={form.status} onChange={set('status')}>{Object.entries(obligationStatusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></CtlField>
+          {form.status === '1' && <CtlField label="تاریخ ایفا" hint="خالی بماند، امروز ثبت می‌شود"><input type="date" value={form.fulfilledDate} onChange={set('fulfilledDate')} /></CtlField>}
+          <CtlField label="توضیحات" wide><textarea rows={2} value={form.description} onChange={set('description')} maxLength={2000} /></CtlField>
+        </div></div>
+      </form>
+    </ControlDialog>
+  )
+}
+
+function AddendumFormDialog({ contract, contracts, tenantId, item, onClose, onSaved }) {
+  const [contractId, setContractId] = useState(contract?.id || contracts?.[0]?.id || '')
+  const [form, setForm] = useState({
+    title: item?.title || '', description: item?.description || '', addendumDate: item?.addendumDate || '',
+    amountChange: item ? String(Math.round(item.amountChange)) : '', extensionDays: item ? String(item.extensionDays) : '',
+    startDate: item?.startDate || '', endDate: item?.endDate || '', changeRequestId: item?.changeRequestId || '',
+  })
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const [approvedChanges, setApprovedChanges] = useState([])
+  const set = (key) => (event) => setForm((current) => ({ ...current, [key]: event.target.value }))
+  const projectId = (contract || (contracts || []).find((c) => c.id === contractId))?.projectId
+
+  // The approved (or carried out) change requests of the contract's project - what an addendum may carry out.
+  useEffect(() => {
+    let cancelled = false
+    if (!projectId) { setApprovedChanges([]); return undefined }
+    changeRequestsApi.list(projectId).then((result) => {
+      if (!cancelled) setApprovedChanges((result.isSuccess ? arrayPayload(result) : []).filter((change) => change.status === 2 || change.status === 4))
+    })
+    return () => { cancelled = true }
+  }, [projectId])
+
+  async function submit(event) {
+    event.preventDefault()
+    const amount = Number(form.amountChange || 0)
+    const days = Number(toLatinDigits(form.extensionDays || '0'))
+    if (!contractId) { setError('قرارداد را انتخاب کنید.'); return }
+    if (!form.title.trim()) { setError('عنوان الحاقیه را وارد کنید.'); return }
+    if (!amount && !days) { setError('الحاقیه باید مبلغ یا مدت (یا هر دو) را تغییر دهد.'); return }
+    setSaving(true); setError('')
+    const fields = { title: form.title.trim(), description: emptyToNull(form.description.trim()), addendumDate: emptyToNull(form.addendumDate), amountChange: amount, extensionDays: days, startDate: emptyToNull(form.startDate), endDate: emptyToNull(form.endDate) }
+    // An edit that clears the change request sends the empty id (null would keep the stored one).
+    fields.changeRequestId = form.changeRequestId || (item?.changeRequestId ? '00000000-0000-0000-0000-000000000000' : null)
+    const result = item ? await contractsApi.updateAddendum(contractId, item.id, fields) : await contractsApi.createAddendum(contractId, { tenantId, ...fields })
+    setSaving(false)
+    if (!result.isSuccess) { setError(PersianMessages.error(result.error)); return }
+    onSaved({ type: 'success', text: item ? 'الحاقیه ذخیره شد.' : 'الحاقیه ثبت شد. برای اعمال، آن را برای تأیید ارسال کنید.' })
+  }
+
+  return (
+    <ControlDialog
+      size="sm" icon={RefreshCw} title={item ? 'ویرایش الحاقیه' : 'الحاقیه‌ی جدید'} subtitle={contract?.title} onClose={onClose}
+      footer={(
+        <>
+          {error && <span className="ue-error"><TriangleAlert size={15} />{error}</span>}
+          <div className="ue-foot-actions"><button type="button" className="ue-cancel" onClick={onClose}>انصراف</button><button type="submit" form="addendum-form" className="ue-save" disabled={saving}>{saving ? 'در حال ذخیره...' : 'ذخیره'}</button></div>
+        </>
+      )}
+    >
+      <form id="addendum-form" onSubmit={submit} noValidate>
+        <div className="ue-card"><div className="ue-grid">
+          {!contract && <CtlField label="قرارداد" required wide><select value={contractId} onChange={(e) => setContractId(e.target.value)}>{(contracts || []).map((c) => <option key={c.id} value={c.id}>{c.title} — {c.counterparty}</option>)}</select></CtlField>}
+          <CtlField label="عنوان" required wide><input value={form.title} onChange={set('title')} maxLength={300} autoFocus /></CtlField>
+          <CtlField label="مصوبه (درخواست تغییر)" wide hint={form.changeRequestId ? 'این الحاقیه اجرای همین تغییرِ مصوب است' : 'بدون مصوبه، در داشبورد تغییرات «تغییر بدون مصوبه» هشدار داده می‌شود'}>
+            <select value={form.changeRequestId} onChange={set('changeRequestId')}>
+              <option value="">— بدون مصوبه —</option>
+              {approvedChanges.map((change) => <option key={change.id} value={change.id}>{change.code} · {change.title}</option>)}
+            </select>
+          </CtlField>
+          <CtlField label="تغییر مبلغ (ریال)" hint={form.amountChange && form.amountChange !== '-' ? `${tomansHint(form.amountChange)} · منفی یعنی کاهش` : 'منفی یعنی کاهش مبلغ'}><AmountInput allowNegative value={form.amountChange} onChange={(value) => setForm((current) => ({ ...current, amountChange: value }))} /></CtlField>
+          <CtlField label="تمدید (روز)"><input className="ltr-input" inputMode="numeric" value={form.extensionDays} onChange={(e) => setForm((current) => ({ ...current, extensionDays: toLatinDigits(e.target.value).replace(/\D/g, '') }))} /></CtlField>
+          <CtlField label="تاریخ الحاقیه"><input type="date" value={form.addendumDate} onChange={set('addendumDate')} /></CtlField>
+          <span />
+          <CtlField label="شروع جدید"><input type="date" value={form.startDate} onChange={set('startDate')} /></CtlField>
+          <CtlField label="پایان جدید"><input type="date" value={form.endDate} onChange={set('endDate')} /></CtlField>
+          <CtlField label="توضیحات" wide><textarea rows={2} value={form.description} onChange={set('description')} maxLength={4000} /></CtlField>
+        </div></div>
+      </form>
+    </ControlDialog>
+  )
+}
+
+function InvoiceFormDialog({ contract, tenantId, item, onClose, onSaved }) {
+  const summary = contract.summary || {}
+  const [form, setForm] = useState({
+    invoiceNumber: item?.invoiceNumber || '', title: item?.title || '', invoiceDate: item?.invoiceDate || todayInputValue(),
+    periodStartDate: item?.periodStartDate || '', periodEndDate: item?.periodEndDate || '', description: item?.description || '',
+    amount: item ? String(Math.round(moneyRials(item.amount))) : '',
+  })
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const set = (key) => (event) => setForm((current) => ({ ...current, [key]: event.target.value }))
+  const room = moneyRials(summary.currentAmount) - moneyRials(summary.invoicedAmount)
+
+  async function submit(event) {
+    event.preventDefault()
+    if (!form.invoiceNumber.trim()) { setError('شماره‌ی صورت‌وضعیت را وارد کنید.'); return }
+    if (!form.amount || Number(form.amount) <= 0) { setError('مبلغ صورت‌وضعیت (ریال) را وارد کنید.'); return }
+    if (form.periodStartDate && form.periodEndDate && form.periodEndDate < form.periodStartDate) { setError('پایان بازه نمی‌تواند قبل از شروع آن باشد.'); return }
+    setSaving(true); setError('')
+    const fields = { invoiceNumber: toLatinDigits(form.invoiceNumber.trim()), invoiceDate: form.invoiceDate, amount: Number(form.amount), description: emptyToNull(form.description.trim()), title: emptyToNull(form.title.trim()), periodStartDate: emptyToNull(form.periodStartDate), periodEndDate: emptyToNull(form.periodEndDate) }
+    const result = item ? await contractsApi.updateInvoice(contract.id, item.id, fields) : await contractsApi.createInvoice(contract.id, { tenantId, ...fields })
+    setSaving(false)
+    if (!result.isSuccess) { setError(PersianMessages.error(result.error)); return }
+    onSaved({ type: 'success', text: item ? 'صورت‌وضعیت ذخیره شد.' : 'صورت‌وضعیت ثبت شد. تا تأیید نشود در هزینه‌ی واقعی حساب نمی‌شود.' })
+  }
+
+  return (
+    <ControlDialog
+      size="sm" icon={CircleDollarSign} title={item ? 'ویرایش صورت‌وضعیت' : 'صورت‌وضعیت جدید'} subtitle={contract.title} onClose={onClose}
+      footer={(
+        <>
+          {error && <span className="ue-error"><TriangleAlert size={15} />{error}</span>}
+          <div className="ue-foot-actions"><button type="button" className="ue-cancel" onClick={onClose}>انصراف</button><button type="submit" form="invoice-form" className="ue-save" disabled={saving}>{saving ? 'در حال ذخیره...' : 'ذخیره'}</button></div>
+        </>
+      )}
+    >
+      <form id="invoice-form" onSubmit={submit} noValidate>
+        <div className="ue-card"><div className="ue-grid">
+          <CtlField label="شماره‌ی صورت‌وضعیت" required><input className="ltr-input" value={form.invoiceNumber} onChange={set('invoiceNumber')} maxLength={100} autoFocus /></CtlField>
+          <CtlField label="عنوان"><input value={form.title} onChange={set('title')} maxLength={300} placeholder="مثلاً صورت‌وضعیت موقت ۱" /></CtlField>
+          <CtlField label="تاریخ" required><input type="date" value={form.invoiceDate} onChange={set('invoiceDate')} /></CtlField>
+          <span />
+          <CtlField label="شروع بازه"><input type="date" value={form.periodStartDate} onChange={set('periodStartDate')} /></CtlField>
+          <CtlField label="پایان بازه"><input type="date" value={form.periodEndDate} onChange={set('periodEndDate')} /></CtlField>
+        </div></div>
+        <div className="ue-card ue-card--accent"><div className="ue-grid">
+          <CtlField label="مبلغ (ریال)" required hint={`${tomansHint(form.amount) || ''}${tomansHint(form.amount) ? ' · ' : ''}ظرفیت باقی‌مانده‌ی قرارداد: ${rialsText(room)} ریال`} wide><AmountInput value={form.amount} onChange={(value) => setForm((current) => ({ ...current, amount: value }))} /></CtlField>
+          <CtlField label="توضیحات" wide><textarea rows={2} value={form.description} onChange={set('description')} maxLength={2000} /></CtlField>
+        </div></div>
+      </form>
+    </ControlDialog>
+  )
+}
+
+/* The payment is the invoice's TOTAL paid so far, not an increment. */
+function PaymentDialog({ contract, invoice, onClose, onSaved }) {
+  const amount = moneyRials(invoice.amount)
+  const [paid, setPaid] = useState(String(Math.round(moneyRials(invoice.paidAmount))))
+  const [date, setDate] = useState(invoice.lastPaymentDate || todayInputValue())
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  async function submit(event) {
+    event.preventDefault()
+    const value = Number(paid || 0)
+    if (value < 0 || value > amount) { setError('مبلغ پرداخت‌شده باید بین صفر و مبلغ صورت‌وضعیت باشد.'); return }
+    if (!date) { setError('تاریخ پرداخت را وارد کنید.'); return }
+    setSaving(true); setError('')
+    const result = await contractsApi.recordPayment(contract.id, invoice.id, { paidAmount: value, paymentDate: date })
+    setSaving(false)
+    if (!result.isSuccess) { setError(PersianMessages.error(result.error)); return }
+    onSaved({ type: 'success', text: 'پرداخت ثبت شد.' })
+  }
+
+  return (
+    <ControlDialog
+      size="sm" icon={WalletCards} title="ثبت پرداخت" subtitle={`صورت‌وضعیت ${invoice.invoiceNumberFa} · ${contract.title}`} onClose={onClose}
+      footer={(
+        <>
+          {error && <span className="ue-error"><TriangleAlert size={15} />{error}</span>}
+          <div className="ue-foot-actions"><button type="button" className="ue-cancel" onClick={onClose}>انصراف</button><button type="submit" form="payment-form" className="ue-save" disabled={saving}>{saving ? 'در حال ثبت...' : 'ثبت پرداخت'}</button></div>
+        </>
+      )}
+    >
+      <form id="payment-form" onSubmit={submit} noValidate>
+        <p className="ue-note">مبلغ صورت‌وضعیت: <b>{rialsText(amount)}</b> ریال. عددی که وارد می‌کنید «جمع کل پرداخت‌شده تا این تاریخ» است، نه مبلغ همین نوبت.</p>
+        <div className="ue-card ue-card--accent"><div className="ue-grid">
+          <CtlField label="جمع پرداخت‌شده (ریال)" required hint={tomansHint(paid)}><AmountInput value={paid} onChange={setPaid} autoFocus /></CtlField>
+          <CtlField label="تاریخ آخرین پرداخت" required><input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></CtlField>
+          <div className="ue-field ue-field--wide"><button type="button" className="ctl-link" onClick={() => setPaid(String(Math.round(amount)))}>پرداخت کامل ({rialsText(amount)})</button></div>
+        </div></div>
+      </form>
+    </ControlDialog>
+  )
+}
+
+/* ---- Suppliers: the parties of the contracts, kept once per tenant ---- */
+
+const supplierCategoryLabels = { 0: 'پیمانکار', 1: 'تأمین‌کننده', 2: 'مشاور', 3: 'سایر' }
+const supplierStatusLabels = { 0: 'فعال', 1: 'غیرفعال' }
+
+function useSuppliers() {
+  const [items, setItems] = useState(null)
+  const [error, setError] = useState('')
+  const [reloadKey, setReloadKey] = useState(0)
+
+  useEffect(() => {
+    let cancelled = false
+    suppliersApi.list().then((result) => {
+      if (cancelled) return
+      setError(result.isSuccess ? '' : PersianMessages.error(result.error))
+      setItems(arrayPayload(result))
+    })
+    return () => { cancelled = true }
+  }, [reloadKey])
+
+  return { items, error, reload: () => setReloadKey((value) => value + 1) }
+}
+
+function SupplierFormDialog({ supplier, onClose, onSaved }) {
+  const isNew = !supplier
+  const [form, setForm] = useState({
+    name: supplier?.name || '', category: String(supplier?.category ?? 0), status: String(supplier?.status ?? 0),
+    nationalId: supplier?.nationalId || '', contactPerson: supplier?.contactPerson || '', phone: supplier?.phone || '',
+    email: supplier?.email || '', address: supplier?.address || '', description: supplier?.description || '',
+  })
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const set = (key) => (event) => setForm((current) => ({ ...current, [key]: event.target.value }))
+
+  async function submit(event) {
+    event.preventDefault()
+    if (!form.name.trim()) { setError('نام تأمین‌کننده را وارد کنید.'); return }
+    setSaving(true); setError('')
+    const fields = {
+      name: form.name.trim(), category: Number(form.category), nationalId: emptyToNull(form.nationalId.trim()), contactPerson: emptyToNull(form.contactPerson.trim()),
+      phone: emptyToNull(form.phone.trim()), email: emptyToNull(form.email.trim()), address: emptyToNull(form.address.trim()), description: emptyToNull(form.description.trim()),
+    }
+    const result = isNew ? await suppliersApi.create(fields) : await suppliersApi.update(supplier.id, { ...fields, status: Number(form.status) })
+    setSaving(false)
+    if (!result.isSuccess) { setError(PersianMessages.error(result.error)); return }
+    onSaved({ type: 'success', text: isNew ? `تأمین‌کننده‌ی «${fields.name}» ثبت شد.` : `تأمین‌کننده‌ی «${fields.name}» ذخیره شد.` })
+  }
+
+  return (
+    <ControlDialog
+      size="sm" icon={isNew ? Plus : Pencil} title={isNew ? 'تأمین‌کننده‌ی جدید' : `ویرایش «${supplier.name}»`} onClose={onClose}
+      footer={(
+        <>
+          {error && <span className="ue-error"><TriangleAlert size={15} />{error}</span>}
+          <div className="ue-foot-actions"><button type="button" className="ue-cancel" onClick={onClose}>انصراف</button><button type="submit" form="supplier-form" className="ue-save" disabled={saving}>{saving ? 'در حال ذخیره...' : isNew ? 'ثبت تأمین‌کننده' : 'ذخیره'}</button></div>
+        </>
+      )}
+    >
+      <form id="supplier-form" onSubmit={submit} noValidate>
+        <div className="ue-card"><div className="ue-grid">
+          <CtlField label="نام" required wide hint="با تغییر نام، نام طرف قرارداد در قراردادهای او هم عوض می‌شود"><input value={form.name} onChange={set('name')} maxLength={300} autoFocus /></CtlField>
+          <CtlField label="نوع"><select value={form.category} onChange={set('category')}>{Object.entries(supplierCategoryLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></CtlField>
+          {isNew ? <span /> : <CtlField label="وضعیت" hint="تأمین‌کننده‌ی غیرفعال در قرارداد تازه انتخاب نمی‌شود"><select value={form.status} onChange={set('status')}>{Object.entries(supplierStatusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></CtlField>}
+          <CtlField label="شناسه‌ی ملی / کد ملی"><input className="ltr-input" value={form.nationalId} onChange={set('nationalId')} maxLength={50} /></CtlField>
+          <CtlField label="رابط"><input value={form.contactPerson} onChange={set('contactPerson')} maxLength={200} /></CtlField>
+          <CtlField label="تلفن"><input className="ltr-input" value={form.phone} onChange={set('phone')} maxLength={50} /></CtlField>
+          <CtlField label="ایمیل"><input className="ltr-input" value={form.email} onChange={set('email')} maxLength={200} /></CtlField>
+          <CtlField label="نشانی" wide><input value={form.address} onChange={set('address')} maxLength={1000} /></CtlField>
+          <CtlField label="توضیحات" wide><textarea rows={2} value={form.description} onChange={set('description')} maxLength={4000} /></CtlField>
+        </div></div>
+      </form>
+    </ControlDialog>
+  )
+}
+
+/* ---- Periodic evaluation of a supplier ---- */
+
+const evaluationCriteria = [
+  ['qualityScore', 'کیفیت کار'],
+  ['timelinessScore', 'زمان‌بندی'],
+  ['complianceScore', 'پایبندی به تعهدات'],
+  ['cooperationScore', 'همکاری و پاسخ‌گویی'],
+]
+const scoreText = (value) => (value === null || value === undefined ? '—' : toPersianDigits(Number(value).toFixed(2).replace(/\.?0+$/, '')))
+const scoreClass = (value) => (value === null || value === undefined ? '' : value >= 4 ? 'pos' : value < 2.5 ? 'neg' : '')
+
+/** What the records say about a period, in one line. */
+function EvaluationMetricsLine({ metrics }) {
+  if (!metrics) return null
+  return (
+    <span>
+      نقاط عطف: {toPersianDigits(metrics.milestonesInPeriod)} سررسید، <span className={metrics.lateMilestones ? 'neg' : ''}>{toPersianDigits(metrics.lateMilestones)} با تأخیر</span>
+      {' · '}تعهدات: {toPersianDigits(metrics.obligationsInPeriod)} سررسید، <span className={metrics.missedObligations ? 'neg' : ''}>{toPersianDigits(metrics.missedObligations)} ایفانشده</span>
+    </span>
+  )
+}
+
+function SupplierEvaluationsDialog({ supplier, projects, canEvaluate, onClose, onChanged }) {
+  const [items, setItems] = useState(null)
+  const [contracts, setContracts] = useState([])
+  const [reloadKey, setReloadKey] = useState(0)
+  const [notice, setNotice] = useState(null)
+  const [form, setForm] = useState(null)
+  const reload = () => { setReloadKey((value) => value + 1); onChanged() }
+
+  useEffect(() => {
+    let cancelled = false
+    suppliersApi.evaluations(supplier.id).then((result) => {
+      if (cancelled) return
+      if (!result.isSuccess) setNotice({ type: 'error', text: PersianMessages.error(result.error) })
+      setItems(result.isSuccess ? arrayPayload(result) : [])
+    })
+    return () => { cancelled = true }
+  }, [supplier.id, reloadKey])
+
+  useEffect(() => {
+    let cancelled = false
+    suppliersApi.get(supplier.id).then((result) => { if (!cancelled && result.isSuccess) setContracts(unwrap(result)?.contracts || []) })
+    return () => { cancelled = true }
+  }, [supplier.id])
+
+  const contractTitle = (id) => {
+    const contract = contracts.find((item) => item.id === id)
+    if (!contract) return 'قرارداد'
+    const project = projects.find((item) => item.id === contract.projectId)
+    return `${contract.title}${project ? ` · ${projectDisplayName(project)}` : ''}`
+  }
+  const remove = (item) => {
+    if (!window.confirm('این ارزیابی حذف شود؟')) return
+    runAction(() => suppliersApi.deleteEvaluation(supplier.id, item.id), 'ارزیابی حذف شد.', setNotice, reload)
+  }
+
+  return (
+    <ControlDialog
+      icon={ClipboardCheck} title={`ارزیابی‌های «${supplier.name}»`} subtitle="ارزیابی دوره‌ای عملکرد بر اساس امتیاز ارزیاب و سوابق ثبت‌شده" onClose={onClose}
+      footer={<div className="ue-foot-actions"><button type="button" className="ue-cancel" onClick={onClose}>بستن</button></div>}
+    >
+      <PageNotice notice={notice} onClose={() => setNotice(null)} />
+      <section className="ue-section">
+        <div className="ue-section-head"><h4><ClipboardCheck size={16} />ارزیابی‌ها</h4>{canEvaluate && <button type="button" className="ctl-link" onClick={() => setForm({ item: null })}><Plus size={14} /> ارزیابی تازه</button>}</div>
+        {items === null ? <p className="ue-note">در حال بارگذاری...</p> : !items.length ? <p className="ue-note">این تأمین‌کننده هنوز ارزیابی نشده است.</p> : (
+          <div className="table-scroll"><table className="cost-sub">
+            <thead><tr><th>دوره</th><th>امتیاز کل</th>{evaluationCriteria.map(([, label]) => <th key={label}>{label}</th>)}<th>سوابق دوره</th><th /></tr></thead>
+            <tbody>{items.map((item) => (
+              <tr key={item.id}>
+                <td>{item.periodStartFa} تا {item.periodEndFa}<small className="ctl-sp"> {item.contractId ? contractTitle(item.contractId) : 'همه‌ی قراردادها'}</small>{item.notes && <small className="ctl-sp"> · {item.notes}</small>}</td>
+                <td><strong className={scoreClass(item.overallScore)}>{scoreText(item.overallScore)}</strong></td>
+                {evaluationCriteria.map(([key]) => <td key={key}>{toPersianDigits(item[key])}</td>)}
+                <td><small><EvaluationMetricsLine metrics={item.metrics} /></small></td>
+                <td>{canEvaluate && (
+                  <span className="row-actions">
+                    <button type="button" title="ویرایش" aria-label="ویرایش" onClick={() => setForm({ item })}><Pencil size={15} /></button>
+                    <button type="button" className="danger" title="حذف" aria-label="حذف" onClick={() => remove(item)}><Trash2 size={15} /></button>
+                  </span>
+                )}</td>
+              </tr>
+            ))}</tbody>
+          </table></div>
+        )}
+      </section>
+      {form && (
+        <EvaluationFormDialog
+          supplier={supplier} item={form.item} contracts={contracts} contractTitle={contractTitle}
+          onClose={() => setForm(null)} onSaved={(result) => { setForm(null); setNotice(result); reload() }}
+        />
+      )}
+    </ControlDialog>
+  )
+}
+
+function EvaluationFormDialog({ supplier, item, contracts, contractTitle, onClose, onSaved }) {
+  const [form, setForm] = useState({
+    periodStart: item?.periodStart || '', periodEnd: item?.periodEnd || '', contractId: item?.contractId || '', notes: item?.notes || '',
+    qualityScore: String(item?.qualityScore ?? 3), timelinessScore: String(item?.timelinessScore ?? 3),
+    complianceScore: String(item?.complianceScore ?? 3), cooperationScore: String(item?.cooperationScore ?? 3),
+  })
+  const [metrics, setMetrics] = useState(null)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const set = (key) => (event) => setForm((current) => ({ ...current, [key]: event.target.value }))
+  const overall = evaluationCriteria.reduce((sum, [key]) => sum + Number(form[key]), 0) / evaluationCriteria.length
+
+  // The facts of the period, read again whenever the period or the contract changes.
+  useEffect(() => {
+    let cancelled = false
+    setMetrics(null)
+    if (!form.periodStart || !form.periodEnd || form.periodEnd < form.periodStart) return undefined
+    suppliersApi.evaluationMetrics(supplier.id, { from: form.periodStart, to: form.periodEnd, contractId: form.contractId || null })
+      .then((result) => { if (!cancelled && result.isSuccess) setMetrics(unwrap(result)) })
+    return () => { cancelled = true }
+  }, [supplier.id, form.periodStart, form.periodEnd, form.contractId])
+
+  async function submit(event) {
+    event.preventDefault()
+    if (!form.periodStart || !form.periodEnd) { setError('ابتدا و انتهای دوره را وارد کنید.'); return }
+    if (form.periodEnd < form.periodStart) { setError('انتهای دوره نمی‌تواند قبل از ابتدای آن باشد.'); return }
+    setSaving(true); setError('')
+    const payload = {
+      periodStart: form.periodStart, periodEnd: form.periodEnd, contractId: form.contractId || null, notes: emptyToNull(form.notes.trim()),
+      qualityScore: Number(form.qualityScore), timelinessScore: Number(form.timelinessScore),
+      complianceScore: Number(form.complianceScore), cooperationScore: Number(form.cooperationScore),
+    }
+    const result = item ? await suppliersApi.updateEvaluation(supplier.id, item.id, payload) : await suppliersApi.createEvaluation(supplier.id, payload)
+    setSaving(false)
+    if (!result.isSuccess) { setError(PersianMessages.error(result.error)); return }
+    onSaved({ type: 'success', text: item ? 'ارزیابی ذخیره شد.' : 'ارزیابی ثبت شد.' })
+  }
+
+  return (
+    <ControlDialog
+      size="sm" icon={item ? Pencil : Plus} title={item ? 'ویرایش ارزیابی' : 'ارزیابی تازه'} subtitle={supplier.name} onClose={onClose}
+      footer={(
+        <>
+          {error && <span className="ue-error"><TriangleAlert size={15} />{error}</span>}
+          <div className="ue-foot-actions"><button type="button" className="ue-cancel" onClick={onClose}>انصراف</button><button type="submit" form="evaluation-form" className="ue-save" disabled={saving}>{saving ? 'در حال ذخیره...' : 'ذخیره'}</button></div>
+        </>
+      )}
+    >
+      <form id="evaluation-form" onSubmit={submit} noValidate>
+        <div className="ue-card"><div className="ue-grid">
+          <CtlField label="ابتدای دوره" required><input type="date" value={form.periodStart} onChange={set('periodStart')} autoFocus /></CtlField>
+          <CtlField label="انتهای دوره" required><input type="date" value={form.periodEnd} onChange={set('periodEnd')} /></CtlField>
+          <CtlField label="قرارداد" wide hint="خالی بماند، همه‌ی قراردادهای این تأمین‌کننده">
+            <select value={form.contractId} onChange={set('contractId')}>
+              <option value="">— همه‌ی قراردادها —</option>
+              {contracts.map((contract) => <option key={contract.id} value={contract.id}>{contractTitle(contract.id)}</option>)}
+            </select>
+          </CtlField>
+        </div>
+        <p className="ue-note">{metrics ? <>سوابق این دوره: <EvaluationMetricsLine metrics={metrics} /></> : 'با تعیین دوره، سوابق آن (نقاط عطف و تعهدات) این‌جا نشان داده می‌شود.'}</p>
+        </div>
+        <div className="ue-card ue-card--accent"><div className="ue-grid">
+          {evaluationCriteria.map(([key, label]) => (
+            <CtlField key={key} label={label} hint="۱ ضعیف تا ۵ عالی">
+              <select value={form[key]} onChange={set(key)}>{[1, 2, 3, 4, 5].map((value) => <option key={value} value={value}>{toPersianDigits(value)}</option>)}</select>
+            </CtlField>
+          ))}
+          <CtlField label="امتیاز کل" hint="میانگین چهار معیار"><input value={scoreText(Math.round(overall * 100) / 100)} readOnly /></CtlField>
+          <CtlField label="یادداشت" wide><textarea rows={2} value={form.notes} onChange={set('notes')} maxLength={2000} /></CtlField>
+        </div></div>
+      </form>
+    </ControlDialog>
+  )
+}
+
+/* ---- Supplier dashboard for senior management: every supplier across all projects, side by side ---- */
+
+const supplierAttentionLabels = {
+  LowScore: 'امتیاز پایین',
+  OverdueMilestones: 'نقطه‌ی عطف معوق',
+  MissedObligations: 'تعهد ایفانشده',
+  NotEvaluated: 'ارزیابی‌نشده با قرارداد فعال',
+}
+const supplierDashboardSorts = {
+  amount: ['بیشترین مبلغ قرارداد', (a, b) => moneyRials(b.contractAmount) - moneyRials(a.contractAmount)],
+  score: ['بهترین امتیاز', (a, b) => (b.latestScore ?? -1) - (a.latestScore ?? -1)],
+  weakest: ['ضعیف‌ترین امتیاز', (a, b) => (a.latestScore ?? 99) - (b.latestScore ?? 99)],
+  risk: ['بیشترین معوقات', (a, b) => (b.overdueMilestones + b.missedObligations) - (a.overdueMilestones + a.missedObligations)],
+  outstanding: ['بیشترین بدهی معوق', (a, b) => moneyRials(b.outstandingPayable) - moneyRials(a.outstandingPayable)],
+}
+
+function SupplierDashboard({ onEvaluate, reloadKey }) {
+  const [dashboard, setDashboard] = useState(null)
+  const [error, setError] = useState('')
+  const [sort, setSort] = useState('amount')
+
+  useEffect(() => {
+    let cancelled = false
+    suppliersApi.dashboard().then((result) => {
+      if (cancelled) return
+      setError(result.isSuccess ? '' : PersianMessages.error(result.error))
+      setDashboard(result.isSuccess ? unwrap(result) : { totals: null, rows: [] })
+    })
+    return () => { cancelled = true }
+  }, [reloadKey])
+
+  const rows = useMemo(() => [...(dashboard?.rows || [])].sort(supplierDashboardSorts[sort][1]), [dashboard, sort])
+  const attention = (dashboard?.rows || []).filter((row) => row.attention?.length)
+  const totals = dashboard?.totals
+  const exportDashboard = () => downloadCsv('supplier-dashboard.csv',
+    ['رتبه', 'تأمین‌کننده', 'نوع', 'پروژه', 'قرارداد', 'قرارداد فعال', 'مبلغ (ریال)', 'بدهی معوق (ریال)', 'نقطه‌ی عطف معوق', 'تعهد ایفانشده', 'آخرین امتیاز', 'میانگین امتیاز', 'نیازمند توجه'],
+    rows.map((row, index) => [index + 1, row.name, enumLabel(row.category, supplierCategoryLabels), row.projectCount, row.contractCount, row.activeContractCount,
+      moneyRials(row.contractAmount), moneyRials(row.outstandingPayable), row.overdueMilestones, row.missedObligations, row.latestScore ?? '', row.averageScore ?? '',
+      (row.attention || []).map((code) => supplierAttentionLabels[code] || code).join('، ')]))
+
+  if (dashboard === null) return <p className="data-state">در حال بارگذاری...</p>
+
+  return (
+    <>
+      {error && <div className="users-notice error ctl-notice" role="alert"><CircleAlert size={16} /><span>{error}</span></div>}
+      {totals && (
+        <ControlKpis items={[
+          { icon: Truck, tone: 'navy', label: 'تأمین‌کننده', value: toPersianDigits(totals.supplierCount), note: `${toPersianDigits(totals.activeSupplierCount)} فعال · ${toPersianDigits(totals.projectCount)} پروژه` },
+          { icon: CircleDollarSign, tone: 'blue', label: 'مبلغ قراردادها', value: rialsText(moneyRials(totals.contractAmount)), note: `ریال · بدهی معوق ${rialsText(moneyRials(totals.outstandingPayable))}` },
+          { icon: TriangleAlert, tone: 'red', label: 'نیازمند توجه', value: toPersianDigits(totals.needingAttention), note: `${toPersianDigits(totals.overdueMilestones)} نقطه‌ی عطف معوق · ${toPersianDigits(totals.missedObligations)} تعهد ایفانشده` },
+          { icon: ClipboardCheck, tone: 'green', label: 'میانگین امتیاز', value: scoreText(totals.averageLatestScore), note: `از آخرین ارزیابیِ ${toPersianDigits(totals.evaluatedSuppliers)} تأمین‌کننده` },
+        ]} />
+      )}
+
+      <section className="task-panel task-table-panel ctl-panel ctl-block">
+        <div className="task-panel-title"><div><h3>نیازمند توجه</h3><p>امتیاز آخرین ارزیابی زیر ۲٫۵، نقطه‌ی عطف یا تعهدِ عقب‌افتاده، یا قرارداد فعال بدون هیچ ارزیابی.</p></div></div>
+        {!attention.length ? <p className="ue-note">موردی نیازمند توجه نیست.</p> : (
+          <div className="table-scroll"><table>
+            <thead><tr><th>تأمین‌کننده</th><th>دلیل</th><th>آخرین امتیاز</th><th /></tr></thead>
+            <tbody>{attention.map((row) => (
+              <tr key={row.supplierId}>
+                <td className="ctl-main"><strong>{row.name}</strong><small>{toPersianDigits(row.activeContractCount)} قرارداد فعال در {toPersianDigits(row.projectCount)} پروژه</small></td>
+                <td><span className="ctl-links">{row.attention.map((code) => <span key={code} className="ctl-chip">{supplierAttentionLabels[code] || code}</span>)}</span></td>
+                <td><strong className={scoreClass(row.latestScore)}>{scoreText(row.latestScore)}</strong></td>
+                <td><span className="row-actions"><button type="button" title="ارزیابی‌های دوره‌ای" aria-label="ارزیابی‌های دوره‌ای" onClick={() => onEvaluate({ id: row.supplierId, name: row.name })}><ClipboardCheck size={15} /></button></span></td>
+              </tr>
+            ))}</tbody>
+          </table></div>
+        )}
+      </section>
+
+      <section className="task-panel task-table-panel ctl-panel ctl-block">
+        <div className="task-panel-title">
+          <div><h3>رتبه‌بندی تأمین‌کنندگان</h3><p>همه‌ی پروژه‌ها؛ مبلغ‌ها فقط از قراردادهای تأییدشده.</p></div>
+          <div className="ctl-filters">
+            <select className="ctl-select" value={sort} onChange={(e) => setSort(e.target.value)} aria-label="مرتب‌سازی">
+              {Object.entries(supplierDashboardSorts).map(([key, [label]]) => <option key={key} value={key}>{label}</option>)}
+            </select>
+            <button type="button" className="ctl-link" onClick={exportDashboard} disabled={!rows.length}><Download size={14} /> خروجی Excel</button>
+          </div>
+        </div>
+        <DataState loading={false} empty={!rows.length}>
+          <div className="table-scroll"><table>
+            <thead><tr><th>#</th><th>تأمین‌کننده</th><th>پروژه</th><th>قرارداد</th><th>مبلغ (ریال)</th><th>بدهی معوق</th><th>عطف معوق</th><th>تعهد ایفانشده</th><th>آخرین امتیاز</th><th>میانگین</th></tr></thead>
+            <tbody>{rows.map((row, index) => (
+              <tr key={row.supplierId}>
+                <td>{toPersianDigits(index + 1)}</td>
+                <td className="ctl-main"><strong>{row.name}</strong><small>{enumLabel(row.category, supplierCategoryLabels)}{row.status === 1 ? ' · غیرفعال' : ''}</small></td>
+                <td>{toPersianDigits(row.projectCount)}</td>
+                <td>{toPersianDigits(row.contractCount)}<small className="ctl-sp"> ({toPersianDigits(row.activeContractCount)} فعال)</small></td>
+                <td>{rialsText(moneyRials(row.contractAmount))}</td>
+                <td className={moneyRials(row.outstandingPayable) > 0 ? 'neg' : ''}>{rialsText(moneyRials(row.outstandingPayable))}</td>
+                <td className={row.overdueMilestones ? 'neg' : ''}>{toPersianDigits(row.overdueMilestones)}</td>
+                <td className={row.missedObligations ? 'neg' : ''}>{toPersianDigits(row.missedObligations)}</td>
+                <td title={row.latestPeriodEndFa ? `تا ${row.latestPeriodEndFa}` : 'ارزیابی نشده'}><strong className={scoreClass(row.latestScore)}>{scoreText(row.latestScore)}</strong></td>
+                <td>{scoreText(row.averageScore)}{row.evaluationCount > 0 && <small className="ctl-sp"> ({toPersianDigits(row.evaluationCount)})</small>}</td>
+              </tr>
+            ))}</tbody>
+          </table></div>
+        </DataState>
+      </section>
+    </>
+  )
+}
+
+function SuppliersPage({ data }) {
+  const { can } = useAuth()
+  const suppliers = useSuppliers()
+  const [notice, setNotice] = useState(null)
+  const [form, setForm] = useState(null)
+  const [search, setSearch] = useState('')
+  const [open, setOpen] = useState(null)
+  const [detail, setDetail] = useState(null)
+  const [evaluating, setEvaluating] = useState(null)
+  const [view, setView] = useState('list')
+  const canManage = can('Contracts.ManageSuppliers')
+  const projectName = (id) => projectDisplayName(data.projects.find((project) => project.id === id))
+  const items = suppliers.items || []
+  const shown = items.filter((item) => !search.trim() || `${item.name} ${item.nationalId || ''} ${item.contactPerson || ''}`.toLowerCase().includes(search.trim().toLowerCase()))
+  const total = (key) => items.reduce((sum, item) => sum + moneyRials(item.stats?.[key]), 0)
+
+  // The contracts of the supplier that is opened, with the figures of each.
+  useEffect(() => {
+    let cancelled = false
+    setDetail(null)
+    if (!open) return undefined
+    suppliersApi.get(open).then((result) => { if (!cancelled) setDetail(result.isSuccess ? unwrap(result) : { contracts: [], error: PersianMessages.error(result.error) }) })
+    return () => { cancelled = true }
+  }, [open, suppliers.items])
+
+  const remove = (item) => {
+    if (!window.confirm(`تأمین‌کننده‌ی «${item.name}» حذف شود؟`)) return
+    runAction(() => suppliersApi.remove(item.id), 'تأمین‌کننده حذف شد.', setNotice, suppliers.reload)
+  }
+
+  const exportSuppliers = () => downloadCsv('suppliers.csv', ['تأمین‌کننده', 'نوع', 'وضعیت', 'شناسه‌ی ملی', 'تعداد قرارداد', 'مبلغ (ریال)', 'صورت‌حساب‌شده (ریال)', 'پرداخت‌شده (ریال)', 'بدهی معوق (ریال)'],
+    shown.map((item) => [item.name, enumLabel(item.category, supplierCategoryLabels), enumLabel(item.status, supplierStatusLabels), item.nationalId || '', item.stats?.contractCount ?? 0,
+      moneyRials(item.stats?.contractAmount), moneyRials(item.stats?.invoicedAmount), moneyRials(item.stats?.paidAmount), moneyRials(item.stats?.outstandingPayable)]))
+
+  return (
+    <>
+      <TaskPageHeader
+        section="کنترل و اجرا" title="مدیریت تأمین‌کنندگان" action={null}
+        description="شناسنامه‌ی پیمانکاران، تأمین‌کنندگان و مشاوران، با قراردادها، صورت‌حساب‌ها و پرداخت هر کدام در همه‌ی پروژه‌ها"
+      />
+      <DataState loading={data.loading} error={data.error} empty={false}>
+        {!can('Contracts.View') ? <p className="data-state data-state--error">برای دیدن این بخش، دسترسی «مشاهده‌ی قراردادها» (Contracts.View) لازم است.</p> : (
+          <>
+            <PageNotice notice={notice} onClose={() => setNotice(null)} />
+            {suppliers.error && <div className="users-notice error ctl-notice" role="alert"><CircleAlert size={16} /><span>{suppliers.error}</span></div>}
+            <nav className="settings-subtabs ctl-subtabs">
+              <button type="button" className={view === 'list' ? 'active' : ''} onClick={() => setView('list')}><Truck size={16} />فهرست و شناسنامه</button>
+              <button type="button" className={view === 'dashboard' ? 'active' : ''} onClick={() => setView('dashboard')}><LayoutDashboard size={16} />داشبورد مدیریتی</button>
+            </nav>
+            {view === 'dashboard' && <SupplierDashboard data={data} onEvaluate={setEvaluating} reloadKey={suppliers.items} />}
+            {view === 'list' && (<>
+            <ControlKpis items={[
+              { icon: Truck, tone: 'navy', label: 'تأمین‌کننده', value: toPersianDigits(items.length), note: `${toPersianDigits(items.filter((item) => item.status === 0).length)} فعال` },
+              { icon: FileText, tone: 'blue', label: 'قرارداد', value: toPersianDigits(items.reduce((sum, item) => sum + (item.stats?.contractCount || 0), 0)), note: 'همه‌ی وضعیت‌ها' },
+              { icon: CircleDollarSign, tone: 'red', label: 'صورت‌حساب‌شده', value: rialsText(total('invoicedAmount')), note: 'ریال، تأییدشده' },
+              { icon: CircleAlert, tone: 'green', label: 'بدهی معوق', value: rialsText(total('outstandingPayable')), note: 'ریال، هنوز پرداخت‌نشده' },
+            ]} />
+            <section className="task-panel task-table-panel ctl-panel ctl-block">
+              <div className="task-panel-title">
+                <div><h3>فهرست تأمین‌کنندگان</h3><p>مبلغ‌ها فقط از قراردادهای تأییدشده جمع شده است. برای دیدن قراردادهای هر کدام، روی نام بزنید.</p></div>
+                <div className="ctl-filters">
+                  <input className="users-search" type="search" placeholder="جست‌وجوی نام یا شناسه..." value={search} onChange={(e) => setSearch(e.target.value)} aria-label="جست‌وجو" />
+                  <button type="button" className="ctl-link" onClick={exportSuppliers} disabled={!shown.length}><Download size={14} /> خروجی Excel</button>
+                  {canManage && <button type="button" className="users-add" onClick={() => setForm({ supplier: null })}><Plus size={16} />تأمین‌کننده‌ی جدید</button>}
+                </div>
+              </div>
+              <DataState loading={suppliers.items === null} empty={!shown.length}>
+                <div className="table-scroll"><table>
+                  <thead><tr><th>تأمین‌کننده</th><th>نوع</th><th>قرارداد</th><th>مبلغ (ریال)</th><th>صورت‌حساب‌شده</th><th>پرداخت‌شده</th><th>بدهی معوق</th><th>امتیاز</th><th>وضعیت</th><th>عملیات</th></tr></thead>
+                  <tbody>
+                    {shown.map((item) => (
+                      <Fragment key={item.id}>
+                        <tr className="cost-clickable" onClick={() => setOpen(open === item.id ? null : item.id)}>
+                          <td className="ctl-main"><strong><ChevronDown size={14} className={open === item.id ? 'cost-open' : ''} /> {item.name}</strong>{(item.nationalId || item.contactPerson) && <small>{[item.nationalId && `شناسه ${toPersianDigits(item.nationalId)}`, item.contactPerson].filter(Boolean).join(' · ')}</small>}</td>
+                          <td>{enumLabel(item.category, supplierCategoryLabels)}</td>
+                          <td>{toPersianDigits(item.stats?.contractCount ?? 0)}</td>
+                          <td>{rialsText(moneyRials(item.stats?.contractAmount))}</td>
+                          <td>{rialsText(moneyRials(item.stats?.invoicedAmount))}</td>
+                          <td>{rialsText(moneyRials(item.stats?.paidAmount))}</td>
+                          <td className={moneyRials(item.stats?.outstandingPayable) > 0 ? 'neg' : ''}>{rialsText(moneyRials(item.stats?.outstandingPayable))}</td>
+                          <td title={item.stats?.evaluationCount ? `آخرین ارزیابی تا ${item.stats.latestPeriodEndFa} · میانگین ${scoreText(item.stats.averageScore)} از ${toPersianDigits(item.stats.evaluationCount)} ارزیابی` : 'ارزیابی نشده'}>
+                            {item.stats?.evaluationCount ? <strong className={scoreClass(item.stats.latestScore)}>{scoreText(item.stats.latestScore)}</strong> : '—'}
+                          </td>
+                          <td>{enumLabel(item.status, supplierStatusLabels)}</td>
+                          <td onClick={(e) => e.stopPropagation()}>
+                            <span className="row-actions">
+                              <button type="button" title="ارزیابی‌های دوره‌ای" aria-label="ارزیابی‌های دوره‌ای" onClick={() => setEvaluating(item)}><ClipboardCheck size={15} /></button>
+                              {canManage && <button type="button" title="ویرایش" aria-label="ویرایش" onClick={() => setForm({ supplier: item })}><Pencil size={15} /></button>}
+                              {canManage && <button type="button" className="danger" title="حذف" aria-label="حذف" onClick={() => remove(item)}><Trash2 size={15} /></button>}
+                            </span>
+                          </td>
+                        </tr>
+                        {open === item.id && (detail === null
+                          ? <tr className="cost-subrow"><td colSpan={10}>در حال بارگذاری...</td></tr>
+                          : !(detail.contracts || []).length
+                            ? <tr className="cost-subrow"><td colSpan={10}>{detail.error || 'این تأمین‌کننده هنوز قراردادی ندارد.'}</td></tr>
+                            : detail.contracts.map((contract) => (
+                              <tr key={contract.id} className="cost-subrow">
+                                <td colSpan={2}>{contract.title} <small className="ctl-sp">شماره {contract.contractNumberFa} · {projectName(contract.projectId)}</small></td>
+                                <td />
+                                <td>{rialsText(moneyRials(contract.approvalStatus === 2 ? contract.summary?.currentAmount : contract.originalAmount))}</td>
+                                <td>{contract.approvalStatus === 2 ? rialsText(moneyRials(contract.summary?.invoicedAmount)) : '—'}</td>
+                                <td>{contract.approvalStatus === 2 ? rialsText(moneyRials(contract.summary?.paidAmount)) : '—'}</td>
+                                <td>{contract.approvalStatus === 2 ? rialsText(moneyRials(contract.summary?.outstandingPayable)) : '—'}</td>
+                                <td />
+                                <td colSpan={2}><ApprovalBadge status={contract.approvalStatus} /></td>
+                              </tr>
+                            )))}
+                      </Fragment>
+                    ))}
+                  </tbody>
+                </table></div>
+              </DataState>
+            </section>
+            </>)}
+            {evaluating && (
+              <SupplierEvaluationsDialog
+                supplier={evaluating} projects={data.projects} canEvaluate={can('Contracts.EvaluateSuppliers')}
+                onClose={() => setEvaluating(null)} onChanged={suppliers.reload}
+              />
+            )}
+            {form && (
+              <SupplierFormDialog
+                supplier={form.supplier} onClose={() => setForm(null)}
+                onSaved={(result) => { setForm(null); setNotice(result); suppliers.reload() }}
+              />
+            )}
+          </>
+        )}
+      </DataState>
+    </>
+  )
+}
+
+/* ---- Changes: the project's change requests, and the addenda of its contracts ---- */
+
+const changeTypeLabels = { 0: 'دامنه', 1: 'زمان‌بندی', 2: 'هزینه', 3: 'کیفیت', 4: 'سایر' }
+const changePriorityLabels = { 0: 'کم', 1: 'عادی', 2: 'زیاد', 3: 'فوری' }
+const changeStatusLabels = { 0: 'پیش‌نویس', 1: 'در انتظار تأیید', 2: 'تأییدشده', 3: 'ردشده', 4: 'اجراشده', 5: 'لغوشده' }
+const changeStatusClass = { 0: 'todo', 1: 'review', 2: 'doing', 3: 'rejected', 4: 'done', 5: 'todo' }
+const ChangeStatusBadge = ({ status }) => <span className={`status-pill ${changeStatusClass[status] ?? 'todo'}`}>{enumLabel(status, changeStatusLabels)}</span>
+const signedDays = (days) => (days ? `${days > 0 ? '+' : ''}${toPersianDigits(days)} روز` : '—')
+const signedRials = (rials) => (rials ? `${rials > 0 ? '+' : ''}${rialsText(rials)}` : '—')
+
+function useChangeRequests(projectId) {
+  const [items, setItems] = useState(null)
+  const [error, setError] = useState('')
+  const [reloadKey, setReloadKey] = useState(0)
+
+  useEffect(() => {
+    let cancelled = false
+    if (!projectId) { setItems([]); return undefined }
+    setItems(null)
+    changeRequestsApi.list(projectId).then((result) => {
+      if (cancelled) return
+      setError(result.isSuccess ? '' : PersianMessages.error(result.error))
+      setItems(arrayPayload(result))
+    })
+    return () => { cancelled = true }
+  }, [projectId, reloadKey])
+
+  return { items, error, reload: () => setReloadKey((value) => value + 1) }
+}
+
+function ChangesPage({ data }) {
+  const { can } = useAuth()
+  const [tab, setTab] = useState('requests')
+  const projectIds = useMemo(() => (data.selectedProjectId ? [data.selectedProjectId] : []), [data.selectedProjectId])
+  const contracts = useContractDetails(projectIds)
+  const changes = useChangeRequests(data.selectedProjectId)
+  const [notice, setNotice] = useState(null)
+  const [adding, setAdding] = useState(false)
+  const [changeForm, setChangeForm] = useState(null)
+  const items = contracts.items || []
+  const eligible = items.map(({ contract }) => contract).filter((contract) => contract.approvalStatus === 2 && contract.status !== 3)
+
+  const actionNode = tab === 'requests'
+    ? can('Contracts.ManageChanges') && <button type="button" onClick={() => setChangeForm({ item: null })} disabled={!data.selectedProjectId}><Plus size={18} />درخواست تغییر</button>
+    : can('Contracts.ManageAddenda') && <button type="button" onClick={() => setAdding(true)} disabled={!eligible.length}><Plus size={18} />الحاقیه‌ی جدید</button>
+
+  return (
+    <>
+      <TaskPageHeader
+        section="کنترل و اجرا" title="مدیریت تغییرات" action={null}
+        description="ثبت، بررسی و تصویب درخواست‌های تغییر پروژه با اثر آن بر دامنه، زمان و هزینه؛ و الحاقیه‌های قراردادها"
+        actionNode={actionNode}
+      >
+        <ProjectSelector data={data} />
+      </TaskPageHeader>
+      <DataState loading={data.loading} error={data.error} empty={!data.projects.length}>
+        {!can('Contracts.View') ? <p className="data-state data-state--error">برای دیدن این بخش، دسترسی «مشاهده‌ی قراردادها» (Contracts.View) لازم است.</p> : (
+          <>
+            <PageNotice notice={notice} onClose={() => setNotice(null)} />
+            <nav className="settings-subtabs ctl-subtabs">
+              <button type="button" className={tab === 'requests' ? 'active' : ''} onClick={() => setTab('requests')}><RefreshCw size={16} />درخواست‌های تغییر</button>
+              <button type="button" className={tab === 'addenda' ? 'active' : ''} onClick={() => setTab('addenda')}><FileText size={16} />الحاقیه‌های قرارداد</button>
+              <button type="button" className={tab === 'dashboard' ? 'active' : ''} onClick={() => setTab('dashboard')}><LayoutDashboard size={16} />داشبورد تغییرات</button>
+            </nav>
+            {tab === 'requests' && (
+              <ChangeRequestsPanel
+                data={data} changes={changes} contracts={items.map(({ contract }) => contract)} canManage={can('Contracts.ManageChanges')}
+                setNotice={setNotice} onEdit={(item) => setChangeForm({ item })}
+              />
+            )}
+            {tab === 'addenda' && <ContractAddendaPanel data={data} contracts={contracts} changes={changes.items || []} />}
+            {tab === 'dashboard' && <ChangeDashboardPanel data={data} reloadKey={`${changes.items?.length}:${contracts.items?.length}`} />}
+            {changeForm && (
+              <ChangeRequestFormDialog
+                data={data} item={changeForm.item} contracts={items.map(({ contract }) => contract)}
+                onClose={() => setChangeForm(null)} onSaved={(result) => { setChangeForm(null); setNotice(result); changes.reload() }}
+              />
+            )}
+            {adding && <AddendumFormDialog contracts={eligible} tenantId={data.tenantId} onClose={() => setAdding(false)} onSaved={(result) => { setAdding(false); setNotice(result); contracts.reload() }} />}
+          </>
+        )}
+      </DataState>
+    </>
+  )
+}
+
+/** The Workflow approvals of some change requests, by subject id, newest first (as Workflow returns them); empty without Workflow or Workflow.View. */
+function useChangeApprovals(items) {
+  const [approvals, setApprovals] = useState({})
+  const key = (items || []).filter((item) => item.submittedAtUtc).map((item) => `${item.id}:${item.status}`).join(',')
+
+  useEffect(() => {
+    let cancelled = false
+    const ids = (items || []).filter((item) => item.submittedAtUtc).map((item) => item.id)
+    if (!ids.length) { setApprovals({}); return undefined }
+    workflowApi.forSubjects('ChangeRequest', ids).then((result) => {
+      if (cancelled) return
+      const map = {}
+      for (const instance of (result.isSuccess ? arrayPayload(result) : [])) {
+        (map[instance.subjectId] ||= []).push(instance)
+      }
+      setApprovals(map)
+    })
+    return () => { cancelled = true }
+  }, [key])
+
+  return approvals
+}
+
+/** Where a pending approval stands: the step it waits on and who is to decide. */
+const pendingStepText = (instance, userName) => {
+  if (!instance || instance.status !== 0) return null
+  const step = (instance.steps || []).find((item) => item.order === instance.currentStepOrder)
+  const who = instance.currentApproverUserId || step?.approverUserId
+  return `مرحله‌ی ${toPersianDigits(instance.currentStepOrder)} از ${toPersianDigits(instance.totalSteps)}${step?.name ? `: ${step.name}` : ''}${who ? ` · ${userName(who)}` : ''}`
+}
+
+function ChangeRequestsPanel({ data, changes, contracts, canManage, setNotice, onEdit }) {
+  const [detail, setDetail] = useState(null)
+  const [outcome, setOutcome] = useState(null)
+  const items = changes.items || []
+  const approvals = useChangeApprovals(changes.items)
+  const latestApproval = (id) => (approvals[id] || [])[0]
+  const decided = items.filter((item) => item.status === 2 || item.status === 4)
+  const cost = decided.reduce((sum, item) => sum + moneyRials(item.costImpact), 0)
+  const days = decided.reduce((sum, item) => sum + Number(item.scheduleImpactDays || 0), 0)
+  const act = (call, text) => runAction(call, text, setNotice, changes.reload)
+  const contractTitle = (id) => contracts.find((contract) => contract.id === id)?.title
+
+  const exportChanges = () => downloadCsv(`change-requests-${data.selectedProject?.code || 'project'}.csv`,
+    ['کد', 'عنوان', 'نوع', 'اولویت', 'درخواست‌دهنده', 'قرارداد', 'اثر بر دامنه', 'اثر بر زمان (روز)', 'اثر بر هزینه (ریال)', 'وضعیت', 'تاریخ اجرا'],
+    items.map((item) => [item.code, item.title, enumLabel(item.type, changeTypeLabels), enumLabel(item.priority, changePriorityLabels), item.requestedBy || '',
+      contractTitle(item.contractId) || '', item.scopeImpact || '', item.scheduleImpactDays, moneyRials(item.costImpact), enumLabel(item.status, changeStatusLabels), item.implementedDateFa || '']))
+
+  return (
+    <>
+      {changes.error && <div className="users-notice error ctl-notice" role="alert"><CircleAlert size={16} /><span>{changes.error}</span></div>}
+      <ControlKpis items={[
+        { icon: RefreshCw, tone: 'navy', label: 'درخواست تغییر', value: toPersianDigits(items.length), note: `${toPersianDigits(items.filter((item) => item.status === 0).length)} پیش‌نویس` },
+        { icon: CircleAlert, tone: 'red', label: 'در انتظار تصمیم', value: toPersianDigits(items.filter((item) => item.status === 1).length), note: 'ارسال‌شده برای تأیید' },
+        { icon: CircleDollarSign, tone: cost < 0 ? 'green' : 'blue', label: 'اثر هزینه‌ی مصوب', value: signedRials(cost), note: 'ریال، تأییدشده و اجراشده' },
+        { icon: Clock3, tone: 'green', label: 'اثر زمانی مصوب', value: signedDays(days), note: 'تأییدشده و اجراشده' },
+      ]} />
+      <section className="task-panel task-table-panel ctl-panel ctl-block">
+        <div className="task-panel-title">
+          <div><h3>درخواست‌های تغییر پروژه</h3><p>هر درخواست پیش از ارسال باید اثرش بر دامنه، زمان و هزینه را داشته باشد؛ تصمیم از مسیر تأیید ثبت می‌شود.</p></div>
+          <button type="button" className="ctl-link" onClick={exportChanges} disabled={!items.length}><Download size={14} /> خروجی Excel</button>
+        </div>
+        <DataState loading={changes.items === null} empty={!items.length}>
+          <div className="table-scroll"><table>
+            <thead><tr><th>درخواست</th><th>نوع</th><th>اثر بر زمان</th><th>اثر بر هزینه (ریال)</th><th>وضعیت</th><th>عملیات</th></tr></thead>
+            <tbody>{items.map((item) => (
+              <tr key={item.id}>
+                <td className="ctl-main"><strong>{item.code} · {item.title}</strong><small>{[item.requestedBy && `درخواست‌دهنده: ${item.requestedBy}`, contractTitle(item.contractId) && `قرارداد: ${contractTitle(item.contractId)}`, `اولویت ${enumLabel(item.priority, changePriorityLabels)}`].filter(Boolean).join(' · ')}</small></td>
+                <td>{enumLabel(item.type, changeTypeLabels)}</td>
+                <td>{signedDays(item.scheduleImpactDays)}</td>
+                <td className={moneyRials(item.costImpact) > 0 ? 'neg' : ''}>{signedRials(moneyRials(item.costImpact))}</td>
+                <td><ChangeStatusBadge status={item.status} />{!item.hasImpactAssessment && item.status === 0 && <small className="ctl-sp neg"> بدون تحلیل اثر</small>}{item.status === 1 && pendingStepText(latestApproval(item.id), data.userName) && <small className="ctl-sp"> {pendingStepText(latestApproval(item.id), data.userName)}</small>}</td>
+                <td><span className="row-actions">
+                  <button type="button" title="جزئیات" aria-label="جزئیات" onClick={() => setDetail(item)}><Eye size={15} /></button>
+                  {canManage && (item.status === 0 || item.status === 3) && <button type="button" title="ویرایش" aria-label="ویرایش" onClick={() => onEdit(item)}><Pencil size={15} /></button>}
+                  {canManage && item.status === 0 && <button type="button" className="ok" title="ارسال برای تصمیم" aria-label="ارسال برای تصمیم" onClick={() => act(() => changeRequestsApi.submit(item.id), 'درخواست تغییر برای تصمیم ارسال شد.')}><Send size={15} /></button>}
+                  {canManage && item.status === 2 && <button type="button" className="ok" title="ثبت اجرا" aria-label="ثبت اجرا" onClick={() => setOutcome({ kind: 'implement', item })}><CheckCheck size={15} /></button>}
+                  {canManage && [0, 2, 3].includes(item.status) && <button type="button" title="لغو" aria-label="لغو" onClick={() => setOutcome({ kind: 'cancel', item })}><X size={15} /></button>}
+                  {canManage && item.status === 0 && <button type="button" className="danger" title="حذف" aria-label="حذف" onClick={() => window.confirm(`درخواست «${item.title}» حذف شود؟`) && act(() => changeRequestsApi.remove(item.id), 'درخواست تغییر حذف شد.')}><Trash2 size={15} /></button>}
+                </span></td>
+              </tr>
+            ))}</tbody>
+          </table></div>
+        </DataState>
+      </section>
+      {detail && <ChangeRequestDetailDialog item={detail} approvals={[...(approvals[detail.id] || [])].reverse()} userName={data.userName} contractTitle={contractTitle(detail.contractId)} onClose={() => setDetail(null)} />}
+      {outcome && (
+        <ChangeOutcomeDialog
+          kind={outcome.kind} item={outcome.item} onClose={() => setOutcome(null)}
+          onSaved={(result) => { setOutcome(null); setNotice(result); changes.reload() }}
+        />
+      )}
+    </>
+  )
+}
+
+function ChangeRequestDetailDialog({ item, approvals, userName, contractTitle, onClose }) {
+  const at = (value) => (value ? new Date(value).toLocaleDateString('fa-IR') : null)
+  const rows = [
+    ['نوع و اولویت', `${enumLabel(item.type, changeTypeLabels)} · ${enumLabel(item.priority, changePriorityLabels)}`],
+    ['درخواست‌دهنده', item.requestedBy], ['قرارداد مرتبط', contractTitle], ['شرح', item.description], ['دلیل', item.reason],
+    ['اثر بر دامنه', item.scopeImpact], ['اثر بر زمان', signedDays(item.scheduleImpactDays)], ['اثر بر هزینه', `${signedRials(moneyRials(item.costImpact))} ریال`],
+    ['سایر اثرها', item.otherImpact], ['ثبت', at(item.createdAtUtc)], ['ارسال برای تصمیم', at(item.submittedAtUtc)],
+    ['تصمیم', item.decidedAtUtc && `${enumLabel(item.status === 3 ? 3 : 2, changeStatusLabels)} در ${at(item.decidedAtUtc)}${item.decisionNote ? ` · «${item.decisionNote}»` : ''}`],
+    ['اجرا', item.implementedDateFa], ['یادداشت نتیجه', item.outcomeNote],
+  ].filter(([, value]) => value)
+  return (
+    <ControlDialog
+      size="sm" icon={RefreshCw} title={`${item.code} · ${item.title}`} subtitle={enumLabel(item.status, changeStatusLabels)} onClose={onClose}
+      footer={<div className="ue-foot-actions"><button type="button" className="ue-cancel" onClick={onClose}>بستن</button></div>}
+    >
+      <div className="ue-card">
+        {rows.map(([label, value]) => <p key={label} className="ue-note"><strong>{label}:</strong> {value}</p>)}
+      </div>
+      <section className="ue-section">
+        <div className="ue-section-head"><h4><CheckCheck size={16} />سابقه‌ی تصمیم</h4></div>
+        {!item.submittedAtUtc ? <p className="ue-note">هنوز برای تصمیم ارسال نشده است.</p>
+          : !approvals.length ? <p className="ue-note">سابقه‌ای از مسیر تأیید نیست: یا برای درخواست‌های تغییر مسیری تعریف نشده بود و با ارسال مستقیم تصمیم گرفته شد، یا دسترسی دیدن کارتابل تأیید (Workflow.View) را ندارید.</p> : (
+            <div className="table-scroll"><table className="cost-sub">
+              <thead><tr><th>مرحله</th><th>تصمیم‌گیرنده</th><th>تصمیم</th><th>تاریخ</th><th>نظر</th></tr></thead>
+              <tbody>{approvals.flatMap((instance, index) => {
+                const stepName = (order) => (instance.steps || []).find((step) => step.order === order)?.name || `مرحله‌ی ${toPersianDigits(order)}`
+                const decided = (instance.decisions || []).map((decision) => (
+                  <tr key={decision.id}>
+                    <td>{approvals.length > 1 ? `دور ${toPersianDigits(index + 1)} · ` : ''}{stepName(decision.stepOrder)}</td>
+                    <td>{userName(decision.decidedByUserId)}{decision.onBehalfOfUserId && <small className="ctl-sp"> از طرف {userName(decision.onBehalfOfUserId)}</small>}</td>
+                    <td><span className={`status-pill ${decision.approved ? 'done' : 'rejected'}`}>{decision.approved ? 'تأیید' : 'رد'}</span></td>
+                    <td>{new Date(decision.decidedAtUtc).toLocaleDateString('fa-IR')}</td>
+                    <td>{decision.comment || '—'}</td>
+                  </tr>
+                ))
+                const waiting = instance.status === 0 && (
+                  <tr key={`${instance.id}-waiting`}>
+                    <td>{approvals.length > 1 ? `دور ${toPersianDigits(index + 1)} · ` : ''}{stepName(instance.currentStepOrder)}</td>
+                    <td>{userName(instance.currentApproverUserId || (instance.steps || []).find((step) => step.order === instance.currentStepOrder)?.approverUserId)}</td>
+                    <td><span className="status-pill review">در انتظار</span></td><td>—</td><td>—</td>
+                  </tr>
+                )
+                return waiting ? [...decided, waiting] : decided
+              })}</tbody>
+            </table></div>
+          )}
+      </section>
+    </ControlDialog>
+  )
+}
+
+function ChangeOutcomeDialog({ kind, item, onClose, onSaved }) {
+  const implementing = kind === 'implement'
+  const [date, setDate] = useState('')
+  const [note, setNote] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  async function submit(event) {
+    event.preventDefault()
+    setSaving(true); setError('')
+    const result = implementing
+      ? await changeRequestsApi.implement(item.id, { date: emptyToNull(date), note: emptyToNull(note.trim()) })
+      : await changeRequestsApi.cancel(item.id, emptyToNull(note.trim()))
+    setSaving(false)
+    if (!result.isSuccess) { setError(PersianMessages.error(result.error)); return }
+    onSaved({ type: 'success', text: implementing ? 'اجرای تغییر ثبت شد.' : 'درخواست تغییر لغو شد.' })
+  }
+
+  return (
+    <ControlDialog
+      size="sm" icon={implementing ? CheckCheck : X} title={implementing ? 'ثبت اجرای تغییر' : 'لغو درخواست تغییر'} subtitle={`${item.code} · ${item.title}`} onClose={onClose}
+      footer={(
+        <>
+          {error && <span className="ue-error"><TriangleAlert size={15} />{error}</span>}
+          <div className="ue-foot-actions"><button type="button" className="ue-cancel" onClick={onClose}>انصراف</button><button type="submit" form="change-outcome-form" className="ue-save" disabled={saving}>{saving ? 'در حال ذخیره...' : implementing ? 'ثبت اجرا' : 'لغو درخواست'}</button></div>
+        </>
+      )}
+    >
+      <form id="change-outcome-form" onSubmit={submit} noValidate>
+        <div className="ue-card"><div className="ue-grid">
+          {implementing && <CtlField label="تاریخ اجرا" hint="خالی بماند، امروز ثبت می‌شود"><input type="date" value={date} onChange={(e) => setDate(e.target.value)} autoFocus /></CtlField>}
+          <CtlField label={implementing ? 'چگونه اجرا شد' : 'دلیل لغو'} wide><textarea rows={2} value={note} onChange={(e) => setNote(e.target.value)} maxLength={2000} /></CtlField>
+        </div></div>
+      </form>
+    </ControlDialog>
+  )
+}
+
+function ChangeRequestFormDialog({ data, item, contracts, onClose, onSaved }) {
+  const [form, setForm] = useState({
+    title: item?.title || '', type: String(item?.type ?? 0), priority: String(item?.priority ?? 1), requestedBy: item?.requestedBy || '',
+    contractId: item?.contractId || '', description: item?.description || '', reason: item?.reason || '',
+    scopeImpact: item?.scopeImpact || '', scheduleImpactDays: item ? String(item.scheduleImpactDays || '') : '',
+    costImpact: item ? String(Math.round(moneyRials(item.costImpact)) || '') : '', otherImpact: item?.otherImpact || '',
+  })
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const set = (key) => (event) => setForm((current) => ({ ...current, [key]: event.target.value }))
+
+  async function submit(event) {
+    event.preventDefault()
+    if (!form.title.trim()) { setError('عنوان درخواست را وارد کنید.'); return }
+    const days = Number(toLatinDigits(form.scheduleImpactDays || '0'))
+    if (!Number.isInteger(days)) { setError('اثر بر زمان باید عدد صحیح (روز) باشد.'); return }
+    setSaving(true); setError('')
+    const fields = {
+      title: form.title.trim(), type: Number(form.type), priority: Number(form.priority), requestedBy: emptyToNull(form.requestedBy.trim()),
+      contractId: form.contractId || null, description: emptyToNull(form.description.trim()), reason: emptyToNull(form.reason.trim()),
+      scopeImpact: emptyToNull(form.scopeImpact.trim()), scheduleImpactDays: days, costImpact: Number(form.costImpact || 0), otherImpact: emptyToNull(form.otherImpact.trim()),
+    }
+    const result = item ? await changeRequestsApi.update(item.id, fields) : await changeRequestsApi.create({ tenantId: data.tenantId, projectId: data.selectedProjectId, ...fields })
+    setSaving(false)
+    if (!result.isSuccess) { setError(PersianMessages.error(result.error)); return }
+    onSaved({ type: 'success', text: item ? 'درخواست تغییر ذخیره شد.' : 'درخواست تغییر ثبت شد. برای تصمیم، آن را ارسال کنید.' })
+  }
+
+  return (
+    <ControlDialog
+      size="sm" icon={item ? Pencil : Plus} title={item ? `ویرایش ${item.code}` : 'درخواست تغییر تازه'} subtitle={item?.status === 3 ? 'ردشده؛ با ذخیره دوباره پیش‌نویس می‌شود' : undefined} onClose={onClose}
+      footer={(
+        <>
+          {error && <span className="ue-error"><TriangleAlert size={15} />{error}</span>}
+          <div className="ue-foot-actions"><button type="button" className="ue-cancel" onClick={onClose}>انصراف</button><button type="submit" form="change-request-form" className="ue-save" disabled={saving}>{saving ? 'در حال ذخیره...' : 'ذخیره'}</button></div>
+        </>
+      )}
+    >
+      <form id="change-request-form" onSubmit={submit} noValidate>
+        <div className="ue-card"><div className="ue-grid">
+          <CtlField label="عنوان" required wide><input value={form.title} onChange={set('title')} maxLength={300} autoFocus /></CtlField>
+          <CtlField label="نوع"><select value={form.type} onChange={set('type')}>{Object.entries(changeTypeLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></CtlField>
+          <CtlField label="اولویت"><select value={form.priority} onChange={set('priority')}>{Object.entries(changePriorityLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></CtlField>
+          <CtlField label="درخواست‌دهنده" hint="شخص یا واحد؛ می‌تواند بیرون از سامانه باشد"><input value={form.requestedBy} onChange={set('requestedBy')} maxLength={200} /></CtlField>
+          <CtlField label="قرارداد مرتبط"><select value={form.contractId} onChange={set('contractId')}><option value="">— ندارد —</option>{contracts.map((contract) => <option key={contract.id} value={contract.id}>{contract.title}</option>)}</select></CtlField>
+          <CtlField label="شرح تغییر" wide><textarea rows={2} value={form.description} onChange={set('description')} maxLength={4000} /></CtlField>
+          <CtlField label="دلیل" wide><textarea rows={2} value={form.reason} onChange={set('reason')} maxLength={2000} /></CtlField>
+        </div></div>
+        <div className="ue-card ue-card--accent"><div className="ue-grid">
+          <CtlField label="اثر بر دامنه" wide hint="پیش از ارسال برای تصمیم لازم است"><textarea rows={3} value={form.scopeImpact} onChange={set('scopeImpact')} maxLength={4000} /></CtlField>
+          <CtlField label="اثر بر زمان (روز)" hint="منفی یعنی صرفه‌جویی"><input className="ltr-input" value={form.scheduleImpactDays} onChange={set('scheduleImpactDays')} inputMode="numeric" /></CtlField>
+          <CtlField label="اثر بر هزینه (ریال)" hint={form.costImpact && form.costImpact !== '-' ? tomansHint(form.costImpact.replace('-', '')) : 'منفی یعنی صرفه‌جویی'}>
+            <AmountInput value={form.costImpact} onChange={(value) => setForm((current) => ({ ...current, costImpact: value }))} allowNegative />
+          </CtlField>
+          <CtlField label="سایر اثرها" wide hint="کیفیت، ریسک، منابع"><textarea rows={2} value={form.otherImpact} onChange={set('otherImpact')} maxLength={2000} /></CtlField>
+        </div></div>
+      </form>
+    </ControlDialog>
+  )
+}
+
+/** One project's changes at a glance: decisions waiting, the approved impact against the baseline, and changes made without approval. */
+function ChangeDashboardPanel({ data, reloadKey }) {
+  const [dashboard, setDashboard] = useState(null)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    let cancelled = false
+    if (!data.selectedProjectId) { setDashboard(null); return undefined }
+    changeRequestsApi.dashboard(data.selectedProjectId).then((result) => {
+      if (cancelled) return
+      setError(result.isSuccess ? '' : PersianMessages.error(result.error))
+      setDashboard(result.isSuccess ? unwrap(result) : null)
+    })
+    return () => { cancelled = true }
+  }, [data.selectedProjectId, reloadKey])
+
+  if (error) return <div className="users-notice error ctl-notice" role="alert"><CircleAlert size={16} /><span>{error}</span></div>
+  if (!dashboard) return <p className="data-state">در حال بارگذاری...</p>
+  const d = dashboard
+  const percent = (value) => (value === null || value === undefined ? null : `${toPersianDigits(Number(value).toFixed(2).replace(/\.?0+$/, ''))}٪`)
+
+  return (
+    <>
+      <ControlKpis items={[
+        { icon: RefreshCw, tone: 'navy', label: 'درخواست تغییر', value: toPersianDigits(d.total), note: `${toPersianDigits(d.approved + d.implemented)} مصوب · ${toPersianDigits(d.rejected)} رد · ${toPersianDigits(d.cancelled)} لغو` },
+        { icon: CircleAlert, tone: 'red', label: 'در انتظار تصمیم', value: toPersianDigits(d.pending), note: `${toPersianDigits(d.drafts)} پیش‌نویس هنوز ارسال نشده` },
+        { icon: CircleDollarSign, tone: 'blue', label: 'اثر هزینه‌ی مصوب', value: signedRials(moneyRials(d.approvedCostImpact)), note: d.budget ? `${percent(d.costImpactPercent)} از بودجه‌ی ${rialsText(moneyRials(d.budget))} ریال` : 'ریال · بودجه‌ی پروژه ثبت نشده' },
+        { icon: Clock3, tone: 'green', label: 'اثر زمانی مصوب', value: signedDays(d.approvedScheduleImpactDays), note: d.plannedDurationDays ? `${percent(d.scheduleImpactPercent)} از ${toPersianDigits(d.plannedDurationDays)} روز · پایان ${d.plannedEndDateFa} ← ${d.impactedEndDateFa}` : 'تاریخ‌های پروژه ثبت نشده' },
+      ]} />
+
+      <section className="task-panel task-table-panel ctl-panel ctl-block">
+        <div className="task-panel-title"><div><h3>تغییرات بدون مصوبه</h3><p>الحاقیه‌های تأییدشده یا در انتظار تأیید که درخواست تغییرِ مصوبی پشتشان نیست. فقط هشدار است؛ چیزی رد نمی‌شود.</p></div></div>
+        {!d.unapprovedAddenda.length ? <p className="ue-note">همه‌ی الحاقیه‌های اعمال‌شده مصوبه دارند.</p> : (
+          <>
+            <p className="ue-note neg"><TriangleAlert size={14} /> {toPersianDigits(d.unapprovedAddenda.length)} الحاقیه بدون مصوبه: {signedRials(moneyRials(d.unapprovedAmount))} ریال و {signedDays(d.unapprovedExtensionDays)}</p>
+            <div className="table-scroll"><table>
+              <thead><tr><th>قرارداد</th><th>الحاقیه</th><th>تغییر مبلغ (ریال)</th><th>تمدید</th><th>تأیید الحاقیه</th><th>دلیل هشدار</th></tr></thead>
+              <tbody>{d.unapprovedAddenda.map((row) => (
+                <tr key={row.addendumId}>
+                  <td className="ctl-main"><strong>{row.contractTitle}</strong><small>شماره {row.contractNumberFa}</small></td>
+                  <td>{toPersianDigits(row.number)}. {row.title}</td>
+                  <td className={moneyRials(row.amountChange) < 0 ? 'neg' : ''}>{signedRials(moneyRials(row.amountChange))}</td>
+                  <td>{signedDays(row.extensionDays)}</td>
+                  <td><ApprovalBadge status={row.approvalStatus} /></td>
+                  <td><span className="ctl-chip">{row.reason === 'NoChangeRequest' ? 'بدون درخواست تغییر' : 'درخواستش مصوب نیست'}</span></td>
+                </tr>
+              ))}</tbody>
+            </table></div>
+          </>
+        )}
+      </section>
+
+      <section className="task-panel task-table-panel ctl-panel ctl-block">
+        <div className="task-panel-title"><div><h3>در انتظار تصمیم</h3><p>به ترتیب زمان ارسال؛ قدیمی‌ترین بالا.</p></div></div>
+        {!d.pendingChanges.length ? <p className="ue-note">درخواستی منتظر تصمیم نیست.</p> : (
+          <div className="table-scroll"><table>
+            <thead><tr><th>درخواست</th><th>انتظار</th><th>اثر بر زمان</th><th>اثر بر هزینه (ریال)</th></tr></thead>
+            <tbody>{d.pendingChanges.map((row) => (
+              <tr key={row.id}>
+                <td className="ctl-main"><strong>{row.code} · {row.title}</strong></td>
+                <td className={row.waitingDays > 7 ? 'neg' : ''}>{toPersianDigits(row.waitingDays)} روز</td>
+                <td>{signedDays(row.scheduleImpactDays)}</td>
+                <td>{signedRials(moneyRials(row.costImpact))}</td>
+              </tr>
+            ))}</tbody>
+          </table></div>
+        )}
+      </section>
+    </>
+  )
+}
+
+/** The addenda of the project's contracts: a change to a contract's amount or duration. */
+function ContractAddendaPanel({ data, contracts, changes }) {
+  const changeOf = (id) => changes.find((change) => change.id === id)
+  const items = contracts.items || []
+  const rows = items.flatMap(({ contract, addenda }) => addenda.map((addendum) => ({ contract, addendum })))
+    .sort((a, b) => String(b.addendum.addendumDate || '').localeCompare(String(a.addendum.addendumDate || '')))
+  const approved = rows.filter((row) => row.addendum.approvalStatus === 2)
+  const net = approved.reduce((sum, row) => sum + Number(row.addendum.amountChange || 0), 0)
+  const days = approved.reduce((sum, row) => sum + Number(row.addendum.extensionDays || 0), 0)
+  const pending = rows.filter((row) => row.addendum.approvalStatus === 1).length
+
+  const exportChanges = () => downloadCsv(`contract-changes-${data.selectedProject?.code || 'project'}.csv`,
+    ['قرارداد', 'طرف قرارداد', 'شماره', 'عنوان', 'تاریخ', 'تغییر مبلغ (ریال)', 'تمدید (روز)', 'تأیید', 'مصوبه'],
+    rows.map(({ contract, addendum }) => [contract.contractNumber, contract.counterparty, addendum.number, addendum.title, addendum.addendumDateFa || '', addendum.amountChange, addendum.extensionDays, enumLabel(addendum.approvalStatus, approvalLabels), changeOf(addendum.changeRequestId)?.code || '']))
+
+  return (
+    <>
+      {contracts.error && <div className="users-notice error ctl-notice" role="alert"><CircleAlert size={16} /><span>{contracts.error}</span></div>}
+      <ControlKpis items={[
+        { icon: RefreshCw, tone: 'navy', label: 'الحاقیه', value: toPersianDigits(rows.length), note: 'همه‌ی وضعیت‌ها' },
+        { icon: CircleDollarSign, tone: net < 0 ? 'green' : 'red', label: 'خالص تغییر مبلغ', value: `${net > 0 ? '+' : ''}${rialsText(net)}`, note: 'ریال، الحاقیه‌های تأییدشده' },
+        { icon: Clock3, tone: 'blue', label: 'تمدید زمان', value: `${toPersianDigits(days)} روز`, note: 'الحاقیه‌های تأییدشده' },
+        { icon: CircleAlert, tone: 'red', label: 'در انتظار تأیید', value: toPersianDigits(pending), note: 'هنوز اعمال نشده' },
+      ]} />
+      <section className="task-panel task-table-panel ctl-panel ctl-block">
+        <div className="task-panel-title"><div><h3>الحاقیه‌های قراردادها</h3><p>الحاقیه فقط بعد از تأیید روی مبلغ و تاریخ پایان قرارداد اثر می‌گذارد.</p></div><button type="button" className="ctl-link" onClick={exportChanges} disabled={!rows.length}><Download size={14} /> خروجی Excel</button></div>
+        <DataState loading={contracts.items === null} empty={!rows.length}>
+          <div className="table-scroll"><table>
+            <thead><tr><th>قرارداد</th><th>الحاقیه</th><th>تاریخ</th><th>تغییر مبلغ (ریال)</th><th>تمدید</th><th>تأیید</th><th>مصوبه</th></tr></thead>
+            <tbody>{rows.map(({ contract, addendum }) => (
+              <tr key={addendum.id}>
+                <td className="ctl-main"><strong>{contract.title}</strong><small>{contract.counterparty}</small></td>
+                <td className="ctl-main"><strong>{toPersianDigits(addendum.number)}. {addendum.title}</strong>{addendum.description && <small>{addendum.description}</small>}</td>
+                <td>{addendum.addendumDateFa || '—'}</td>
+                <td className={addendum.amountChange < 0 ? 'neg' : ''}>{addendum.amountChange > 0 ? '+' : ''}{rialsText(addendum.amountChange)}</td>
+                <td>{addendum.extensionDays ? `${toPersianDigits(addendum.extensionDays)} روز` : '—'}</td>
+                <td><ApprovalBadge status={addendum.approvalStatus} /></td>
+                <td>{(() => {
+                  const change = changeOf(addendum.changeRequestId)
+                  if (change && (change.status === 2 || change.status === 4)) return <span title={change.title}>{change.code}</span>
+                  if (addendum.approvalStatus === 0 || addendum.approvalStatus === 3) return <small className="ctl-sp">{change ? change.code : '—'}</small>
+                  return <span className="ctl-chip neg" title={change ? `${change.code} ${enumLabel(change.status, changeStatusLabels)} است` : 'هیچ درخواست تغییرِ تأییدشده‌ای پشت این الحاقیه نیست'}><TriangleAlert size={12} /> {change ? `${change.code} مصوب نیست` : 'بدون مصوبه'}</span>
+                })()}</td>
+              </tr>
+            ))}</tbody>
+          </table></div>
+        </DataState>
+      </section>
+    </>
+  )
 }
 
 function TaskManagement({ active, data }) {
@@ -1043,8 +3969,8 @@ function ControlManagement({ active, data }) {
   if (active === 'مدیریت منابع') return <ResourcesPage data={data} />
   if (active === 'مدیریت هزینه') return <CostPage data={data} />
   if (active === 'مدیریت ذینفعان') return <StakeholdersPage data={data} />
-  if (active === 'مدیریت تأمین‌کنندگان') return <UnsupportedProjectArea title={active} message="در Core فعلی endpoint مستقلی برای تأمین‌کنندگان پروژه پیدا نشد." />
-  if (active === 'مدیریت تغییرات') return <UnsupportedProjectArea title={active} message="در Core فعلی endpoint مستقلی برای change request یا مدیریت تغییرات پیدا نشد." />
+  if (active === 'مدیریت تأمین‌کنندگان') return <SuppliersPage data={data} />
+  if (active === 'مدیریت تغییرات') return <ChangesPage data={data} />
   return null
 }
 
