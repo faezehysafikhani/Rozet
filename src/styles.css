@@ -1562,6 +1562,11 @@ margin-top: 18px;
 .cost-mini > div { padding: 10px 12px; border: 1px solid #e6e9f0; border-radius: 10px; background: #fafbfd; }
 .cost-mini small { display: block; color: #98a0ae; font-size: .8rem; }
 .cost-mini b { color: #202b42; font-size: 1rem; }
+.ctl-links { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; white-space: normal; }
+.ctl-chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 999px; background: #eef1f8; color: #46506a; font-size: .8rem; }
+.ctl-chip button { display: inline-flex; border: 0; padding: 0; background: transparent; color: #98a0ae; cursor: pointer; }
+.ctl-chip button:hover { color: #c0453a; }
+:root[data-mode="dark"] .ctl-chip { background: rgba(255, 255, 255, .08); color: var(--d-text, #dfe4ee); }
 .cost-sub { width: 100%; border-collapse: collapse; }
 .cost-sub th, .cost-sub td { padding: 8px 8px; border-bottom: 1px solid #eceef2; text-align: right; font-size: .9rem; color: #46506a; white-space: nowrap; }
 .cost-sub th { color: #98a0ae; font-weight: 500; background: #fafbfc; }

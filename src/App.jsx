@@ -75,7 +75,7 @@ import {
   RotateCcw,
 } from 'lucide-react'
 import { AuthProvider, Can, useAuth } from './services/AuthContext'
-import { PersianMessages, contractsApi, costReportApi, groupsApi, identityApi, labelForModule, labelForPermission, orgChartApi, permissionsApi, platformApi, projectManagementApi, rolesApi, suppliersApi, unwrap, usersApi } from './services/api'
+import { PersianMessages, actionsApi, contractsApi, costReportApi, groupsApi, identityApi, labelForModule, labelForPermission, orgChartApi, permissionsApi, platformApi, projectManagementApi, rolesApi, suppliersApi, unwrap, usersApi } from './services/api'
 import { DEFAULT_TENANT_ID } from './services/config'
 import { useChat } from './hooks/useChat'
 import { useNotifications } from './hooks/useNotifications'
@@ -2818,6 +2818,7 @@ const obligationPartyLabels = { 0: 'طرف قرارداد', 1: 'کارفرما' 
 function ContractCommitments({ contract, canEdit }) {
   const [milestones, setMilestones] = useState(null)
   const [obligations, setObligations] = useState(null)
+  const [links, setLinks] = useState([])
   const [reloadKey, setReloadKey] = useState(0)
   const [notice, setNotice] = useState(null)
   const [sub, setSub] = useState(null)
@@ -2827,11 +2828,27 @@ function ContractCommitments({ contract, canEdit }) {
     let cancelled = false
     contractsApi.milestones(contract.id).then((result) => { if (!cancelled) setMilestones(result.isSuccess ? arrayPayload(result) : []) })
     contractsApi.obligations(contract.id).then((result) => { if (!cancelled) setObligations(result.isSuccess ? arrayPayload(result) : []) })
+    contractsApi.links(contract.id).then((result) => { if (!cancelled) setLinks(result.isSuccess ? arrayPayload(result) : []) })
     return () => { cancelled = true }
   }, [contract.id, reloadKey])
 
   const act = (call, text) => runAction(call, text, setNotice, reload)
   const done = (result) => { setSub(null); setNotice(result); reload() }
+  const linksOf = (subjectType, subjectId) => links.filter((link) => link.subjectType === subjectType && link.subjectId === subjectId)
+  const linkButton = (subjectType, subject) => canEdit && <button type="button" title="پیوند سند یا اقدام" aria-label="پیوند سند یا اقدام" onClick={() => setSub({ kind: 'link', subjectType, subject })}><Paperclip size={15} /></button>
+  const linkChips = (subjectType, subjectId) => {
+    const own = linksOf(subjectType, subjectId)
+    return own.length > 0 && (
+      <span className="ctl-links">
+        {own.map((link) => (
+          <span key={link.id} className="ctl-chip" title={link.note || undefined}>
+            {link.kind === 0 ? 'سند' : 'اقدام'}: {link.title}
+            {canEdit && <button type="button" aria-label="حذف پیوند" title="حذف پیوند" onClick={() => window.confirm('این پیوند حذف شود؟') && act(() => contractsApi.deleteLink(contract.id, link.id), 'پیوند حذف شد.')}><X size={12} /></button>}
+          </span>
+        ))}
+      </span>
+    )
+  }
 
   return (
     <>
@@ -2843,12 +2860,13 @@ function ContractCommitments({ contract, canEdit }) {
             <thead><tr><th>عنوان</th><th>سررسید</th><th>وضعیت</th><th>انجام</th><th /></tr></thead>
             <tbody>{milestones.map((item) => (
               <tr key={item.id}>
-                <td>{item.title}{item.description && <small className="ctl-sp"> {item.description}</small>}</td>
+                <td>{item.title}{item.description && <small className="ctl-sp"> {item.description}</small>}{linkChips(1, item.id)}</td>
                 <td className={item.isOverdue ? 'neg' : ''}>{item.dueDateFa}{item.isOverdue && <small className="ctl-sp"> معوق</small>}</td>
                 <td>{enumLabel(item.status, milestoneStatusLabels)}</td>
                 <td>{item.completedDateFa || '—'}</td>
                 <td>{canEdit && (
                   <span className="row-actions">
+                    {linkButton(1, item)}
                     <button type="button" title="ویرایش" aria-label="ویرایش" onClick={() => setSub({ kind: 'milestone', item })}><Pencil size={15} /></button>
                     <button type="button" className="danger" title="حذف" aria-label="حذف" onClick={() => window.confirm('این نقطه‌ی عطف حذف شود؟') && act(() => contractsApi.deleteMilestone(contract.id, item.id), 'نقطه‌ی عطف حذف شد.')}><Trash2 size={15} /></button>
                   </span>
@@ -2866,12 +2884,13 @@ function ContractCommitments({ contract, canEdit }) {
             <thead><tr><th>عنوان</th><th>بر عهده‌ی</th><th>سررسید</th><th>وضعیت</th><th /></tr></thead>
             <tbody>{obligations.map((item) => (
               <tr key={item.id}>
-                <td>{item.title}{item.description && <small className="ctl-sp"> {item.description}</small>}</td>
+                <td>{item.title}{item.description && <small className="ctl-sp"> {item.description}</small>}{linkChips(2, item.id)}</td>
                 <td>{enumLabel(item.party, obligationPartyLabels)}</td>
                 <td className={item.isOverdue ? 'neg' : ''}>{item.dueDateFa || '—'}{item.isOverdue && <small className="ctl-sp"> معوق</small>}</td>
                 <td>{enumLabel(item.status, obligationStatusLabels)}{item.fulfilledDateFa && <small className="ctl-sp"> {item.fulfilledDateFa}</small>}</td>
                 <td>{canEdit && (
                   <span className="row-actions">
+                    {linkButton(2, item)}
                     <button type="button" title="ویرایش" aria-label="ویرایش" onClick={() => setSub({ kind: 'obligation', item })}><Pencil size={15} /></button>
                     <button type="button" className="danger" title="حذف" aria-label="حذف" onClick={() => window.confirm('این تعهد حذف شود؟') && act(() => contractsApi.deleteObligation(contract.id, item.id), 'تعهد حذف شد.')}><Trash2 size={15} /></button>
                   </span>
@@ -2882,9 +2901,75 @@ function ContractCommitments({ contract, canEdit }) {
         )}
       </section>
 
+      <section className="ue-section">
+        <div className="ue-section-head"><h4><Paperclip size={16} />اسناد و پیوست‌های قرارداد</h4>{canEdit && <button type="button" className="ctl-link" onClick={() => setSub({ kind: 'link', subjectType: 0, subject: contract })}><Plus size={14} /> پیوند تازه</button>}</div>
+        {!linksOf(0, contract.id).length ? <p className="ue-note">سند یا اقدامی به این قرارداد پیوند نخورده است.</p> : <p className="ue-note">{linkChips(0, contract.id)}</p>}
+      </section>
+
+      {sub?.kind === 'link' && <LinkFormDialog contract={contract} subjectType={sub.subjectType} subject={sub.subject} onClose={() => setSub(null)} onSaved={done} />}
       {sub?.kind === 'milestone' && <MilestoneFormDialog contract={contract} item={sub.item} onClose={() => setSub(null)} onSaved={done} />}
       {sub?.kind === 'obligation' && <ObligationFormDialog contract={contract} item={sub.item} onClose={() => setSub(null)} onSaved={done} />}
     </>
+  )
+}
+
+/** Links a project document or an action to the contract, or to one of its milestones or obligations (as evidence). */
+function LinkFormDialog({ contract, subjectType, subject, onClose, onSaved }) {
+  const [kind, setKind] = useState('0')
+  const [options, setOptions] = useState(null)
+  const [targetId, setTargetId] = useState('')
+  const [note, setNote] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    let cancelled = false
+    setOptions(null); setTargetId('')
+    const load = kind === '0' ? projectManagementApi.documents(contract.projectId) : actionsApi.list(contract.projectId)
+    load.then((result) => {
+      if (cancelled) return
+      const items = result.isSuccess ? arrayPayload(result) : []
+      setOptions(items.map((item) => ({ id: item.id, title: kind === '0' ? (item.description || item.fileName || 'سند') : (item.title || 'اقدام') })))
+    })
+    return () => { cancelled = true }
+  }, [kind, contract.projectId])
+
+  async function submit(event) {
+    event.preventDefault()
+    const target = (options || []).find((item) => item.id === targetId)
+    if (!target) { setError(kind === '0' ? 'یک سند را انتخاب کنید.' : 'یک اقدام را انتخاب کنید.'); return }
+    setSaving(true); setError('')
+    const result = await contractsApi.createLink(contract.id, {
+      kind: Number(kind), targetId: target.id, title: target.title, subjectType, subjectId: subjectType === 0 ? null : subject.id, note: emptyToNull(note.trim()),
+    })
+    setSaving(false)
+    if (!result.isSuccess) { setError(PersianMessages.error(result.error)); return }
+    onSaved({ type: 'success', text: 'پیوند ثبت شد.' })
+  }
+
+  return (
+    <ControlDialog
+      size="sm" icon={Paperclip} title="پیوند سند یا اقدام" subtitle={subjectType === 0 ? contract.title : subject.title} onClose={onClose}
+      footer={(
+        <>
+          {error && <span className="ue-error"><TriangleAlert size={15} />{error}</span>}
+          <div className="ue-foot-actions"><button type="button" className="ue-cancel" onClick={onClose}>انصراف</button><button type="submit" form="link-form" className="ue-save" disabled={saving}>{saving ? 'در حال ذخیره...' : 'ثبت پیوند'}</button></div>
+        </>
+      )}
+    >
+      <form id="link-form" onSubmit={submit} noValidate>
+        <div className="ue-card"><div className="ue-grid">
+          <CtlField label="نوع"><select value={kind} onChange={(e) => setKind(e.target.value)}><option value="0">سند پروژه</option><option value="1">اقدام</option></select></CtlField>
+          <CtlField label={kind === '0' ? 'سند' : 'اقدام'} required wide hint="از موارد همین پروژه">
+            <select value={targetId} onChange={(e) => setTargetId(e.target.value)} disabled={options === null}>
+              <option value="">{options === null ? 'در حال بارگذاری...' : options.length ? '— انتخاب کنید —' : 'موردی در این پروژه نیست'}</option>
+              {(options || []).map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}
+            </select>
+          </CtlField>
+          <CtlField label="یادداشت" wide><input value={note} onChange={(e) => setNote(e.target.value)} maxLength={1000} /></CtlField>
+        </div></div>
+      </form>
+    </ControlDialog>
   )
 }
 

@@ -435,6 +435,17 @@ export const contractsApi = {
   createObligation: (contractId, payload) => api.post(`${contractsBase}/${contractId}/obligations`, payload),
   updateObligation: (contractId, id, payload) => api.put(`${contractsBase}/${contractId}/obligations/${id}`, payload),
   deleteObligation: (contractId, id) => api.delete(`${contractsBase}/${contractId}/obligations/${id}`),
+  // Links from the contract, one of its milestones or one of its obligations to a project document (kind 0) or an action (kind 1).
+  // subjectType: Contract = 0, Milestone = 1, Obligation = 2 (subjectId is the milestone's / obligation's id; omit it for the contract).
+  // The title is the target's name, kept as it was when linked.
+  links: (contractId) => api.get(`${contractsBase}/${contractId}/links`),
+  createLink: (contractId, payload) => api.post(`${contractsBase}/${contractId}/links`, payload),
+  deleteLink: (contractId, id) => api.delete(`${contractsBase}/${contractId}/links/${id}`),
+}
+
+/** Actions of a project (the Actions module), to link them to a contract as evidence. */
+export const actionsApi = {
+  list: (projectId) => api.get(`/api/actions?${projectQuery({ projectId })}`),
 }
 
 /**
