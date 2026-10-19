@@ -1,43 +1,57 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import {
   Bell,
   BookOpen,
   Boxes,
   Building2,
+  ArrowDownUp,
+  Camera,
+  Check,
   CalendarDays,
   CalendarRange,
   ChartNoAxesCombined,
   CheckCircle2,
   CheckCheck,
   CheckSquare2,
+  ChevronDown,
   ChevronLeft,
+  CircleAlert,
   CircleDollarSign,
   CircleDashed,
   CircleHelp,
   Clock3,
+  CloudUpload,
   Columns3,
   Eye,
   EyeOff,
   FileChartColumn,
   FileText,
   Filter,
+  Lock,
   FolderOpen,
+  Grid3x3,
   Handshake,
   History,
   KeyRound,
   LayoutDashboard,
   ListTodo,
+  LoaderCircle,
   LogOut,
   Menu,
   MessagesSquare,
   MessageCircle,
+  MessageSquareText,
+  RotateCcw,
   MoreHorizontal,
   Network,
+  Palette,
   Plus,
   Paperclip,
   Pencil,
   Presentation,
   RefreshCw,
+  Save,
   Search,
   Send,
   Settings,
@@ -48,6 +62,7 @@ import {
   TrendingUp,
   TriangleAlert,
   Truck,
+  Upload,
   UserRound,
   UserCog,
   UserPlus,
@@ -63,13 +78,16 @@ import {
   SlidersHorizontal,
   Smile,
   LockKeyhole,
+  Sun,
+  Moon,
 } from 'lucide-react'
 import { AuthProvider, Can, useAuth } from './services/AuthContext'
-import { PersianMessages, groupsApi, identityApi, labelForModule, labelForPermission, orgChartApi, permissionsApi, platformApi, projectManagementApi, rolesApi, unwrap, usersApi } from './services/api'
+import { PersianMessages, accountApi, groupsApi, identityApi, labelForModule, labelForPermission, myTeamsApi, orgChartApi, permissionsApi, platformApi, projectManagementApi, rolesApi, smsPanelApi, unwrap, uploadPolicyApi, usersApi } from './services/api'
 import { DEFAULT_TENANT_ID } from './services/config'
 import { useChat } from './hooks/useChat'
 import { useNotifications } from './hooks/useNotifications'
 import { useDashboard } from './hooks/useDashboard'
+import { PRESET_AVATARS } from './utils/avatars'
 
 // A sidebar entry is a container for several sections, so it is shown when ANY of the
 // permissions below was granted - not just one hard-coded permission. Entries not listed
@@ -85,7 +103,7 @@ const menuPermissions = {
 
 // Which granted permissions surface each section of the user-management screen.
 const sectionPermissions = {
-  users: ['users.view', 'users.create', 'users.update', 'users.assign_roles'],
+  users: ['users.view'],
   loginHistory: ['audit_logs.view'],
   access: [
     'roles.view', 'roles.create', 'roles.update', 'roles.assign_permissions',
@@ -107,20 +125,58 @@ function Pagination({ pageNumber, pageSize, totalCount, onChange }) {
 
   return (
     <div className="table-pager">
-      <span>نمایش {from} تا {to} از {totalCount} رکورد</span>
+      <span>نمایش {toPersianDigits(from)} تا {toPersianDigits(to)} از {toPersianDigits(totalCount)} مورد</span>
       <div>
         <button type="button" disabled={pageNumber <= 1} onClick={() => onChange(pageNumber - 1)}>قبلی</button>
-        <b>صفحه {pageNumber} از {totalPages}</b>
+        <b>صفحه {toPersianDigits(pageNumber)} از {toPersianDigits(totalPages)}</b>
         <button type="button" disabled={pageNumber >= totalPages} onClick={() => onChange(pageNumber + 1)}>بعدی</button>
       </div>
     </div>
   )
 }
 
+function toPersianDigits(value) {
+  return String(value ?? '').replace(/\d/g, (digit) => '۰۱۲۳۴۵۶۷۸۹'[digit])
+}
+
 function initialsOf(name = '') {
   const parts = String(name).trim().split(/\s+/)
   if (!parts[0]) return '؟'
   return parts.length > 1 ? `${parts[0][0]}\u200c${parts[1][0]}` : parts[0].slice(0, 2)
+}
+
+// Core's upload-policy default (Uploads.MaxFileSizeKb) is 200KB; avatars are stored as a data
+// URL on the user record, so the file is resized/compressed client-side to fit under that.
+const AVATAR_MAX_BYTES = 200 * 1024
+
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(reader.result)
+    reader.onerror = () => reject(reader.error)
+    reader.readAsDataURL(file)
+  })
+}
+
+/** Resizes an image into a square canvas and re-encodes it as JPEG, shrinking until it fits. */
+async function compressImageToDataUrl(file, maxSide = 220, quality = 0.8) {
+  const original = await readFileAsDataUrl(file)
+  const image = await new Promise((resolve, reject) => {
+    const img = new Image()
+    img.onload = () => resolve(img)
+    img.onerror = reject
+    img.src = original
+  })
+  const scale = Math.min(1, maxSide / Math.max(image.width, image.height))
+  const canvas = document.createElement('canvas')
+  canvas.width = Math.round(image.width * scale)
+  canvas.height = Math.round(image.height * scale)
+  const context = canvas.getContext('2d')
+  // JPEG has no alpha: without a backdrop, transparent PNG areas would come out black.
+  context.fillStyle = '#fff'
+  context.fillRect(0, 0, canvas.width, canvas.height)
+  context.drawImage(image, 0, 0, canvas.width, canvas.height)
+  return canvas.toDataURL('image/jpeg', quality)
 }
 
 function formatDateTime(value) {
@@ -195,7 +251,9 @@ const menuItems = [
 ]
 
 const dashboardLabel = 'داشبورد اصلی'
-const userProfileLabel = 'پروفایل کاربر'
+// Same label as the «ارتباطات و سیستم» submenu's «تنظیمات» entry, so the topbar's profile
+// button and the sidebar both land on the one settings page.
+const userProfileLabel = 'تنظیمات'
 const submenuLabels = menuItems.flatMap((item) => item.children || []).map((item) => item.label)
 
 function isMenuItemActive(item, active) {
@@ -256,12 +314,12 @@ function Login({ onForgotPassword }) {
   return (
     <main className="login-page" dir="rtl">
       <section className="login-visual" aria-label="معرفی سامانه روزت">
-  <img
-    src="/login-visual2.png"
-    alt="سامانه روزت"
-    className="login-visual-image"
-  />
-</section>
+        <img
+          src="/login-visual2.png"
+          alt="سامانه روزت"
+          className="login-visual-image"
+        />
+      </section>
 
       <section className="login-panel">
         <div className="login-box">
@@ -326,12 +384,12 @@ function AuthShell({ title, subtitle, children, onBack }) {
     <main className="login-page" dir="rtl">
       <section className="login-visual" aria-label="معرفی سامانه روزت">
         <section className="login-visual" aria-label="معرفی سامانه روزت">
-  <img
-    src="/login-visual2.png"
-    alt="سامانه روزت"
-    className="login-visual-image"
-  />
-</section>  
+          <img
+            src="/login-visual2.png"
+            alt="سامانه روزت"
+            className="login-visual-image"
+          />
+        </section>
       </section>
       <section className="login-panel">
         <div className="login-box">
@@ -586,71 +644,71 @@ function useProjectManagementData() {
 
   useEffect(() => {
     let cancelled = false
-    ;(async () => {
-      setLoading(true)
-      setError('')
-      const [projectResult, userResult] = await Promise.all([
-        projectManagementApi.projects({ tenantId, pageNumber: 1, pageSize: 50 }),
-        usersApi.list({ tenantId, pageNumber: 1, pageSize: 200 }),
-      ])
-      if (cancelled) return
-      if (!projectResult.isSuccess) setError(PersianMessages.error(projectResult.error))
-      const projectItems = arrayPayload(projectResult)
-      setProjects(projectItems)
-      setProjectTotal(totalPayload(projectResult, projectItems))
-      setUsers(arrayPayload(userResult))
-      setSelectedProjectId((current) => current && projectItems.some((p) => p.id === current) ? current : projectItems[0]?.id || '')
-      setLoading(false)
-    })()
+      ; (async () => {
+        setLoading(true)
+        setError('')
+        const [projectResult, userResult] = await Promise.all([
+          projectManagementApi.projects({ tenantId, pageNumber: 1, pageSize: 50 }),
+          usersApi.list({ tenantId, pageNumber: 1, pageSize: 200 }),
+        ])
+        if (cancelled) return
+        if (!projectResult.isSuccess) setError(PersianMessages.error(projectResult.error))
+        const projectItems = arrayPayload(projectResult)
+        setProjects(projectItems)
+        setProjectTotal(totalPayload(projectResult, projectItems))
+        setUsers(arrayPayload(userResult))
+        setSelectedProjectId((current) => current && projectItems.some((p) => p.id === current) ? current : projectItems[0]?.id || '')
+        setLoading(false)
+      })()
     return () => { cancelled = true }
   }, [tenantId, refreshKey])
 
   useEffect(() => {
     let cancelled = false
-    ;(async () => {
-      if (!projects.length) {
-        setTasks([])
-        return
-      }
-      const results = await Promise.all(projects.map((project) => projectManagementApi.agileTasks({ projectId: project.id })))
-      if (cancelled) return
-      setTasks(results.flatMap((result, index) => arrayPayload(result).map((task) => ({ ...task, projectName: projectDisplayName(projects[index]) }))))
-    })()
+      ; (async () => {
+        if (!projects.length) {
+          setTasks([])
+          return
+        }
+        const results = await Promise.all(projects.map((project) => projectManagementApi.agileTasks({ projectId: project.id })))
+        if (cancelled) return
+        setTasks(results.flatMap((result, index) => arrayPayload(result).map((task) => ({ ...task, projectName: projectDisplayName(projects[index]) }))))
+      })()
     return () => { cancelled = true }
   }, [projects])
 
   useEffect(() => {
     let cancelled = false
-    ;(async () => {
-      if (!selectedProjectId) {
-        setActivities([]); setProgressUpdates([]); setDocuments([]); setRisks([])
-        setStakeholders([]); setTeamMembers([]); setGovernanceRoles([]); setDeliverables([]); setKpis([])
-        return
-      }
-      setLoadingDetails(true)
-      const [activityResult, progressResult, documentResult, riskResult, stakeholderResult, memberResult, governanceResult, deliverableResult, kpiResult] = await Promise.all([
-        projectManagementApi.waterfallActivities(selectedProjectId),
-        projectManagementApi.progressUpdates(selectedProjectId),
-        projectManagementApi.documents(selectedProjectId),
-        projectManagementApi.risks(selectedProjectId),
-        projectManagementApi.stakeholders(selectedProjectId),
-        projectManagementApi.teamMembers(selectedProjectId),
-        projectManagementApi.governanceRoles(selectedProjectId),
-        projectManagementApi.deliverables(selectedProjectId),
-        projectManagementApi.kpis({ projectId: selectedProjectId }),
-      ])
-      if (cancelled) return
-      setActivities(arrayPayload(activityResult))
-      setProgressUpdates(arrayPayload(progressResult))
-      setDocuments(arrayPayload(documentResult))
-      setRisks(arrayPayload(riskResult))
-      setStakeholders(arrayPayload(stakeholderResult))
-      setTeamMembers(arrayPayload(memberResult))
-      setGovernanceRoles(arrayPayload(governanceResult))
-      setDeliverables(arrayPayload(deliverableResult))
-      setKpis(arrayPayload(kpiResult))
-      setLoadingDetails(false)
-    })()
+      ; (async () => {
+        if (!selectedProjectId) {
+          setActivities([]); setProgressUpdates([]); setDocuments([]); setRisks([])
+          setStakeholders([]); setTeamMembers([]); setGovernanceRoles([]); setDeliverables([]); setKpis([])
+          return
+        }
+        setLoadingDetails(true)
+        const [activityResult, progressResult, documentResult, riskResult, stakeholderResult, memberResult, governanceResult, deliverableResult, kpiResult] = await Promise.all([
+          projectManagementApi.waterfallActivities(selectedProjectId),
+          projectManagementApi.progressUpdates(selectedProjectId),
+          projectManagementApi.documents(selectedProjectId),
+          projectManagementApi.risks(selectedProjectId),
+          projectManagementApi.stakeholders(selectedProjectId),
+          projectManagementApi.teamMembers(selectedProjectId),
+          projectManagementApi.governanceRoles(selectedProjectId),
+          projectManagementApi.deliverables(selectedProjectId),
+          projectManagementApi.kpis({ projectId: selectedProjectId }),
+        ])
+        if (cancelled) return
+        setActivities(arrayPayload(activityResult))
+        setProgressUpdates(arrayPayload(progressResult))
+        setDocuments(arrayPayload(documentResult))
+        setRisks(arrayPayload(riskResult))
+        setStakeholders(arrayPayload(stakeholderResult))
+        setTeamMembers(arrayPayload(memberResult))
+        setGovernanceRoles(arrayPayload(governanceResult))
+        setDeliverables(arrayPayload(deliverableResult))
+        setKpis(arrayPayload(kpiResult))
+        setLoadingDetails(false)
+      })()
     return () => { cancelled = true }
   }, [selectedProjectId, refreshKey])
 
@@ -689,11 +747,11 @@ function FormField({ label, children, wide = false }) {
   return <label className="ue-field" style={wide ? { gridColumn: '1 / -1' } : undefined}><span>{label}</span>{children}</label>
 }
 
-function UserSelect({ data, value, onChange, required = false }) {
+function UserSelect({ data, value, onChange, required = false, users }) {
   return (
     <select value={value || ''} onChange={(event) => onChange(event.target.value)} required={required}>
       <option value="">انتخاب نشده</option>
-      {data.users.map((item) => <option key={item.id} value={item.id}>{item.displayName || item.email}</option>)}
+      {(users || data.users).map((item) => <option key={item.id} value={item.id}>{item.displayName || item.email}</option>)}
     </select>
   )
 }
@@ -712,6 +770,21 @@ const creationTitles = {
   governance: 'تعریف نقش حاکمیتی',
 }
 
+const editTitles = {
+  risk: 'ویرایش ریسک',
+  stakeholder: 'ویرایش ذینفع',
+  member: 'ویرایش نقش عضو پروژه',
+  governance: 'ویرایش نقش حاکمیتی',
+}
+
+// The form of an existing record (risks, stakeholders, team members and governance roles can be edited).
+const editInitialState = (kind, item) => ({
+  risk: { description: item.description || '', probabilityScore: String(item.probabilityScore), severityScore: String(item.severityScore), impactScore: String(item.impactScore), responsePlan: item.responsePlan || '', riskOwnerUserId: item.riskOwnerUserId || '' },
+  stakeholder: { name: item.name || '', isInternal: String(Boolean(item.isInternal)), expectations: item.expectations || '', notes: item.notes || '', power: String(item.power), interest: String(item.interest), engagementStrategy: item.engagementStrategy || '', requirements: item.requirements || '' },
+  member: { userId: item.userId, roleTitle: item.roleTitle || '' },
+  governance: { title: item.title || '', userId: item.userId || '', personnelNumber: item.personnelNumber || '', phone: item.phone || '', email: item.email || '', serviceLocation: item.serviceLocation || '' },
+}[kind])
+
 const creationInitialState = (kind, data) => ({
   project: { name: '', code: '', type: '1', startDate: '', endDate: '', cost: '', goal: '', description: '' },
   task: { title: '', description: '', responsibleUserId: '', approverUserId: '', dueDate: '', priority: '1', sprintNumber: '' },
@@ -726,12 +799,25 @@ const creationInitialState = (kind, data) => ({
   governance: { title: '', userId: '', personnelNumber: '', phone: '', email: '', serviceLocation: '' },
 }[kind] || {})
 
-function CreateProjectItemModal({ kind, data, onClose }) {
-  const [form, setForm] = useState(() => creationInitialState(kind, data))
+function CreateProjectItemModal({ kind, data, item = null, onClose }) {
+  const [form, setForm] = useState(() => (item ? editInitialState(kind, item) : creationInitialState(kind, data)))
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [teamCandidates, setTeamCandidates] = useState(null)
   const selectedProjectId = data.selectedProjectId
   const set = (key, value) => setForm((current) => ({ ...current, [key]: value }))
+
+  // A new team member is picked from the users the Core allows on this project's team (not everyone already on it).
+  useEffect(() => {
+    if (kind !== 'member' || item) return undefined
+    let cancelled = false
+    projectManagementApi.availableTeamUsers(selectedProjectId).then((result) => {
+      if (cancelled) return
+      const onTeam = new Set(data.teamMembers.map((member) => member.userId))
+      setTeamCandidates((result.isSuccess ? arrayPayload(result) : data.users).filter((person) => !onTeam.has(person.id)))
+    })
+    return () => { cancelled = true }
+  }, [kind, item, selectedProjectId])
 
   const submit = async (event) => {
     event.preventDefault()
@@ -824,40 +910,44 @@ function CreateProjectItemModal({ kind, data, onClose }) {
         formula: emptyToNull(form.formula),
         targetValue: numberOrNull(form.targetValue),
       }),
-      risk: () => projectManagementApi.createRisk({
-        ...base,
-        description: form.description,
-        probabilityScore: Number(form.probabilityScore),
-        severityScore: Number(form.severityScore),
-        impactScore: Number(form.impactScore),
-        responsePlan: emptyToNull(form.responsePlan),
-        riskOwnerUserId: emptyToNull(form.riskOwnerUserId),
-      }),
-      stakeholder: () => projectManagementApi.createStakeholder({
-        ...base,
-        name: form.name,
-        isInternal: form.isInternal === 'true',
-        expectations: emptyToNull(form.expectations),
-        notes: emptyToNull(form.notes),
-        power: Number(form.power),
-        interest: Number(form.interest),
-        engagementStrategy: emptyToNull(form.engagementStrategy),
-        requirements: emptyToNull(form.requirements),
-      }),
-      member: () => projectManagementApi.addTeamMember({
-        ...base,
-        userId: form.userId,
-        roleTitle: emptyToNull(form.roleTitle),
-      }),
-      governance: () => projectManagementApi.createGovernanceRole({
-        ...base,
-        title: form.title,
-        userId: emptyToNull(form.userId),
-        personnelNumber: emptyToNull(form.personnelNumber),
-        phone: emptyToNull(form.phone),
-        email: emptyToNull(form.email),
-        serviceLocation: emptyToNull(form.serviceLocation),
-      }),
+      risk: () => {
+        const fields = {
+          description: form.description.trim(),
+          probabilityScore: Number(form.probabilityScore),
+          severityScore: Number(form.severityScore),
+          impactScore: Number(form.impactScore),
+          responsePlan: emptyToNull(form.responsePlan.trim()),
+          riskOwnerUserId: emptyToNull(form.riskOwnerUserId),
+        }
+        return item ? projectManagementApi.updateRisk(item.id, fields) : projectManagementApi.createRisk({ ...base, ...fields })
+      },
+      stakeholder: () => {
+        const fields = {
+          name: form.name.trim(),
+          isInternal: form.isInternal === 'true',
+          expectations: emptyToNull(form.expectations.trim()),
+          notes: emptyToNull(form.notes.trim()),
+          power: Number(form.power),
+          interest: Number(form.interest),
+          engagementStrategy: emptyToNull(form.engagementStrategy.trim()),
+          requirements: emptyToNull(form.requirements.trim()),
+        }
+        return item ? projectManagementApi.updateStakeholder(item.id, fields) : projectManagementApi.createStakeholder({ ...base, ...fields })
+      },
+      member: () => (item
+        ? projectManagementApi.updateTeamMember(item.id, { roleTitle: emptyToNull(form.roleTitle.trim()) })
+        : projectManagementApi.addTeamMember({ ...base, userId: form.userId, roleTitle: emptyToNull(form.roleTitle.trim()) })),
+      governance: () => {
+        const fields = {
+          title: form.title.trim(),
+          userId: emptyToNull(form.userId),
+          personnelNumber: emptyToNull(form.personnelNumber.trim()),
+          phone: emptyToNull(form.phone.trim()),
+          email: emptyToNull(form.email.trim()),
+          serviceLocation: emptyToNull(form.serviceLocation.trim()),
+        }
+        return item ? projectManagementApi.updateGovernanceRole(item.id, fields) : projectManagementApi.createGovernanceRole({ ...base, ...fields })
+      },
     }[kind])()
     setBusy(false)
     if (!result.isSuccess) {
@@ -869,106 +959,106 @@ function CreateProjectItemModal({ kind, data, onClose }) {
   }
 
   return (
-    <div className="ue-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-      <div className="ue-backdrop">
-      <form className="ue-modal pm-modal" onSubmit={submit}>
-        <header className="ue-head">
-          <div className="ue-head-title"><strong>{creationTitles[kind]}</strong><small>{kind === 'project' ? 'ثبت در Projects API' : projectDisplayName(data.selectedProject)}</small></div>
-          <button className="ue-close" type="button" onClick={onClose}><X size={17} /></button>
-        </header>
-        <div className="ue-body"><div className="ue-grid">
-          {kind === 'project' && <>
-            <FormField label="نام پروژه"><input value={form.name} onChange={(event) => set('name', event.target.value)} required /></FormField>
-            <FormField label="کد پروژه"><input value={form.code} onChange={(event) => set('code', event.target.value)} required /></FormField>
-            <FormField label="نوع پروژه"><select value={form.type} onChange={(event) => set('type', event.target.value)}><option value="1">چابک</option><option value="0">آبشاری</option></select></FormField>
-            <FormField label="هزینه اولیه"><input type="number" min="0" value={form.cost} onChange={(event) => set('cost', event.target.value)} /></FormField>
-            <FormField label="تاریخ شروع"><input type="date" value={form.startDate} onChange={(event) => set('startDate', event.target.value)} /></FormField>
-            <FormField label="تاریخ پایان"><input type="date" value={form.endDate} onChange={(event) => set('endDate', event.target.value)} /></FormField>
-            <FormField label="هدف پروژه" wide><textarea rows="2" value={form.goal} onChange={(event) => set('goal', event.target.value)} /></FormField>
-            <FormField label="توضیحات" wide><textarea rows="2" value={form.description} onChange={(event) => set('description', event.target.value)} /></FormField>
-          </>}
-          {kind === 'task' && <>
-            <FormField label="عنوان وظیفه"><input value={form.title} onChange={(event) => set('title', event.target.value)} required /></FormField>
-            <FormField label="اولویت"><select value={form.priority} onChange={(event) => set('priority', event.target.value)}><option value="0">کم</option><option value="1">متوسط</option><option value="2">بالا</option><option value="3">بحرانی</option></select></FormField>
-            <FormField label="مسئول"><UserSelect data={data} value={form.responsibleUserId} onChange={(value) => set('responsibleUserId', value)} /></FormField>
-            <FormField label="تأییدکننده"><UserSelect data={data} value={form.approverUserId} onChange={(value) => set('approverUserId', value)} /></FormField>
-            <FormField label="موعد انجام"><input type="date" value={form.dueDate} onChange={(event) => set('dueDate', event.target.value)} /></FormField>
-            <FormField label="شماره اسپرینت"><input type="number" min="1" value={form.sprintNumber} onChange={(event) => set('sprintNumber', event.target.value)} /></FormField>
-            <FormField label="توضیحات" wide><textarea rows="3" value={form.description} onChange={(event) => set('description', event.target.value)} /></FormField>
-          </>}
-          {kind === 'activity' && <>
-            <FormField label="نام فعالیت"><input value={form.name} onChange={(event) => set('name', event.target.value)} required /></FormField>
-            <FormField label="وزن"><input type="number" min="0" step="0.1" value={form.weight} onChange={(event) => set('weight', event.target.value)} required /></FormField>
-            <FormField label="مسئول"><UserSelect data={data} value={form.responsibleUserId} onChange={(value) => set('responsibleUserId', value)} /></FormField>
-            <FormField label="تأییدکننده"><UserSelect data={data} value={form.approverUserId} onChange={(value) => set('approverUserId', value)} /></FormField>
-            <FormField label="تاریخ شروع"><input type="date" value={form.startDate} onChange={(event) => set('startDate', event.target.value)} /></FormField>
-            <FormField label="تاریخ پایان"><input type="date" value={form.endDate} onChange={(event) => set('endDate', event.target.value)} /></FormField>
-            <FormField label="مدت روز"><input type="number" min="0" value={form.durationDays} onChange={(event) => set('durationDays', event.target.value)} /></FormField>
-            <FormField label="نفرساعت"><input type="number" min="0" step="0.1" value={form.manHours} onChange={(event) => set('manHours', event.target.value)} /></FormField>
-            <FormField label="توضیحات" wide><textarea rows="2" value={form.description} onChange={(event) => set('description', event.target.value)} /></FormField>
-          </>}
-          {kind === 'progress' && <>
-            <FormField label="تاریخ ثبت"><input type="date" value={form.registerDate} onChange={(event) => set('registerDate', event.target.value)} required /></FormField>
-            <FormField label="پیشرفت برنامه‌ای"><input type="number" min="0" max="100" step="0.1" value={form.plannedProgress} onChange={(event) => set('plannedProgress', event.target.value)} required /></FormField>
-            <FormField label="پیشرفت واقعی"><input type="number" min="0" max="100" step="0.1" value={form.actualProgress} onChange={(event) => set('actualProgress', event.target.value)} required /></FormField>
-            <FormField label="شرح وضعیت" wide><textarea rows="2" value={form.statusDescription} onChange={(event) => set('statusDescription', event.target.value)} /></FormField>
-            <FormField label="دلایل تأخیر" wide><textarea rows="2" value={form.delayReasons} onChange={(event) => set('delayReasons', event.target.value)} /></FormField>
-          </>}
-          {kind === 'document' && <>
-            <FormField label="نوع سند"><select value={form.documentType} onChange={(event) => set('documentType', event.target.value)}><option value="0">گزارش</option><option value="1">نامه</option><option value="2">صورت‌جلسه</option><option value="3">سایر</option></select></FormField>
-            <FormField label="فایل"><input type="file" onChange={(event) => set('file', event.target.files?.[0] || null)} required /></FormField>
-            <FormField label="توضیح سند" wide><textarea rows="2" value={form.description} onChange={(event) => set('description', event.target.value)} required /></FormField>
-          </>}
-          {kind === 'deliverable' && <>
-            <FormField label="عنوان خروجی"><input value={form.title} onChange={(event) => set('title', event.target.value)} required /></FormField>
-            <FormField label="مسئول"><UserSelect data={data} value={form.responsibleUserId} onChange={(value) => set('responsibleUserId', value)} /></FormField>
-            <FormField label="تاریخ هدف"><input type="date" value={form.targetDate} onChange={(event) => set('targetDate', event.target.value)} /></FormField>
-            <FormField label="توضیحات" wide><textarea rows="2" value={form.description} onChange={(event) => set('description', event.target.value)} /></FormField>
-            <FormField label="معیار پذیرش" wide><textarea rows="2" value={form.acceptanceCriteria} onChange={(event) => set('acceptanceCriteria', event.target.value)} /></FormField>
-          </>}
-          {kind === 'kpi' && <>
-            <FormField label="خروجی پروژه"><select value={form.deliverableId} onChange={(event) => set('deliverableId', event.target.value)} required>{data.deliverables.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}</select></FormField>
-            <FormField label="نوع KPI"><select value={form.type} onChange={(event) => set('type', event.target.value)}><option value="1">کمی</option><option value="0">کیفی</option></select></FormField>
-            <FormField label="هدف عددی"><input type="number" step="0.1" value={form.targetValue} onChange={(event) => set('targetValue', event.target.value)} /></FormField>
-            <FormField label="شرح شاخص" wide><textarea rows="2" value={form.description} onChange={(event) => set('description', event.target.value)} required /></FormField>
-            <FormField label="فرمول" wide><textarea rows="2" value={form.formula} onChange={(event) => set('formula', event.target.value)} /></FormField>
-          </>}
-          {kind === 'risk' && <>
-            <FormField label="احتمال"><input type="number" min="1" max="5" value={form.probabilityScore} onChange={(event) => set('probabilityScore', event.target.value)} required /></FormField>
-            <FormField label="شدت"><input type="number" min="1" max="5" value={form.severityScore} onChange={(event) => set('severityScore', event.target.value)} required /></FormField>
-            <FormField label="اثر"><input type="number" min="1" max="5" value={form.impactScore} onChange={(event) => set('impactScore', event.target.value)} required /></FormField>
-            <FormField label="مالک ریسک"><UserSelect data={data} value={form.riskOwnerUserId} onChange={(value) => set('riskOwnerUserId', value)} /></FormField>
-            <FormField label="شرح ریسک" wide><textarea rows="2" value={form.description} onChange={(event) => set('description', event.target.value)} required /></FormField>
-            <FormField label="برنامه پاسخ" wide><textarea rows="2" value={form.responsePlan} onChange={(event) => set('responsePlan', event.target.value)} /></FormField>
-          </>}
-          {kind === 'stakeholder' && <>
-            <FormField label="نام ذینفع"><input value={form.name} onChange={(event) => set('name', event.target.value)} required /></FormField>
-            <FormField label="نوع"><select value={form.isInternal} onChange={(event) => set('isInternal', event.target.value)}><option value="true">داخلی</option><option value="false">خارجی</option></select></FormField>
-            <FormField label="قدرت"><select value={form.power} onChange={(event) => set('power', event.target.value)}><option value="0">کم</option><option value="1">متوسط</option><option value="2">زیاد</option></select></FormField>
-            <FormField label="علاقه"><select value={form.interest} onChange={(event) => set('interest', event.target.value)}><option value="0">کم</option><option value="1">متوسط</option><option value="2">زیاد</option></select></FormField>
-            <FormField label="انتظارات" wide><textarea rows="2" value={form.expectations} onChange={(event) => set('expectations', event.target.value)} /></FormField>
-            <FormField label="استراتژی تعامل" wide><textarea rows="2" value={form.engagementStrategy} onChange={(event) => set('engagementStrategy', event.target.value)} /></FormField>
-          </>}
-          {kind === 'member' && <>
-            <FormField label="کاربر"><UserSelect data={data} value={form.userId} onChange={(value) => set('userId', value)} required /></FormField>
-            <FormField label="نقش در پروژه"><input value={form.roleTitle} onChange={(event) => set('roleTitle', event.target.value)} /></FormField>
-          </>}
-          {kind === 'governance' && <>
-            <FormField label="عنوان نقش"><input value={form.title} onChange={(event) => set('title', event.target.value)} required /></FormField>
-            <FormField label="کاربر"><UserSelect data={data} value={form.userId} onChange={(value) => set('userId', value)} /></FormField>
-            <FormField label="شماره پرسنلی"><input value={form.personnelNumber} onChange={(event) => set('personnelNumber', event.target.value)} /></FormField>
-            <FormField label="تلفن"><input value={form.phone} onChange={(event) => set('phone', event.target.value)} /></FormField>
-            <FormField label="ایمیل"><input type="email" value={form.email} onChange={(event) => set('email', event.target.value)} /></FormField>
-            <FormField label="محل خدمت"><input value={form.serviceLocation} onChange={(event) => set('serviceLocation', event.target.value)} /></FormField>
-          </>}
-        </div></div>
-        <footer className="ue-foot">
-          {error && <span className="ue-error">{error}</span>}
-          <div className="ue-foot-actions"><button className="ue-cancel" type="button" onClick={onClose}>انصراف</button><button className="ue-save" type="submit" disabled={busy}>{busy ? 'در حال ذخیره...' : 'ذخیره'}</button></div>
-        </footer>
-      </form>
-</div>
-    </div>
+    <ModalPortal><div className="ue-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+        <form className="ue-modal pm-modal" onSubmit={submit}>
+          <header className="ue-head">
+            <div className="ue-head-title"><strong>{item ? editTitles[kind] : creationTitles[kind]}</strong><small>{kind === 'project' ? 'ثبت در Projects API' : projectDisplayName(data.selectedProject)}</small></div>
+            <button className="ue-close" type="button" onClick={onClose}><X size={17} /></button>
+          </header>
+          <div className="ue-body"><div className="ue-grid">
+            {kind === 'project' && <>
+              <FormField label="نام پروژه"><input value={form.name} onChange={(event) => set('name', event.target.value)} required /></FormField>
+              <FormField label="کد پروژه"><input value={form.code} onChange={(event) => set('code', event.target.value)} required /></FormField>
+              <FormField label="نوع پروژه"><select value={form.type} onChange={(event) => set('type', event.target.value)}><option value="1">چابک</option><option value="0">آبشاری</option></select></FormField>
+              <FormField label="هزینه اولیه"><input type="number" min="0" value={form.cost} onChange={(event) => set('cost', event.target.value)} /></FormField>
+              <FormField label="تاریخ شروع"><input type="date" value={form.startDate} onChange={(event) => set('startDate', event.target.value)} /></FormField>
+              <FormField label="تاریخ پایان"><input type="date" value={form.endDate} onChange={(event) => set('endDate', event.target.value)} /></FormField>
+              <FormField label="هدف پروژه" wide><textarea rows="2" value={form.goal} onChange={(event) => set('goal', event.target.value)} /></FormField>
+              <FormField label="توضیحات" wide><textarea rows="2" value={form.description} onChange={(event) => set('description', event.target.value)} /></FormField>
+            </>}
+            {kind === 'task' && <>
+              <FormField label="عنوان وظیفه"><input value={form.title} onChange={(event) => set('title', event.target.value)} required /></FormField>
+              <FormField label="اولویت"><select value={form.priority} onChange={(event) => set('priority', event.target.value)}><option value="0">کم</option><option value="1">متوسط</option><option value="2">بالا</option><option value="3">بحرانی</option></select></FormField>
+              <FormField label="مسئول"><UserSelect data={data} value={form.responsibleUserId} onChange={(value) => set('responsibleUserId', value)} /></FormField>
+              <FormField label="تأییدکننده"><UserSelect data={data} value={form.approverUserId} onChange={(value) => set('approverUserId', value)} /></FormField>
+              <FormField label="موعد انجام"><input type="date" value={form.dueDate} onChange={(event) => set('dueDate', event.target.value)} /></FormField>
+              <FormField label="شماره اسپرینت"><input type="number" min="1" value={form.sprintNumber} onChange={(event) => set('sprintNumber', event.target.value)} /></FormField>
+              <FormField label="توضیحات" wide><textarea rows="3" value={form.description} onChange={(event) => set('description', event.target.value)} /></FormField>
+            </>}
+            {kind === 'activity' && <>
+              <FormField label="نام فعالیت"><input value={form.name} onChange={(event) => set('name', event.target.value)} required /></FormField>
+              <FormField label="وزن"><input type="number" min="0" step="0.1" value={form.weight} onChange={(event) => set('weight', event.target.value)} required /></FormField>
+              <FormField label="مسئول"><UserSelect data={data} value={form.responsibleUserId} onChange={(value) => set('responsibleUserId', value)} /></FormField>
+              <FormField label="تأییدکننده"><UserSelect data={data} value={form.approverUserId} onChange={(value) => set('approverUserId', value)} /></FormField>
+              <FormField label="تاریخ شروع"><input type="date" value={form.startDate} onChange={(event) => set('startDate', event.target.value)} /></FormField>
+              <FormField label="تاریخ پایان"><input type="date" value={form.endDate} onChange={(event) => set('endDate', event.target.value)} /></FormField>
+              <FormField label="مدت روز"><input type="number" min="0" value={form.durationDays} onChange={(event) => set('durationDays', event.target.value)} /></FormField>
+              <FormField label="نفرساعت"><input type="number" min="0" step="0.1" value={form.manHours} onChange={(event) => set('manHours', event.target.value)} /></FormField>
+              <FormField label="توضیحات" wide><textarea rows="2" value={form.description} onChange={(event) => set('description', event.target.value)} /></FormField>
+            </>}
+            {kind === 'progress' && <>
+              <FormField label="تاریخ ثبت"><input type="date" value={form.registerDate} onChange={(event) => set('registerDate', event.target.value)} required /></FormField>
+              <FormField label="پیشرفت برنامه‌ای"><input type="number" min="0" max="100" step="0.1" value={form.plannedProgress} onChange={(event) => set('plannedProgress', event.target.value)} required /></FormField>
+              <FormField label="پیشرفت واقعی"><input type="number" min="0" max="100" step="0.1" value={form.actualProgress} onChange={(event) => set('actualProgress', event.target.value)} required /></FormField>
+              <FormField label="شرح وضعیت" wide><textarea rows="2" value={form.statusDescription} onChange={(event) => set('statusDescription', event.target.value)} /></FormField>
+              <FormField label="دلایل تأخیر" wide><textarea rows="2" value={form.delayReasons} onChange={(event) => set('delayReasons', event.target.value)} /></FormField>
+            </>}
+            {kind === 'document' && <>
+              <FormField label="نوع سند"><select value={form.documentType} onChange={(event) => set('documentType', event.target.value)}><option value="0">گزارش</option><option value="1">نامه</option><option value="2">صورت‌جلسه</option><option value="3">سایر</option></select></FormField>
+              <FormField label="فایل"><input type="file" onChange={(event) => set('file', event.target.files?.[0] || null)} required /></FormField>
+              <FormField label="توضیح سند" wide><textarea rows="2" value={form.description} onChange={(event) => set('description', event.target.value)} required /></FormField>
+            </>}
+            {kind === 'deliverable' && <>
+              <FormField label="عنوان خروجی"><input value={form.title} onChange={(event) => set('title', event.target.value)} required /></FormField>
+              <FormField label="مسئول"><UserSelect data={data} value={form.responsibleUserId} onChange={(value) => set('responsibleUserId', value)} /></FormField>
+              <FormField label="تاریخ هدف"><input type="date" value={form.targetDate} onChange={(event) => set('targetDate', event.target.value)} /></FormField>
+              <FormField label="توضیحات" wide><textarea rows="2" value={form.description} onChange={(event) => set('description', event.target.value)} /></FormField>
+              <FormField label="معیار پذیرش" wide><textarea rows="2" value={form.acceptanceCriteria} onChange={(event) => set('acceptanceCriteria', event.target.value)} /></FormField>
+            </>}
+            {kind === 'kpi' && <>
+              <FormField label="خروجی پروژه"><select value={form.deliverableId} onChange={(event) => set('deliverableId', event.target.value)} required>{data.deliverables.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}</select></FormField>
+              <FormField label="نوع KPI"><select value={form.type} onChange={(event) => set('type', event.target.value)}><option value="1">کمی</option><option value="0">کیفی</option></select></FormField>
+              <FormField label="هدف عددی"><input type="number" step="0.1" value={form.targetValue} onChange={(event) => set('targetValue', event.target.value)} /></FormField>
+              <FormField label="شرح شاخص" wide><textarea rows="2" value={form.description} onChange={(event) => set('description', event.target.value)} required /></FormField>
+              <FormField label="فرمول" wide><textarea rows="2" value={form.formula} onChange={(event) => set('formula', event.target.value)} /></FormField>
+            </>}
+            {kind === 'risk' && <>
+              <FormField label="احتمال وقوع"><select value={form.probabilityScore} onChange={(event) => set('probabilityScore', event.target.value)}>{riskScoreOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></FormField>
+              <FormField label="اثر"><select value={form.impactScore} onChange={(event) => set('impactScore', event.target.value)}>{riskScoreOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></FormField>
+              <FormField label="شدت"><select value={form.severityScore} onChange={(event) => set('severityScore', event.target.value)}>{riskScoreOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></FormField>
+              <FormField label="مالک ریسک"><UserSelect data={data} value={form.riskOwnerUserId} onChange={(value) => set('riskOwnerUserId', value)} /></FormField>
+              <FormField label="شرح ریسک" wide><textarea rows="2" value={form.description} onChange={(event) => set('description', event.target.value)} required /></FormField>
+              <FormField label="برنامه پاسخ" wide><textarea rows="2" value={form.responsePlan} onChange={(event) => set('responsePlan', event.target.value)} /></FormField>
+            </>}
+            {kind === 'stakeholder' && <>
+              <FormField label="نام ذینفع"><input value={form.name} onChange={(event) => set('name', event.target.value)} required /></FormField>
+              <FormField label="نوع"><select value={form.isInternal} onChange={(event) => set('isInternal', event.target.value)}><option value="true">داخلی</option><option value="false">خارجی</option></select></FormField>
+              <FormField label="قدرت"><select value={form.power} onChange={(event) => set('power', event.target.value)}><option value="0">کم</option><option value="1">متوسط</option><option value="2">زیاد</option></select></FormField>
+              <FormField label="علاقه"><select value={form.interest} onChange={(event) => set('interest', event.target.value)}><option value="0">کم</option><option value="1">متوسط</option><option value="2">زیاد</option></select></FormField>
+              <FormField label="انتظارات" wide><textarea rows="2" value={form.expectations} onChange={(event) => set('expectations', event.target.value)} /></FormField>
+              <FormField label="نیازمندی‌ها" wide><textarea rows="2" value={form.requirements} onChange={(event) => set('requirements', event.target.value)} /></FormField>
+              <FormField label="راهبرد تعامل (اختیاری)" wide><textarea rows="2" value={form.engagementStrategy} onChange={(event) => set('engagementStrategy', event.target.value)} placeholder="خالی بماند تا راهبرد پیش‌فرض ربع او نمایش داده شود" /></FormField>
+              <FormField label="یادداشت" wide><textarea rows="2" value={form.notes} onChange={(event) => set('notes', event.target.value)} /></FormField>
+            </>}
+            {kind === 'member' && <>
+              <FormField label="کاربر">{item ? <input value={data.userName(item.userId)} disabled readOnly /> : <UserSelect data={data} users={teamCandidates || []} value={form.userId} onChange={(value) => set('userId', value)} required />}</FormField>
+              <FormField label="نقش در پروژه"><input value={form.roleTitle} onChange={(event) => set('roleTitle', event.target.value)} /></FormField>
+            </>}
+            {kind === 'governance' && <>
+              <FormField label="عنوان نقش"><input value={form.title} onChange={(event) => set('title', event.target.value)} required /></FormField>
+              <FormField label="کاربر"><UserSelect data={data} value={form.userId} onChange={(value) => set('userId', value)} /></FormField>
+              <FormField label="شماره پرسنلی"><input value={form.personnelNumber} onChange={(event) => set('personnelNumber', event.target.value)} /></FormField>
+              <FormField label="تلفن"><input value={form.phone} onChange={(event) => set('phone', event.target.value)} /></FormField>
+              <FormField label="ایمیل"><input type="email" value={form.email} onChange={(event) => set('email', event.target.value)} /></FormField>
+              <FormField label="محل خدمت"><input value={form.serviceLocation} onChange={(event) => set('serviceLocation', event.target.value)} /></FormField>
+            </>}
+          </div></div>
+          <footer className="ue-foot">
+            {error && <span className="ue-error">{error}</span>}
+            <div className="ue-foot-actions"><button className="ue-cancel" type="button" onClick={onClose}>انصراف</button><button className="ue-save" type="submit" disabled={busy}>{busy ? 'در حال ذخیره...' : item ? 'ذخیره تغییرات' : 'ذخیره'}</button></div>
+          </footer>
+        </form>
+    </div></ModalPortal>
   )
 }
 
@@ -998,10 +1088,10 @@ function normalizeTask(task, userName) {
   }
 }
 
-function TaskPageHeader({ title, description, action = 'ایجاد وظیفه جدید', actionNode, children }) {
+function TaskPageHeader({ title, description, action = 'ایجاد وظیفه جدید', actionNode, children, section = 'مدیریت وظایف' }) {
   return (
     <div className="task-page-header">
-      <div><span>مدیریت وظایف / {title}</span><h1>{title}</h1><p>{description}</p></div>
+      <div><span>{section} / {title}</span><h1>{title}</h1><p>{description}</p></div>
       <div className="task-head-actions">{children}{actionNode || (action ? <button type="button"><Plus size={18} />{action}</button> : null)}</div>
     </div>
   )
@@ -1025,27 +1115,27 @@ function TaskDashboard({ data }) {
         <ProjectSelector data={data} />
       </TaskPageHeader>
       <DataState loading={data.loading} error={data.error} empty={!data.projects.length}>
-      <div className="task-kpis">
-        <article><span className="task-kpi-icon navy"><ListTodo size={21} /></span><div><small>کل وظایف</small><strong>{normalized.length.toLocaleString('fa-IR')}</strong><p>در {data.projectTotal.toLocaleString('fa-IR')} پروژه</p></div></article>
-        <article><span className="task-kpi-icon blue"><Clock3 size={21} /></span><div><small>در حال انجام</small><strong>{doing.toLocaleString('fa-IR')}</strong><p>از Agile Tasks</p></div></article>
-        <article><span className="task-kpi-icon green"><CheckCircle2 size={21} /></span><div><small>تکمیل شده</small><strong>{done.toLocaleString('fa-IR')}</strong><p>{normalized.length ? Math.round((done / normalized.length) * 100).toLocaleString('fa-IR') : '۰'}٪ از کل</p></div></article>
-        <article><span className="task-kpi-icon red"><TriangleAlert size={21} /></span><div><small>دارای تأخیر</small><strong>{overdue.toLocaleString('fa-IR')}</strong><p>براساس موعد انجام</p></div></article>
-      </div>
-      <div className="task-dashboard-grid">
-        <section className="task-panel project-progress">
-          <div className="task-panel-title"><div><h3>پیشرفت وظایف پروژه‌ها</h3><p>درصد وظایف تکمیل‌شده به تفکیک پروژه مرجع</p></div><button>مشاهده همه</button></div>
-          {projectRows.length ? projectRows.map(([name, percent, count]) => <div className="progress-row" key={name}><div><strong>{name}</strong><span>{count}</span></div><div className="progress-track"><i style={{ width: `${percent}%` }} /></div><em>{percent}٪</em></div>) : <p className="data-state">هنوز وظیفه‌ای برای پروژه‌ها ثبت نشده است.</p>}
-        </section>
-        <section className="task-panel workload-panel">
-          <div className="task-panel-title"><div><h3>توزیع حجم کار تیم</h3><p>وظایف فعال اعضای پروژه</p></div><MoreHorizontal size={18} /></div>
-          {Object.entries(normalized.reduce((map, task) => {
-            if (task.owner !== '—' && task.status !== 'تکمیل شده') map[task.owner] = (map[task.owner] || 0) + 1
-            return map
-          }, {})).slice(0, 5).map(([name, count], index) => <div className="workload-row" key={name}><span className={`mini-avatar tone-${index}`}>{initialsOf(name)}</span><div><strong>{name}</strong><small>عضو تیم پروژه</small></div><b>{count.toLocaleString('fa-IR')} وظیفه</b></div>)}
-          {!normalized.length && <p className="data-state">برای محاسبه حجم کار، وظیفه‌ای ثبت نشده است.</p>}
-        </section>
-      </div>
-      <TaskList compact data={data} />
+        <div className="task-kpis">
+          <article><span className="task-kpi-icon navy"><ListTodo size={21} /></span><div><small>کل وظایف</small><strong>{normalized.length.toLocaleString('fa-IR')}</strong><p>در {data.projectTotal.toLocaleString('fa-IR')} پروژه</p></div></article>
+          <article><span className="task-kpi-icon blue"><Clock3 size={21} /></span><div><small>در حال انجام</small><strong>{doing.toLocaleString('fa-IR')}</strong><p>از Agile Tasks</p></div></article>
+          <article><span className="task-kpi-icon green"><CheckCircle2 size={21} /></span><div><small>تکمیل شده</small><strong>{done.toLocaleString('fa-IR')}</strong><p>{normalized.length ? Math.round((done / normalized.length) * 100).toLocaleString('fa-IR') : '۰'}٪ از کل</p></div></article>
+          <article><span className="task-kpi-icon red"><TriangleAlert size={21} /></span><div><small>دارای تأخیر</small><strong>{overdue.toLocaleString('fa-IR')}</strong><p>براساس موعد انجام</p></div></article>
+        </div>
+        <div className="task-dashboard-grid">
+          <section className="task-panel project-progress">
+            <div className="task-panel-title"><div><h3>پیشرفت وظایف پروژه‌ها</h3><p>درصد وظایف تکمیل‌شده به تفکیک پروژه مرجع</p></div><button>مشاهده همه</button></div>
+            {projectRows.length ? projectRows.map(([name, percent, count]) => <div className="progress-row" key={name}><div><strong>{name}</strong><span>{count}</span></div><div className="progress-track"><i style={{ width: `${percent}%` }} /></div><em>{percent}٪</em></div>) : <p className="data-state">هنوز وظیفه‌ای برای پروژه‌ها ثبت نشده است.</p>}
+          </section>
+          <section className="task-panel workload-panel">
+            <div className="task-panel-title"><div><h3>توزیع حجم کار تیم</h3><p>وظایف فعال اعضای پروژه</p></div><MoreHorizontal size={18} /></div>
+            {Object.entries(normalized.reduce((map, task) => {
+              if (task.owner !== '—' && task.status !== 'تکمیل شده') map[task.owner] = (map[task.owner] || 0) + 1
+              return map
+            }, {})).slice(0, 5).map(([name, count], index) => <div className="workload-row" key={name}><span className={`mini-avatar tone-${index}`}>{initialsOf(name)}</span><div><strong>{name}</strong><small>عضو تیم پروژه</small></div><b>{count.toLocaleString('fa-IR')} وظیفه</b></div>)}
+            {!normalized.length && <p className="data-state">برای محاسبه حجم کار، وظیفه‌ای ثبت نشده است.</p>}
+          </section>
+        </div>
+        <TaskList compact data={data} />
       </DataState>
     </>
   )
@@ -1066,9 +1156,9 @@ function TaskList({ compact = false, data }) {
     <section className={`task-panel task-table-panel ${compact ? 'compact' : ''}`}>
       <div className="task-panel-title"><div><h3>{compact ? 'وظایف نزدیک به موعد' : 'فهرست وظایف'}</h3><p>{compact ? 'وظایفی که از API وظایف دریافت شده‌اند' : 'مدیریت، فیلتر و پیگیری وظایف پروژه‌ها از Nexus Core'}</p></div>{compact ? <button>مشاهده همه</button> : <div className="table-actions"><label><Search size={16} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="جست‌وجوی وظیفه..." /></label><button><Filter size={16} />فیلترها</button></div>}</div>
       <DataState loading={data?.loading} error={data?.error} empty={!shownTasks.length}>
-      <div className="table-scroll"><table><thead><tr><th>عنوان وظیفه</th><th>پروژه مرجع</th><th>مسئول</th><th>مهلت انجام</th><th>اولویت</th><th>وضعیت</th><th>پیشرفت</th><th /></tr></thead><tbody>
-        {shownTasks.map((task) => <tr key={task.id}><td><span className="task-check" /><strong>{task.title}</strong></td><td>{task.project}</td><td><span className="owner-cell"><i>{initialsOf(task.owner).slice(0, 1)}</i>{task.owner}</span></td><td>{task.due}</td><td><span className={`priority ${task.priority === 'بالا' || task.priority === 'بحرانی' ? 'high' : task.priority === 'متوسط' ? 'medium' : 'low'}`}>{task.priority}</span></td><td><StatusPill status={task.status} /></td><td><span className="inline-progress"><i><b style={{ width: `${task.progress}%` }} /></i>{task.progress.toLocaleString('fa-IR')}٪</span></td><td><MoreHorizontal size={17} /></td></tr>)}
-      </tbody></table></div>
+        <div className="table-scroll"><table><thead><tr><th>عنوان وظیفه</th><th>پروژه مرجع</th><th>مسئول</th><th>مهلت انجام</th><th>اولویت</th><th>وضعیت</th><th>پیشرفت</th><th /></tr></thead><tbody>
+          {shownTasks.map((task) => <tr key={task.id}><td><span className="task-check" /><strong>{task.title}</strong></td><td>{task.project}</td><td><span className="owner-cell"><i>{initialsOf(task.owner).slice(0, 1)}</i>{task.owner}</span></td><td>{task.due}</td><td><span className={`priority ${task.priority === 'بالا' || task.priority === 'بحرانی' ? 'high' : task.priority === 'متوسط' ? 'medium' : 'low'}`}>{task.priority}</span></td><td><StatusPill status={task.status} /></td><td><span className="inline-progress"><i><b style={{ width: `${task.progress}%` }} /></i>{task.progress.toLocaleString('fa-IR')}٪</span></td><td><MoreHorizontal size={17} /></td></tr>)}
+        </tbody></table></div>
       </DataState>
     </section>
   )
@@ -1113,7 +1203,7 @@ function ProjectCalendar({ data }) {
     }
     return map
   }, {})
-  return <><TaskPageHeader title="تقویم پروژه" description="تقویم موعد وظایف؛ Core هنوز endpoint رویداد پروژه مستقل ندارد" action={null}><ProjectSelector data={data} /></TaskPageHeader><div className="calendar-toolbar"><button>امروز</button><div><ChevronLeft size={18} /><strong>{today.toLocaleDateString('fa-IR', { month: 'long', year: 'numeric' })}</strong><ChevronLeft className="flip" size={18} /></div></div><DataState loading={data.loading} error={data.error} empty={!data.tasks.length}><section className="calendar-card"><div className="calendar-weekdays">{['شنبه','یکشنبه','دوشنبه','سه‌شنبه','چهارشنبه','پنجشنبه','جمعه'].map((day) => <span key={day}>{day}</span>)}</div><div className="calendar-days">{cells.map((day, index) => <div className={day === today.getDate() ? 'today' : ''} key={index}>{day && <b>{day.toLocaleString('fa-IR')}</b>}{(byDay[day] || []).slice(0, 3).map((task) => <span className={`event ${task.priority === 'بالا' || task.priority === 'بحرانی' ? 'gold' : task.status === 'تکمیل شده' ? 'green' : 'blue'}`} key={task.id}>{task.title}</span>)}</div>)}</div></section></DataState></>
+  return <><TaskPageHeader title="تقویم پروژه" description="تقویم موعد وظایف؛ Core هنوز endpoint رویداد پروژه مستقل ندارد" action={null}><ProjectSelector data={data} /></TaskPageHeader><div className="calendar-toolbar"><button>امروز</button><div><ChevronLeft size={18} /><strong>{today.toLocaleDateString('fa-IR', { month: 'long', year: 'numeric' })}</strong><ChevronLeft className="flip" size={18} /></div></div><DataState loading={data.loading} error={data.error} empty={!data.tasks.length}><section className="calendar-card"><div className="calendar-weekdays">{['شنبه', 'یکشنبه', 'دوشنبه', 'سه‌شنبه', 'چهارشنبه', 'پنجشنبه', 'جمعه'].map((day) => <span key={day}>{day}</span>)}</div><div className="calendar-days">{cells.map((day, index) => <div className={day === today.getDate() ? 'today' : ''} key={index}>{day && <b>{day.toLocaleString('fa-IR')}</b>}{(byDay[day] || []).slice(0, 3).map((task) => <span className={`event ${task.priority === 'بالا' || task.priority === 'بحرانی' ? 'gold' : task.status === 'تکمیل شده' ? 'green' : 'blue'}`} key={task.id}>{task.title}</span>)}</div>)}</div></section></DataState></>
 }
 
 function ProjectPlanning({ data }) {
@@ -1223,8 +1313,8 @@ function Meetings() {
 }
 
 function Workflows() {
-  const flows = [['گردش کار وظایف اجرایی','پیش‌نویس، در حال انجام، بازبینی، تأیید نهایی','۳ پروژه','فعال'],['فرآیند بررسی مستندات','ثبت، بررسی کارشناس، اصلاح، تأیید مدیر','۲ پروژه','فعال'],['الگوی درخواست تغییر','ثبت درخواست، ارزیابی اثر، کمیته تغییر، اجرا','تمام پروژه‌ها','پیش‌نویس']]
-  return <><TaskPageHeader title="گردش کار و الگوها" description="تعریف مراحل و قوانین گردش وظایف به تفکیک پروژه" action={null} /><section className="workflow-help"><Workflow size={28} /><div><h3>فرآیندهای کاری را با پروژه خود هماهنگ کنید</h3><p>وضعیت‌ها، مسئول هر مرحله و قوانین انتقال را بدون نیاز به کدنویسی تعریف کنید.</p></div><button>راهنمای طراحی گردش کار</button></section><div className="workflow-grid">{flows.map(([title, steps, projects, status], index) => <article key={title}><header><span className={`workflow-icon tone-${index}`}><Workflow size={20} /></span><MoreHorizontal size={18} /></header><h3>{title}</h3><p>{steps}</p><div className="flow-steps">{[1,2,3,4].map((step) => <i key={step} />)}</div><footer><span>{projects}</span><StatusPill status={status === 'فعال' ? 'تکمیل شده' : 'برای انجام'} /></footer></article>)}</div></>
+  const flows = [['گردش کار وظایف اجرایی', 'پیش‌نویس، در حال انجام، بازبینی، تأیید نهایی', '۳ پروژه', 'فعال'], ['فرآیند بررسی مستندات', 'ثبت، بررسی کارشناس، اصلاح، تأیید مدیر', '۲ پروژه', 'فعال'], ['الگوی درخواست تغییر', 'ثبت درخواست، ارزیابی اثر، کمیته تغییر، اجرا', 'تمام پروژه‌ها', 'پیش‌نویس']]
+  return <><TaskPageHeader title="گردش کار و الگوها" description="تعریف مراحل و قوانین گردش وظایف به تفکیک پروژه" action={null} /><section className="workflow-help"><Workflow size={28} /><div><h3>فرآیندهای کاری را با پروژه خود هماهنگ کنید</h3><p>وضعیت‌ها، مسئول هر مرحله و قوانین انتقال را بدون نیاز به کدنویسی تعریف کنید.</p></div><button>راهنمای طراحی گردش کار</button></section><div className="workflow-grid">{flows.map(([title, steps, projects, status], index) => <article key={title}><header><span className={`workflow-icon tone-${index}`}><Workflow size={20} /></span><MoreHorizontal size={18} /></header><h3>{title}</h3><p>{steps}</p><div className="flow-steps">{[1, 2, 3, 4].map((step) => <i key={step} />)}</div><footer><span>{projects}</span><StatusPill status={status === 'فعال' ? 'تکمیل شده' : 'برای انجام'} /></footer></article>)}</div></>
 }
 
 function RaciMatrix({ data }) {
@@ -1233,16 +1323,896 @@ function RaciMatrix({ data }) {
   return <><TaskPageHeader title="ماتریس مسئولیت‌ها (RACI)" description="Core نقش‌های حاکمیتی دارد، ولی RACI واقعی به‌عنوان endpoint مستقل ندارد" actionNode={<CreateButton kind="activity" data={data} label="افزودن فعالیت" />}><ProjectSelector data={data} /></TaskPageHeader><div className="raci-legend"><span><i className="r">R</i>مسئول اجرا</span><span><i className="a">A</i>پاسخگو</span><span><i className="c">C</i>مشاور</span><span><i className="i">I</i>مطلع</span></div><section className="task-panel raci-table"><DataState loading={data.loading || data.loadingDetails} error={data.error} empty={!rows.length || !people.length}><div className="table-scroll"><table><thead><tr><th>فعالیت / خروجی</th>{people.slice(0, 5).map((person) => <th key={person.id}><span className="person-head"><i>{initialsOf(data.userName(person.userId)).slice(0, 1)}</i>{data.userName(person.userId)}<small>{person.title}</small></span></th>)}</tr></thead><tbody>{rows.map((row) => <tr key={row.id}><td><strong>{row.name || row.title || row.description || row.id}</strong></td>{people.slice(0, 5).map((person, index) => <td key={person.id}><span className={`raci-role ${index === 0 ? 'a' : row.responsibleUserId === person.userId ? 'r' : index === 1 ? 'c' : 'i'}`}>{index === 0 ? 'A' : row.responsibleUserId === person.userId ? 'R' : index === 1 ? 'C' : 'I'}</span></td>)}</tr>)}</tbody></table></div></DataState></section></>
 }
 
+/* ------------------------------------------------------------------ *
+ * «کنترل و اجرا» - risks, stakeholders and project resources, with     *
+ * everything the Core offers for them (create / edit / delete, the     *
+ * approval round, response reports, matrices and project settings).    *
+ * ------------------------------------------------------------------ */
+
+const approvalClass = { 0: 'todo', 1: 'review', 2: 'done', 3: 'rejected' }
+
+function ApprovalBadge({ status }) {
+  return <span className={`status-pill ${approvalClass[status] ?? 'todo'}`}>{enumLabel(status, approvalLabels)}</span>
+}
+
+function PageNotice({ notice, onClose }) {
+  if (!notice) return null
+  return (
+    <div className={`users-notice ctl-notice ${notice.type}`} role={notice.type === 'error' ? 'alert' : 'status'}>
+      {notice.type === 'error' ? <CircleAlert size={16} /> : <CheckCircle2 size={16} />}
+      <span>{notice.text}</span>
+      <button type="button" onClick={onClose} aria-label="بستن"><X size={15} /></button>
+    </div>
+  )
+}
+
+function ControlKpis({ items }) {
+  return (
+    <div className="task-kpis ctl-kpis">
+      {items.map(({ icon: Icon, tone, label, value, note }) => (
+        <article key={label}><span className={`task-kpi-icon ${tone}`}><Icon size={21} /></span><div><small>{label}</small><strong>{value}</strong><p>{note}</p></div></article>
+      ))}
+    </div>
+  )
+}
+
+/** Runs a Core call, then tells the page how it went and reloads the project's data. */
+async function runAction(call, successText, setNotice, refresh) {
+  const result = await call()
+  if (!result.isSuccess) { setNotice({ type: 'error', text: PersianMessages.error(result.error) }); return false }
+  setNotice({ type: 'success', text: successText })
+  refresh()
+  return true
+}
+
+/* ---- Risks ---- */
+
+const riskResponseLabels = { 0: 'در حال برنامه‌ریزی', 1: 'در حال اجرا', 2: 'متوقف', 3: 'تکمیل شده' }
+const riskLevelLabels = { green: 'کم', yellow: 'متوسط', red: 'بحرانی' }
+const riskBandLabels = { low: 'کم', medium: 'متوسط', high: 'زیاد' }
+const riskScoreOptions = [[1, '۱ - خیلی کم'], [2, '۲ - کم'], [3, '۳ - متوسط'], [4, '۴ - زیاد'], [5, '۵ - خیلی زیاد']]
+const riskBand = (score) => (score <= 2 ? 'low' : score === 3 ? 'medium' : 'high')
+// What the Core uses until a project words its own matrix: probability band, then impact band.
+const DEFAULT_MATRIX_COLORS = {
+  'low-low': 'green', 'low-medium': 'green', 'low-high': 'yellow',
+  'medium-low': 'green', 'medium-medium': 'yellow', 'medium-high': 'red',
+  'high-low': 'yellow', 'high-medium': 'red', 'high-high': 'red',
+}
+
 function RisksPage({ data }) {
-  return <><TaskPageHeader title="مدیریت ریسک" description="ریسک‌های پروژه از Risks API" actionNode={<CreateButton kind="risk" data={data} label="ثبت ریسک" />}><ProjectSelector data={data} /></TaskPageHeader><section className="task-panel task-table-panel"><DataState loading={data.loading || data.loadingDetails} error={data.error} empty={!data.risks.length}><div className="table-scroll"><table><thead><tr><th>ریسک</th><th>احتمال</th><th>شدت</th><th>اثر</th><th>RPN</th><th>مالک</th><th>برنامه پاسخ</th></tr></thead><tbody>{data.risks.map((risk) => <tr key={risk.id}><td><strong>{risk.description}</strong></td><td>{risk.probabilityScore}</td><td>{risk.severityScore}</td><td>{risk.impactScore}</td><td>{risk.rpn}</td><td>{data.userName(risk.riskOwnerUserId)}</td><td>{risk.responsePlan || '—'}</td></tr>)}</tbody></table></div></DataState></section></>
+  const { can } = useAuth()
+  const rights = { create: can('Risks.Create'), edit: can('Risks.Edit'), remove: can('Risks.Delete'), submit: can('Risks.Submit'), respond: can('RiskResponse.Submit') }
+  const [settings, setSettings] = useState(null)
+  const [settingsKey, setSettingsKey] = useState(0)
+  const [notice, setNotice] = useState(null)
+  const [editing, setEditing] = useState(null)
+  const [responseOf, setResponseOf] = useState(null)
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [search, setSearch] = useState('')
+  const [levelFilter, setLevelFilter] = useState('')
+  const [cell, setCell] = useState(null)
+
+  useEffect(() => {
+    let cancelled = false
+    setSettings(null)
+    setCell(null)
+    if (!data.selectedProjectId) return undefined
+    projectManagementApi.riskSettings(data.selectedProjectId).then((result) => { if (!cancelled) setSettings(unwrap(result)) })
+    return () => { cancelled = true }
+  }, [data.selectedProjectId, settingsKey])
+
+  const colorOf = (probability, impact) => {
+    const key = `${riskBand(probability)}-${riskBand(impact)}`
+    const found = settings?.matrixColors?.find((item) => `${item.probability}-${item.impact}` === key)
+    return found?.color || DEFAULT_MATRIX_COLORS[key]
+  }
+
+  const risks = data.risks
+  const total = risks.length
+  const critical = risks.filter((risk) => risk.level === 'red').length
+  const averageRpn = total ? Math.round(risks.reduce((sum, risk) => sum + Number(risk.rpn || 0), 0) / total) : 0
+  const inProgress = risks.filter((risk) => risk.responseStatus === 1).length
+  const countAt = (probability, impact) => risks.filter((risk) => risk.probabilityScore === probability && risk.impactScore === impact).length
+
+  const term = search.trim().toLowerCase()
+  const shown = risks.filter((risk) => (
+    (!levelFilter || risk.level === levelFilter)
+    && (!cell || (risk.probabilityScore === cell.probability && risk.impactScore === cell.impact))
+    && (!term || `${risk.description} ${risk.responsePlan || ''} ${data.userName(risk.riskOwnerUserId)}`.toLowerCase().includes(term))
+  ))
+
+  const changeResponse = (risk, status) => runAction(() => projectManagementApi.setRiskResponseStatus(risk.id, Number(status)), 'وضعیت پاسخ ریسک ذخیره شد.', setNotice, data.refresh)
+  const submitForApproval = (risk) => runAction(() => projectManagementApi.submitRisk(risk.id), 'ریسک برای تأیید ارسال شد.', setNotice, data.refresh)
+  const remove = (risk) => {
+    if (!window.confirm('این ریسک حذف شود؟')) return
+    runAction(() => projectManagementApi.deleteRisk(risk.id), 'ریسک حذف شد.', setNotice, data.refresh)
+  }
+
+  return (
+    <>
+      <TaskPageHeader
+        section="کنترل و اجرا"
+        title="مدیریت ریسک"
+        description="ثبت، ارزیابی و پیگیری ریسک‌های پروژه با ماتریس احتمال و اثر"
+        actionNode={(
+          <>
+            {rights.edit && <button type="button" className="ctl-ghost" onClick={() => setSettingsOpen(true)} disabled={!data.selectedProjectId || !settings}><SlidersHorizontal size={17} />تنظیمات ریسک</button>}
+            {rights.create && <CreateButton kind="risk" data={data} label="ثبت ریسک" disabled={!data.selectedProjectId} />}
+          </>
+        )}
+      >
+        <ProjectSelector data={data} />
+      </TaskPageHeader>
+      <PageNotice notice={notice} onClose={() => setNotice(null)} />
+      <DataState loading={data.loading} error={data.error} empty={!data.projects.length}>
+        <ControlKpis items={[
+          { icon: TriangleAlert, tone: 'navy', label: 'کل ریسک‌ها', value: toPersianDigits(total), note: 'در پروژه‌ی انتخاب‌شده' },
+          { icon: CircleAlert, tone: 'red', label: 'ریسک‌های بحرانی', value: toPersianDigits(critical), note: 'سطح قرمز ماتریس' },
+          { icon: ChartNoAxesCombined, tone: 'blue', label: 'میانگین RPN', value: toPersianDigits(averageRpn), note: 'احتمال × شدت × اثر' },
+          { icon: Clock3, tone: 'green', label: 'پاسخ در حال اجرا', value: toPersianDigits(inProgress), note: 'برنامه‌ی پاسخ فعال' },
+        ]} />
+
+        <section className="ctl-grid">
+          <div className="task-panel ctl-panel">
+            <div className="task-panel-title"><div><h3>ماتریس ریسک</h3><p>برای فیلتر کردن جدول، روی یک خانه بزنید.</p></div>{cell && <button type="button" className="ctl-link" onClick={() => setCell(null)}>حذف فیلتر</button>}</div>
+            <div className="ctl-matrix-body">
+            <div className="rm-wrap">
+              <span className="rm-axis rm-axis-y">احتمال</span>
+              <div className="rm-grid">
+                {[5, 4, 3, 2, 1].map((probability) => (
+                  <div className="rm-row" key={probability}>
+                    <b className="rm-label">{toPersianDigits(probability)}</b>
+                    {[1, 2, 3, 4, 5].map((impact) => {
+                      const count = countAt(probability, impact)
+                      const active = cell?.probability === probability && cell?.impact === impact
+                      return (
+                        <button
+                          type="button" key={impact}
+                          className={`rm-cell ${colorOf(probability, impact)}${active ? ' active' : ''}${count ? ' has' : ''}`}
+                          title={`احتمال ${toPersianDigits(probability)} × اثر ${toPersianDigits(impact)}: ${toPersianDigits(count)} ریسک`}
+                          onClick={() => setCell(active ? null : { probability, impact })}
+                        >{count ? toPersianDigits(count) : ''}</button>
+                      )
+                    })}
+                  </div>
+                ))}
+                <div className="rm-row rm-foot"><b className="rm-label" />{[1, 2, 3, 4, 5].map((impact) => <b className="rm-label" key={impact}>{toPersianDigits(impact)}</b>)}</div>
+              </div>
+              <span className="rm-axis rm-axis-x">اثر</span>
+            </div>
+            <div className="ctl-matrix-info">
+            <div className="rm-legend">
+              {['green', 'yellow', 'red'].map((color) => <span key={color}><i className={`rm-dot ${color}`} />{riskLevelLabels[color]}</span>)}
+              {settings?.isDefault === false && <em>تنظیم اختصاصی پروژه</em>}
+            </div>
+            {settings?.definitions?.length > 0 && (
+              <details className="rm-defs">
+                <summary>تعریف سطح‌ها</summary>
+                {['probability', 'impact'].map((axis) => (
+                  <div key={axis}>
+                    <h5>{axis === 'probability' ? 'احتمال' : 'اثر'}</h5>
+                    <ul>{settings.definitions.filter((item) => item.axis === axis).map((item) => <li key={item.level}><b>{riskBandLabels[item.level]}</b> <small>({item.range})</small> {item.description}</li>)}</ul>
+                  </div>
+                ))}
+              </details>
+            )}
+            </div>
+            </div>
+          </div>
+
+          <div className="task-panel task-table-panel ctl-panel ctl-table-panel">
+            <div className="task-panel-title">
+              <div><h3>فهرست ریسک‌ها</h3><p>{toPersianDigits(shown.length)} از {toPersianDigits(total)} ریسک</p></div>
+              <div className="ctl-filters">
+                <label className="ctl-search"><Search size={15} /><input type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="جستجو در ریسک‌ها..." /></label>
+                <select className="ctl-select" value={levelFilter} onChange={(e) => setLevelFilter(e.target.value)} aria-label="سطح ریسک">
+                  <option value="">همه‌ی سطح‌ها</option>
+                  <option value="red">بحرانی</option><option value="yellow">متوسط</option><option value="green">کم</option>
+                </select>
+              </div>
+            </div>
+            <DataState loading={data.loadingDetails} empty={!shown.length}>
+              <div className="table-scroll">
+                <table>
+                  <thead><tr><th>ریسک</th><th>احتمال</th><th>اثر</th><th>شدت</th><th>RPN</th><th>وضعیت پاسخ</th><th>تأیید</th><th>عملیات</th></tr></thead>
+                  <tbody>
+                    {shown.map((risk) => (
+                      <tr key={risk.id}>
+                        <td className="ctl-main">
+                          <strong>{risk.description}</strong>
+                          <small>مالک: {data.userName(risk.riskOwnerUserId)}{risk.responsePlan ? ` · پاسخ: ${risk.responsePlan}` : ''}</small>
+                        </td>
+                        <td>{toPersianDigits(risk.probabilityScore)}</td>
+                        <td>{toPersianDigits(risk.impactScore)}</td>
+                        <td>{toPersianDigits(risk.severityScore)}</td>
+                        <td><span className={`level-pill ${risk.level}`} title={riskLevelLabels[risk.level]}>{toPersianDigits(risk.rpn)}</span></td>
+                        <td>
+                          {rights.edit && risk.approvalStatus === 2
+                            ? <select className="ctl-select" value={risk.responseStatus} onChange={(e) => changeResponse(risk, e.target.value)} aria-label="وضعیت پاسخ">{Object.entries(riskResponseLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select>
+                            : <span title={risk.approvalStatus === 2 ? '' : 'وضعیت پاسخ پس از تأیید ریسک قابل تغییر است.'}>{enumLabel(risk.responseStatus, riskResponseLabels)}</span>}
+                        </td>
+                        <td><ApprovalBadge status={risk.approvalStatus} /></td>
+                        <td>
+                          <span className="row-actions">
+                            {rights.edit && <button type="button" title="ویرایش" aria-label="ویرایش" onClick={() => setEditing(risk)}><Pencil size={15} /></button>}
+                            <button type="button" title="گزارش‌های پاسخ به ریسک" aria-label="گزارش‌های پاسخ" onClick={() => setResponseOf(risk)}><MessageSquareText size={15} /></button>
+                            {rights.submit && (risk.approvalStatus === 0 || risk.approvalStatus === 3) && <button type="button" className="ok" title="ارسال برای تأیید" aria-label="ارسال برای تأیید" onClick={() => submitForApproval(risk)}><Send size={15} /></button>}
+                            {rights.remove && <button type="button" className="danger" title="حذف" aria-label="حذف" disabled={risk.approvalStatus === 1} onClick={() => remove(risk)}><Trash2 size={15} /></button>}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </DataState>
+          </div>
+        </section>
+      </DataState>
+
+      {editing && <CreateProjectItemModal kind="risk" item={editing} data={data} onClose={() => setEditing(null)} />}
+      {responseOf && (
+        <RiskResponseDialog
+          risk={responseOf} data={data} canSubmit={rights.respond && responseOf.approvalStatus === 2}
+          onClose={() => setResponseOf(null)}
+          onSaved={(result) => { setResponseOf(null); setNotice(result); data.refresh() }}
+        />
+      )}
+      {settingsOpen && settings && (
+        <RiskSettingsDialog
+          settings={settings} data={data}
+          onClose={() => setSettingsOpen(false)}
+          onSaved={(result) => { setSettingsOpen(false); setNotice(result); setSettingsKey((key) => key + 1) }}
+        />
+      )}
+    </>
+  )
+}
+
+/* Reports on how the answer to one risk is going. The Core takes them only for an approved risk,
+   and a report waits for verification before it changes the risk's response status. */
+function RiskResponseDialog({ risk, data, canSubmit, onClose, onSaved }) {
+  const [items, setItems] = useState(null)
+  const [status, setStatus] = useState(String(risk.responseStatus ?? 0))
+  const [comment, setComment] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const [reloadKey, setReloadKey] = useState(0)
+
+  useEffect(() => {
+    let cancelled = false
+    projectManagementApi.riskResponseSubmissions(risk.id).then((result) => {
+      if (cancelled) return
+      if (!result.isSuccess) setError(PersianMessages.error(result.error))
+      setItems(arrayPayload(result))
+    })
+    return () => { cancelled = true }
+  }, [risk.id, reloadKey])
+
+  async function submit(event) {
+    event.preventDefault()
+    setSaving(true)
+    setError('')
+    const result = await projectManagementApi.submitRiskResponse({ tenantId: data.tenantId, riskId: risk.id, status: Number(status), comment: emptyToNull(comment.trim()) })
+    setSaving(false)
+    if (!result.isSuccess) { setError(PersianMessages.error(result.error)); return }
+    setComment('')
+    setReloadKey((key) => key + 1)
+    onSaved({ type: 'success', text: 'گزارش پاسخ ثبت شد.' })
+  }
+
+  return (
+    <UserDialog
+      size="sm" icon={MessageSquareText} title="گزارش‌های پاسخ به ریسک" subtitle={risk.description}
+      onClose={onClose}
+      footer={(
+        <>
+          {error && <span className="ue-error"><TriangleAlert size={15} />{error}</span>}
+          <div className="ue-foot-actions">
+            <button type="button" className="ue-cancel" onClick={onClose}>بستن</button>
+            {canSubmit && <button type="submit" form="risk-response-form" className="ue-save" disabled={saving}>{saving ? 'در حال ثبت...' : 'ثبت گزارش'}</button>}
+          </div>
+        </>
+      )}
+    >
+      {canSubmit ? (
+        <form id="risk-response-form" onSubmit={submit} className="ue-card ue-card--accent">
+          <h5 className="ue-card-title">گزارش تازه</h5>
+          <div className="ue-grid">
+            <Field label="وضعیت پاسخ" required><select value={status} onChange={(e) => setStatus(e.target.value)}>{Object.entries(riskResponseLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></Field>
+            <Field label="توضیح" wide><textarea rows={3} value={comment} onChange={(e) => setComment(e.target.value)} maxLength={2000} /></Field>
+          </div>
+        </form>
+      ) : (
+        <p className="ue-note">{risk.approvalStatus === 2 ? 'برای ثبت گزارش، دسترسی «ثبت گزارش پاسخ ریسک» لازم است.' : 'گزارش پاسخ فقط برای ریسکِ تأییدشده ثبت می‌شود.'}</p>
+      )}
+      <section className="ue-section ue-section--first">
+        <h4><History size={16} />سابقه‌ی گزارش‌ها</h4>
+        {items === null ? <p className="users-empty"><LoaderCircle size={18} className="spin" /></p>
+          : !items.length ? <p className="ue-note">هنوز گزارشی ثبت نشده است.</p>
+            : (
+              <ul className="ctl-timeline">
+                {items.map((item) => (
+                  <li key={item.id}>
+                    <div><strong>{enumLabel(item.previousStatus, riskResponseLabels)} ← {enumLabel(item.submittedStatus, riskResponseLabels)}</strong><ApprovalBadge status={item.approvalStatus} /></div>
+                    {item.comment && <p>{item.comment}</p>}
+                    <small>{data.userName(item.submittedByUserId)} · {formatDateTime(item.submittedAtUtc)}</small>
+                  </li>
+                ))}
+              </ul>
+            )}
+      </section>
+    </UserDialog>
+  )
+}
+
+/* How a project words its six bands and colours its 3x3 matrix. */
+function RiskSettingsDialog({ settings, data, onClose, onSaved }) {
+  const [definitions, setDefinitions] = useState(() => settings.definitions.map((item) => ({ ...item })))
+  const [colors, setColors] = useState(() => {
+    const map = {}
+    for (const probability of ['low', 'medium', 'high']) for (const impact of ['low', 'medium', 'high']) {
+      map[`${probability}-${impact}`] = settings.matrixColors.find((item) => item.probability === probability && item.impact === impact)?.color || DEFAULT_MATRIX_COLORS[`${probability}-${impact}`]
+    }
+    return map
+  })
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  const setDefinition = (axis, level, key, value) => setDefinitions((current) => current.map((item) => (item.axis === axis && item.level === level ? { ...item, [key]: value } : item)))
+
+  async function save(reset) {
+    if (!reset && definitions.some((item) => !item.range.trim() || !item.description.trim())) { setError('برای هر سطح، بازه و توضیح را بنویسید.'); return }
+    setSaving(true)
+    setError('')
+    const result = await projectManagementApi.saveRiskSettings({
+      tenantId: data.tenantId,
+      projectId: data.selectedProjectId,
+      definitions: reset ? [] : definitions.map((item) => ({ ...item, range: item.range.trim(), description: item.description.trim() })),
+      matrixColors: reset ? [] : Object.entries(colors).map(([key, color]) => { const [probability, impact] = key.split('-'); return { probability, impact, color } }),
+    })
+    setSaving(false)
+    if (!result.isSuccess) { setError(PersianMessages.error(result.error)); return }
+    onSaved({ type: 'success', text: reset ? 'تنظیمات ریسک به حالت پیش‌فرض برگشت.' : 'تنظیمات ریسک ذخیره شد.' })
+  }
+
+  return (
+    <UserDialog
+      icon={SlidersHorizontal} title="تنظیمات ریسک پروژه" subtitle={projectDisplayName(data.selectedProject)}
+      onClose={onClose}
+      footer={(
+        <>
+          {error && <span className="ue-error"><TriangleAlert size={15} />{error}</span>}
+          <div className="ue-foot-actions">
+            <button type="button" className="ue-cancel" onClick={() => save(true)} disabled={saving || settings.isDefault}><RotateCcw size={14} /> پیش‌فرض</button>
+            <button type="button" className="ue-cancel" onClick={onClose}>انصراف</button>
+            <button type="button" className="ue-save" onClick={() => save(false)} disabled={saving}>{saving ? 'در حال ذخیره...' : 'ذخیره تنظیمات'}</button>
+          </div>
+        </>
+      )}
+    >
+      <section className="ue-section ue-section--first">
+        <h4><ChartNoAxesCombined size={16} />تعریف سطح‌ها</h4>
+        <p className="ue-note">هر پروژه می‌تواند بازه و توضیح سطح‌های کم، متوسط و زیاد را به زبان خودش بنویسد.</p>
+        {['probability', 'impact'].map((axis) => (
+          <div className="ue-card" key={axis}>
+            <h5 className="ue-card-title">{axis === 'probability' ? 'احتمال' : 'اثر'}</h5>
+            {['high', 'medium', 'low'].map((level) => {
+              const item = definitions.find((d) => d.axis === axis && d.level === level)
+              return (
+                <div className="ctl-def-row" key={level}>
+                  <b>{riskBandLabels[level]}</b>
+                  <input value={item.range} onChange={(e) => setDefinition(axis, level, 'range', e.target.value)} maxLength={80} aria-label="بازه" />
+                  <input value={item.description} onChange={(e) => setDefinition(axis, level, 'description', e.target.value)} maxLength={400} aria-label="توضیح" />
+                </div>
+              )
+            })}
+          </div>
+        ))}
+      </section>
+      <section className="ue-section">
+        <h4><Grid3x3 size={16} />رنگ خانه‌های ماتریس</h4>
+        <p className="ue-note">رنگ هر ترکیب احتمال × اثر. ماتریس بالای صفحه و رنگ سطح هر ریسک از همین‌جا می‌آید.</p>
+        <div className="ctl-color-grid">
+          <span />{['low', 'medium', 'high'].map((impact) => <b key={impact}>اثر {riskBandLabels[impact]}</b>)}
+          {['high', 'medium', 'low'].map((probability) => (
+            <Fragment key={probability}>
+              <b>احتمال {riskBandLabels[probability]}</b>
+              {['low', 'medium', 'high'].map((impact) => (
+                <select key={impact} className={`ctl-color ${colors[`${probability}-${impact}`]}`} value={colors[`${probability}-${impact}`]} onChange={(e) => setColors((current) => ({ ...current, [`${probability}-${impact}`]: e.target.value }))} aria-label={`احتمال ${riskBandLabels[probability]} و اثر ${riskBandLabels[impact]}`}>
+                  <option value="green">سبز</option><option value="yellow">زرد</option><option value="red">قرمز</option>
+                </select>
+              ))}
+            </Fragment>
+          ))}
+        </div>
+      </section>
+    </UserDialog>
+  )
+}
+
+/* ---- Stakeholders ---- */
+
+const stakeholderQuadrantLabels = { 0: 'پایش', 1: 'مطلع نگه داشتن', 2: 'راضی نگه داشتن', 3: 'مدیریت دقیق' }
+const stakeholderQuadrantKeys = { 0: 'monitor', 1: 'keepInformed', 2: 'keepSatisfied', 3: 'manageClosely' }
+// "High" is the high side of an axis; Medium and Low are the low side.
+const stakeholderQuadrantOf = (power, interest) => (power === 2 ? (interest === 2 ? 3 : 2) : (interest === 2 ? 1 : 0))
+const stakeholderLevels = [[0, 'کم'], [1, 'متوسط'], [2, 'زیاد']]
+
+function StakeholdersPage({ data }) {
+  const { can } = useAuth()
+  const rights = { create: can('Stakeholders.Create'), edit: can('Stakeholders.Edit'), remove: can('Stakeholders.Delete'), submit: can('Stakeholders.Submit') }
+  const [settings, setSettings] = useState(null)
+  const [settingsKey, setSettingsKey] = useState(0)
+  const [notice, setNotice] = useState(null)
+  const [editing, setEditing] = useState(null)
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [search, setSearch] = useState('')
+  const [cell, setCell] = useState(null)
+
+  useEffect(() => {
+    let cancelled = false
+    setSettings(null)
+    setCell(null)
+    if (!data.selectedProjectId) return undefined
+    projectManagementApi.stakeholderSettings(data.selectedProjectId).then((result) => { if (!cancelled) setSettings(unwrap(result)) })
+    return () => { cancelled = true }
+  }, [data.selectedProjectId, settingsKey])
+
+  const items = data.stakeholders
+  const manage = items.filter((item) => stakeholderQuadrantOf(item.power, item.interest) === 3).length
+  const internal = items.filter((item) => item.isInternal).length
+  const term = search.trim().toLowerCase()
+  const shown = items.filter((item) => (
+    (!cell || (item.power === cell.power && item.interest === cell.interest))
+    && (!term || `${item.name} ${item.expectations || ''} ${item.engagementStrategy || ''}`.toLowerCase().includes(term))
+  ))
+  const wording = (quadrant) => settings?.[stakeholderQuadrantKeys[quadrant]] || ''
+
+  const submitForApproval = (item) => runAction(() => projectManagementApi.submitStakeholder(item.id), 'ذینفع برای تأیید ارسال شد.', setNotice, data.refresh)
+  const remove = (item) => {
+    if (!window.confirm(`ذینفع «${item.name}» حذف شود؟`)) return
+    runAction(() => projectManagementApi.deleteStakeholder(item.id), 'ذینفع حذف شد.', setNotice, data.refresh)
+  }
+
+  return (
+    <>
+      <TaskPageHeader
+        section="کنترل و اجرا"
+        title="مدیریت ذینفعان"
+        description="شناسایی ذینفعان پروژه و تعیین راهبرد تعامل با هر یک بر اساس قدرت و علاقه"
+        actionNode={(
+          <>
+            {rights.edit && <button type="button" className="ctl-ghost" onClick={() => setSettingsOpen(true)} disabled={!data.selectedProjectId || !settings}><SlidersHorizontal size={17} />راهبردهای تعامل</button>}
+            {rights.create && <CreateButton kind="stakeholder" data={data} label="ثبت ذینفع" disabled={!data.selectedProjectId} />}
+          </>
+        )}
+      >
+        <ProjectSelector data={data} />
+      </TaskPageHeader>
+      <PageNotice notice={notice} onClose={() => setNotice(null)} />
+      <DataState loading={data.loading} error={data.error} empty={!data.projects.length}>
+        <ControlKpis items={[
+          { icon: Handshake, tone: 'navy', label: 'کل ذینفعان', value: toPersianDigits(items.length), note: 'در پروژه‌ی انتخاب‌شده' },
+          { icon: Target, tone: 'red', label: 'مدیریت دقیق', value: toPersianDigits(manage), note: 'قدرت و علاقه‌ی زیاد' },
+          { icon: Building2, tone: 'blue', label: 'داخلی', value: toPersianDigits(internal), note: 'درون سازمان' },
+          { icon: Users, tone: 'green', label: 'خارجی', value: toPersianDigits(items.length - internal), note: 'بیرون از سازمان' },
+        ]} />
+
+        <section className="ctl-grid">
+          <div className="task-panel ctl-panel">
+            <div className="task-panel-title"><div><h3>ماتریس قدرت و علاقه</h3><p>برای فیلتر کردن جدول، روی یک خانه بزنید.</p></div>{cell && <button type="button" className="ctl-link" onClick={() => setCell(null)}>حذف فیلتر</button>}</div>
+            <div className="ctl-matrix-body">
+            <div className="rm-wrap sm-wrap">
+              <span className="rm-axis rm-axis-y">قدرت</span>
+              <div className="rm-grid sm-grid">
+                {[2, 1, 0].map((power) => (
+                  <div className="rm-row" key={power}>
+                    <b className="rm-label">{stakeholderLevels[power][1]}</b>
+                    {[0, 1, 2].map((interest) => {
+                      const here = items.filter((item) => item.power === power && item.interest === interest)
+                      const active = cell?.power === power && cell?.interest === interest
+                      const quadrant = stakeholderQuadrantOf(power, interest)
+                      return (
+                        <button
+                          type="button" key={interest}
+                          className={`sm-cell q${quadrant}${active ? ' active' : ''}${here.length ? ' has' : ''}`}
+                          title={`${stakeholderQuadrantLabels[quadrant]}: ${toPersianDigits(here.length)} ذینفع`}
+                          onClick={() => setCell(active ? null : { power, interest })}
+                        >
+                          {here.slice(0, 3).map((item) => <span key={item.id}>{item.name}</span>)}
+                          {here.length > 3 && <em>+{toPersianDigits(here.length - 3)}</em>}
+                        </button>
+                      )
+                    })}
+                  </div>
+                ))}
+                <div className="rm-row rm-foot"><b className="rm-label" />{[0, 1, 2].map((interest) => <b className="rm-label" key={interest}>{stakeholderLevels[interest][1]}</b>)}</div>
+              </div>
+              <span className="rm-axis rm-axis-x">علاقه</span>
+            </div>
+            <div className="ctl-matrix-info">
+            <ul className="sm-legend">
+              {[3, 2, 1, 0].map((quadrant) => <li key={quadrant}><i className={`rm-dot q${quadrant}`} /><b>{stakeholderQuadrantLabels[quadrant]}</b>{wording(quadrant) && <small>{wording(quadrant)}</small>}</li>)}
+            </ul>
+            </div>
+            </div>
+          </div>
+
+          <div className="task-panel task-table-panel ctl-panel ctl-table-panel">
+            <div className="task-panel-title">
+              <div><h3>فهرست ذینفعان</h3><p>{toPersianDigits(shown.length)} از {toPersianDigits(items.length)} ذینفع</p></div>
+              <div className="ctl-filters"><label className="ctl-search"><Search size={15} /><input type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="جستجو در ذینفعان..." /></label></div>
+            </div>
+            <DataState loading={data.loadingDetails} empty={!shown.length}>
+              <div className="table-scroll">
+                <table>
+                  <thead><tr><th>ذینفع</th><th>قدرت</th><th>علاقه</th><th>راهبرد</th><th>تأیید</th><th>عملیات</th></tr></thead>
+                  <tbody>
+                    {shown.map((item) => {
+                      const quadrant = stakeholderQuadrantOf(item.power, item.interest)
+                      return (
+                        <tr key={item.id}>
+                          <td className="ctl-main">
+                            <strong>{item.name}<em className="ctl-tag">{item.isInternal ? 'داخلی' : 'خارجی'}</em></strong>
+                            {item.expectations && <small>انتظارات: {item.expectations}</small>}
+                          </td>
+                          <td>{compactEnumLabel(item.power, stakeholderLevelLabels)}</td>
+                          <td>{compactEnumLabel(item.interest, stakeholderLevelLabels)}</td>
+                          <td className="ctl-main"><span className={`quad-pill q${quadrant}`}>{stakeholderQuadrantLabels[quadrant]}</span><small>{item.engagementStrategy || item.strategy || ''}</small></td>
+                          <td><ApprovalBadge status={item.approvalStatus} /></td>
+                          <td>
+                            <span className="row-actions">
+                              {rights.edit && <button type="button" title="ویرایش" aria-label="ویرایش" onClick={() => setEditing(item)}><Pencil size={15} /></button>}
+                              {rights.submit && (item.approvalStatus === 0 || item.approvalStatus === 3) && <button type="button" className="ok" title="ارسال برای تأیید" aria-label="ارسال برای تأیید" onClick={() => submitForApproval(item)}><Send size={15} /></button>}
+                              {rights.remove && <button type="button" className="danger" title="حذف" aria-label="حذف" disabled={item.approvalStatus === 1} onClick={() => remove(item)}><Trash2 size={15} /></button>}
+                            </span>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </DataState>
+          </div>
+        </section>
+      </DataState>
+
+      {editing && <CreateProjectItemModal kind="stakeholder" item={editing} data={data} onClose={() => setEditing(null)} />}
+      {settingsOpen && settings && (
+        <StakeholderSettingsDialog
+          settings={settings} data={data}
+          onClose={() => setSettingsOpen(false)}
+          onSaved={(result) => { setSettingsOpen(false); setNotice(result); setSettingsKey((key) => key + 1) }}
+        />
+      )}
+    </>
+  )
+}
+
+/* The wording a project uses for each engagement quadrant; a blank text puts it back on the default. */
+function StakeholderSettingsDialog({ settings, data, onClose, onSaved }) {
+  const [form, setForm] = useState({ manageClosely: settings.manageClosely, keepSatisfied: settings.keepSatisfied, keepInformed: settings.keepInformed, monitor: settings.monitor })
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const quadrants = [[3, 'manageClosely'], [2, 'keepSatisfied'], [1, 'keepInformed'], [0, 'monitor']]
+
+  async function save(reset) {
+    setSaving(true)
+    setError('')
+    const result = await projectManagementApi.saveStakeholderSettings({
+      tenantId: data.tenantId, projectId: data.selectedProjectId,
+      ...(reset ? { manageClosely: '', keepSatisfied: '', keepInformed: '', monitor: '' } : form),
+    })
+    setSaving(false)
+    if (!result.isSuccess) { setError(PersianMessages.error(result.error)); return }
+    onSaved({ type: 'success', text: reset ? 'راهبردها به حالت پیش‌فرض برگشت.' : 'راهبردهای تعامل ذخیره شد.' })
+  }
+
+  return (
+    <UserDialog
+      size="sm" icon={SlidersHorizontal} title="راهبردهای تعامل با ذینفعان" subtitle={projectDisplayName(data.selectedProject)}
+      onClose={onClose}
+      footer={(
+        <>
+          {error && <span className="ue-error"><TriangleAlert size={15} />{error}</span>}
+          <div className="ue-foot-actions">
+            <button type="button" className="ue-cancel" onClick={() => save(true)} disabled={saving || settings.isDefault}><RotateCcw size={14} /> پیش‌فرض</button>
+            <button type="button" className="ue-cancel" onClick={onClose}>انصراف</button>
+            <button type="button" className="ue-save" onClick={() => save(false)} disabled={saving}>{saving ? 'در حال ذخیره...' : 'ذخیره'}</button>
+          </div>
+        </>
+      )}
+    >
+      <p className="ue-note">این متن‌ها زیر هر ذینفع، بر اساس ربع قدرت و علاقه‌اش نمایش داده می‌شوند (مگر برای او راهبرد جداگانه نوشته شده باشد).</p>
+      <div className="ue-card">
+        <div className="ue-grid">
+          {quadrants.map(([quadrant, key]) => (
+            <Field key={key} label={stakeholderQuadrantLabels[quadrant]} wide>
+              <textarea rows={2} value={form[key]} onChange={(e) => setForm((current) => ({ ...current, [key]: e.target.value }))} maxLength={400} />
+            </Field>
+          ))}
+        </div>
+      </div>
+    </UserDialog>
+  )
+}
+
+/* ---- Resources: the project team, who carries how much, and its governance roles ---- */
+
+const taskDone = (task) => task.status === 2 || task.status === 'Done'
+
+/** What each person of the selected project carries, from the work that names them as responsible. */
+function buildWorkload(data) {
+  const projectTasks = data.tasks.filter((task) => task.projectId === data.selectedProjectId)
+  const onTeam = new Set(data.teamMembers.map((member) => member.userId))
+  const roleOf = new Map(data.teamMembers.map((member) => [member.userId, member.roleTitle]))
+  const rows = new Map()
+  const rowOf = (userId) => {
+    if (!rows.has(userId)) rows.set(userId, { userId, onTeam: onTeam.has(userId), roleTitle: roleOf.get(userId) || '', activities: 0, manHours: 0, tasksOpen: 0, tasksDone: 0, storyPoints: 0, deliverables: 0, risks: 0 })
+    return rows.get(userId)
+  }
+  data.teamMembers.forEach((member) => rowOf(member.userId))
+  let unassigned = { activities: 0, tasks: 0, deliverables: 0 }
+  for (const activity of data.activities) {
+    if (!activity.responsibleUserId) { unassigned.activities += 1; continue }
+    const row = rowOf(activity.responsibleUserId)
+    row.activities += 1
+    row.manHours += Number(activity.manHours || 0)
+  }
+  for (const task of projectTasks) {
+    if (!task.responsibleUserId) { unassigned.tasks += 1; continue }
+    const row = rowOf(task.responsibleUserId)
+    if (taskDone(task)) row.tasksDone += 1
+    else { row.tasksOpen += 1; row.storyPoints += Number(task.storyPoints || 0) }
+  }
+  for (const deliverable of data.deliverables) {
+    if (!deliverable.responsibleUserId) { unassigned.deliverables += 1; continue }
+    rowOf(deliverable.responsibleUserId).deliverables += 1
+  }
+  for (const risk of data.risks) if (risk.riskOwnerUserId) rowOf(risk.riskOwnerUserId).risks += 1
+  const list = [...rows.values()].sort((a, b) => (b.manHours - a.manHours) || ((b.tasksOpen + b.activities) - (a.tasksOpen + a.activities)))
+  const load = (row) => row.manHours || row.tasksOpen + row.activities
+  const maxLoad = Math.max(0, ...list.map(load))
+  const totalManHours = list.reduce((sum, row) => sum + row.manHours, 0)
+  return { list, unassigned, maxLoad, load, totalManHours, projectTasks }
 }
 
 function ResourcesPage({ data }) {
-  return <><TaskPageHeader title="مدیریت منابع" description="منابع انسانی فعلاً از Project Team API پوشش داده می‌شود" actionNode={<CreateButton kind="member" data={data} label="افزودن عضو" />}><ProjectSelector data={data} /><CreateButton kind="governance" data={data} label="تعریف نقش حاکمیتی" /></TaskPageHeader><section className="task-panel task-table-panel"><DataState loading={data.loading || data.loadingDetails} error={data.error} empty={!data.teamMembers.length}><div className="table-scroll"><table><thead><tr><th>نام عضو</th><th>نقش پروژه</th><th>شناسه کاربر</th></tr></thead><tbody>{data.teamMembers.map((member) => <tr key={member.id}><td><span className="owner-cell"><i>{initialsOf(data.userName(member.userId)).slice(0, 1)}</i><strong>{data.userName(member.userId)}</strong></span></td><td>{member.roleTitle || '—'}</td><td>{member.userId}</td></tr>)}</tbody></table></div></DataState></section></>
+  const { can } = useAuth()
+  const rights = { members: can('ProjectTeam.ManageMembers'), governance: can('ProjectTeam.ManageGovernance') }
+  const [notice, setNotice] = useState(null)
+  const [editing, setEditing] = useState(null)
+  const [teamOpen, setTeamOpen] = useState(false)
+
+  const workload = useMemo(() => buildWorkload(data), [data.teamMembers, data.activities, data.tasks, data.deliverables, data.risks, data.selectedProjectId])
+  const unassignedTotal = workload.unassigned.activities + workload.unassigned.tasks + workload.unassigned.deliverables
+  const userOf = (userId) => data.users.find((item) => item.id === userId)
+
+  const removeMember = (member) => {
+    if (!window.confirm(`«${data.userName(member.userId)}» از تیم پروژه حذف شود؟`)) return
+    runAction(() => projectManagementApi.removeTeamMember(member.id), 'عضو از تیم پروژه حذف شد.', setNotice, data.refresh)
+  }
+  const removeRole = (role) => {
+    if (!window.confirm(`نقش «${role.title}» حذف شود؟`)) return
+    runAction(() => projectManagementApi.deleteGovernanceRole(role.id), 'نقش حاکمیتی حذف شد.', setNotice, data.refresh)
+  }
+  const vacant = data.governanceRoles.filter((role) => !role.userId).length
+  const hours = (value) => toPersianDigits(Math.round(value * 10) / 10)
+
+  return (
+    <>
+      <TaskPageHeader
+        section="کنترل و اجرا"
+        title="مدیریت منابع"
+        description="اعضای تیم پروژه، بار کاری هر نفر و نقش‌های حاکمیتی"
+        actionNode={(
+          <>
+            {rights.governance && <button type="button" className="ctl-ghost" onClick={() => setEditing({ kind: 'governance', item: null })} disabled={!data.selectedProjectId}><Plus size={17} />نقش حاکمیتی</button>}
+            {rights.members && <button type="button" className="ctl-ghost" onClick={() => setTeamOpen(true)} disabled={!data.selectedProjectId}><UsersRound size={17} />تنظیم تیم</button>}
+            {rights.members && <button type="button" onClick={() => setEditing({ kind: 'member', item: null })} disabled={!data.selectedProjectId}><Plus size={18} />افزودن عضو</button>}
+          </>
+        )}
+      >
+        <ProjectSelector data={data} />
+      </TaskPageHeader>
+      <PageNotice notice={notice} onClose={() => setNotice(null)} />
+      <DataState loading={data.loading} error={data.error} empty={!data.projects.length}>
+        <ControlKpis items={[
+          { icon: Users, tone: 'navy', label: 'اعضای تیم', value: toPersianDigits(data.teamMembers.length), note: 'در پروژه‌ی انتخاب‌شده' },
+          { icon: Clock3, tone: 'blue', label: 'نفرساعت برنامه‌ریزی‌شده', value: hours(workload.totalManHours), note: 'مجموع فعالیت‌های دارای مسئول' },
+          { icon: CircleAlert, tone: 'red', label: 'کار بدون مسئول', value: toPersianDigits(unassignedTotal), note: 'فعالیت، وظیفه و خروجی' },
+          { icon: Shield, tone: 'green', label: 'نقش‌های حاکمیتی', value: toPersianDigits(data.governanceRoles.length), note: `${toPersianDigits(vacant)} نقش بدون فرد` },
+        ]} />
+
+        {unassignedTotal > 0 && (
+          <div className="users-notice error ctl-notice" role="status">
+            <CircleAlert size={16} />
+            <span>
+              کارهای بدون مسئول:
+              {workload.unassigned.activities > 0 && ` ${toPersianDigits(workload.unassigned.activities)} فعالیت`}
+              {workload.unassigned.tasks > 0 && ` ${toPersianDigits(workload.unassigned.tasks)} وظیفه`}
+              {workload.unassigned.deliverables > 0 && ` ${toPersianDigits(workload.unassigned.deliverables)} خروجی`}
+              . برای هر کدام مسئول تعیین کنید تا بار کاری درست دیده شود.
+            </span>
+          </div>
+        )}
+
+        <section className="task-panel task-table-panel ctl-panel ctl-block">
+          <div className="task-panel-title"><div><h3>بار کاری اعضا</h3><p>بر اساس فعالیت‌ها، وظایف، خروجی‌ها و ریسک‌هایی که مسئولش هستند</p></div></div>
+          <DataState loading={data.loadingDetails} empty={!workload.list.length}>
+            <div className="table-scroll"><table>
+              <thead><tr><th>عضو</th><th>فعالیت‌ها</th><th>نفرساعت</th><th>بار کاری</th><th>وظایف باز</th><th>انجام‌شده</th><th>خروجی‌ها</th><th>ریسک‌ها</th></tr></thead>
+              <tbody>
+                {workload.list.map((row) => {
+                  const share = workload.maxLoad ? Math.round((workload.load(row) / workload.maxLoad) * 100) : 0
+                  return (
+                    <tr key={row.userId}>
+                      <td className="ctl-main">
+                        <span className="owner-cell"><i>{initialsOf(data.userName(row.userId)).slice(0, 1)}</i><strong>{data.userName(row.userId)}{!row.onTeam && <em className="ctl-tag ctl-tag--warn" title="مسئول کاری است ولی عضو تیم پروژه نیست">خارج از تیم</em>}</strong></span>
+                        {row.roleTitle && <small>{row.roleTitle}</small>}
+                      </td>
+                      <td>{toPersianDigits(row.activities)}</td>
+                      <td>{row.manHours ? hours(row.manHours) : '—'}</td>
+                      <td className="ctl-bar-cell" title={`${toPersianDigits(share)}٪ نسبت به پرکارترین عضو`}><span className="ctl-bar"><i style={{ width: `${share}%` }} /></span></td>
+                      <td>{toPersianDigits(row.tasksOpen)}{row.storyPoints > 0 && <small className="ctl-sp"> ({toPersianDigits(row.storyPoints)} امتیاز)</small>}</td>
+                      <td>{toPersianDigits(row.tasksDone)}</td>
+                      <td>{toPersianDigits(row.deliverables)}</td>
+                      <td>{toPersianDigits(row.risks)}</td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table></div>
+          </DataState>
+        </section>
+
+        <section className="task-panel task-table-panel ctl-panel ctl-block">
+          <div className="task-panel-title"><div><h3>اعضای تیم پروژه</h3><p>کسانی که روی این پروژه کار می‌کنند</p></div></div>
+          <DataState loading={data.loadingDetails} empty={!data.teamMembers.length}>
+            <div className="table-scroll"><table>
+              <thead><tr><th>عضو</th><th>نقش در پروژه</th><th>ایمیل</th><th>موبایل</th><th>وضعیت حساب</th><th>عملیات</th></tr></thead>
+              <tbody>
+                {data.teamMembers.map((member) => {
+                  const person = userOf(member.userId)
+                  return (
+                    <tr key={member.id}>
+                      <td><span className="owner-cell"><i>{initialsOf(data.userName(member.userId)).slice(0, 1)}</i><strong>{data.userName(member.userId)}</strong></span></td>
+                      <td>{member.roleTitle || '—'}</td>
+                      <td className="ltr-cell">{person?.email || '—'}</td>
+                      <td className="ltr-cell">{person?.phoneNumber ? toPersianDigits(person.phoneNumber) : '—'}</td>
+                      <td>{person ? <span className={`user-status ${person.isActive ? 'active' : ''}`}><i />{person.isActive ? 'فعال' : 'غیرفعال'}</span> : '—'}</td>
+                      <td>
+                        {rights.members && (
+                          <span className="row-actions">
+                            <button type="button" title="ویرایش نقش" aria-label="ویرایش نقش" onClick={() => setEditing({ kind: 'member', item: member })}><Pencil size={15} /></button>
+                            <button type="button" className="danger" title="حذف از تیم" aria-label="حذف از تیم" onClick={() => removeMember(member)}><Trash2 size={15} /></button>
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table></div>
+          </DataState>
+        </section>
+
+        <section className="task-panel task-table-panel ctl-panel ctl-block">
+          <div className="task-panel-title"><div><h3>نقش‌های حاکمیتی</h3><p>مسئولیت‌های راهبری و تأیید پروژه</p></div></div>
+          <DataState loading={data.loadingDetails} empty={!data.governanceRoles.length}>
+            <div className="table-scroll"><table>
+              <thead><tr><th>عنوان نقش</th><th>فرد</th><th>شماره پرسنلی</th><th>تلفن</th><th>ایمیل</th><th>محل خدمت</th><th>عملیات</th></tr></thead>
+              <tbody>
+                {data.governanceRoles.map((role) => (
+                  <tr key={role.id}>
+                    <td><strong>{role.title}</strong></td>
+                    <td>{role.userId ? data.userName(role.userId) : <span className="users-missing">بدون فرد</span>}</td>
+                    <td className="ltr-cell">{role.personnelNumber ? toPersianDigits(role.personnelNumber) : '—'}</td>
+                    <td className="ltr-cell">{role.phone ? toPersianDigits(role.phone) : '—'}</td>
+                    <td className="ltr-cell">{role.email || '—'}</td>
+                    <td>{role.serviceLocation || '—'}</td>
+                    <td>
+                      {rights.governance && (
+                        <span className="row-actions">
+                          <button type="button" title="ویرایش" aria-label="ویرایش" onClick={() => setEditing({ kind: 'governance', item: role })}><Pencil size={15} /></button>
+                          <button type="button" className="danger" title="حذف" aria-label="حذف" onClick={() => removeRole(role)}><Trash2 size={15} /></button>
+                        </span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table></div>
+          </DataState>
+        </section>
+      </DataState>
+
+      {editing && <CreateProjectItemModal kind={editing.kind} item={editing.item} data={data} onClose={() => setEditing(null)} />}
+      {teamOpen && (
+        <TeamSetDialog
+          data={data}
+          onClose={() => setTeamOpen(false)}
+          onSaved={(result) => { setTeamOpen(false); setNotice(result); data.refresh() }}
+        />
+      )}
+    </>
+  )
 }
 
-function StakeholdersPage({ data }) {
-  return <><TaskPageHeader title="مدیریت ذینفعان" description="ذینفعان پروژه از Stakeholders API" actionNode={<CreateButton kind="stakeholder" data={data} label="ثبت ذینفع" />}><ProjectSelector data={data} /></TaskPageHeader><section className="task-panel task-table-panel"><DataState loading={data.loading || data.loadingDetails} error={data.error} empty={!data.stakeholders.length}><div className="table-scroll"><table><thead><tr><th>نام</th><th>نوع</th><th>قدرت</th><th>علاقه</th><th>انتظارات</th><th>استراتژی تعامل</th></tr></thead><tbody>{data.stakeholders.map((item) => <tr key={item.id}><td><strong>{item.name}</strong></td><td>{item.isInternal ? 'داخلی' : 'خارجی'}</td><td>{compactEnumLabel(item.power, stakeholderLevelLabels)}</td><td>{compactEnumLabel(item.interest, stakeholderLevelLabels)}</td><td>{item.expectations || '—'}</td><td>{item.engagementStrategy || '—'}</td></tr>)}</tbody></table></div></DataState></section></>
+/* The whole team of the project in one go: tick who is on it. People left unticked are removed,
+   new ones join without a role title, those already on it keep theirs. */
+function TeamSetDialog({ data, onClose, onSaved }) {
+  const [candidates, setCandidates] = useState(null)
+  const [picked, setPicked] = useState(() => new Set(data.teamMembers.map((member) => member.userId)))
+  const [filter, setFilter] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    let cancelled = false
+    projectManagementApi.availableTeamUsers(data.selectedProjectId).then((result) => {
+      if (cancelled) return
+      const known = new Map()
+      for (const person of result.isSuccess ? arrayPayload(result) : data.users) known.set(person.id, person)
+      // People already on the team stay listed even when the Core no longer offers them.
+      for (const member of data.teamMembers) if (!known.has(member.userId)) known.set(member.userId, data.users.find((item) => item.id === member.userId) || { id: member.userId, displayName: data.userName(member.userId) })
+      setCandidates([...known.values()])
+    })
+    return () => { cancelled = true }
+  }, [data.selectedProjectId])
+
+  const term = filter.trim().toLowerCase()
+  const shown = (candidates || []).filter((person) => !term || `${person.displayName || ''} ${person.email || ''} ${person.username || ''}`.toLowerCase().includes(term))
+  const original = data.teamMembers.map((member) => member.userId).sort().join(',')
+  const changed = [...picked].sort().join(',') !== original
+  const removed = data.teamMembers.filter((member) => !picked.has(member.userId)).length
+  const added = [...picked].filter((id) => !data.teamMembers.some((member) => member.userId === id)).length
+
+  async function save() {
+    setSaving(true)
+    setError('')
+    const result = await projectManagementApi.setTeam({ tenantId: data.tenantId, projectId: data.selectedProjectId, userIds: [...picked] })
+    setSaving(false)
+    if (!result.isSuccess) { setError(PersianMessages.error(result.error)); return }
+    onSaved({ type: 'success', text: `تیم پروژه ذخیره شد (${toPersianDigits(added)} عضو تازه، ${toPersianDigits(removed)} حذف).` })
+  }
+
+  return (
+    <UserDialog
+      size="sm" icon={UsersRound} title="تنظیم تیم پروژه" subtitle={projectDisplayName(data.selectedProject)}
+      onClose={onClose}
+      footer={(
+        <>
+          {error && <span className="ue-error"><TriangleAlert size={15} />{error}</span>}
+          <div className="ue-foot-actions">
+            <button type="button" className="ue-cancel" onClick={onClose}>انصراف</button>
+            <button type="button" className="ue-save" onClick={save} disabled={saving || !changed}>{saving ? 'در حال ذخیره...' : 'ذخیره تیم'}</button>
+          </div>
+        </>
+      )}
+    >
+      <div className="ue-section-head">
+        <p className="ue-note ctl-note-flex">{toPersianDigits(picked.size)} نفر انتخاب شده. حذف شدگان از تیم بیرون می‌روند.</p>
+        <label className="users-search users-search--sm"><Search size={15} /><input type="search" value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="جستجوی کاربر..." /></label>
+      </div>
+      {candidates === null ? <p className="users-empty"><LoaderCircle size={18} className="spin" /></p> : (
+        <ul className="ue-roles ctl-people">
+          {shown.map((person) => (
+            <li key={person.id}>
+              <label>
+                <input type="checkbox" checked={picked.has(person.id)} onChange={(e) => setPicked((current) => { const next = new Set(current); if (e.target.checked) next.add(person.id); else next.delete(person.id); return next })} />
+                <span className="access-check"><CheckCheck size={13} /></span>
+                <span className="access-text"><strong>{person.displayName || person.email}</strong>{(person.email || person.username) && <code>{person.email || person.username}</code>}</span>
+              </label>
+            </li>
+          ))}
+          {!shown.length && <li><p className="ue-note">کاربری پیدا نشد.</p></li>}
+        </ul>
+      )}
+    </UserDialog>
+  )
 }
 
 function CostPage({ data }) {
@@ -1608,449 +2578,636 @@ function ChatPage() {
  * User management - all data comes from /api/identity/*                *
  * ------------------------------------------------------------------ */
 
-function UsersTable() {
-  const { user: currentUser } = useAuth()
-  const tenantId = currentUser?.tenantId || DEFAULT_TENANT_ID
-  const PAGE_SIZE = 10
-  const [users, setUsers] = useState([])
-  const [roles, setRoles] = useState([])
-  const [total, setTotal] = useState(0)
-  const [page, setPage] = useState(1)
-  const [search, setSearch] = useState('')
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
-  const [editing, setEditing] = useState(null)
-  const [rolesFor, setRolesFor] = useState(null)
-  const { can } = useAuth()
+const NATIONAL_CODE = /^[0-9]{10}$/
+const PHONE_NUMBER = /^(\+?[0-9]{8,15}|0?9[0-9]{9})$/
+const EMAIL_ADDRESS = /^[^@\s]+@[^@\s]+\.[^@\s]+$/
 
-  async function load(targetPage = page) {
-    setLoading(true)
-    const result = await usersApi.list({ tenantId, pageNumber: targetPage, pageSize: PAGE_SIZE, search })
-    if (!result.isSuccess) setError(PersianMessages.error(result.error))
-    else setError('')
-    const paged = unwrap(result)
-    setUsers(paged?.items || [])
-    setTotal(paged?.totalCount || 0)
-    setLoading(false)
-  }
-
-  // Any new search starts from the first page.
-  useEffect(() => { setPage(1) }, [search])
-  useEffect(() => { load(page) }, [page, search])
+/** Debounced copy of a fast-changing value, e.g. a search box. */
+function useDebounced(value, delay = 350) {
+  const [debounced, setDebounced] = useState(value)
   useEffect(() => {
-    if (!can('roles.view')) return
-    rolesApi.list(tenantId).then((r) => setRoles(unwrap(r, []) || []))
-  }, [tenantId])
-
-  const activeCount = users.filter((u) => u.isActive).length
-
-  async function toggleActive(user) {
-    const result = await usersApi.update(user.id, { displayName: user.displayName, isActive: !user.isActive })
-    if (!result.isSuccess) { setError(PersianMessages.error(result.error)); return }
-    load(page)
-  }
-
-  async function saveRoles(userId, roleIds) {
-    const result = await usersApi.assignRoles(userId, roleIds)
-    if (!result.isSuccess) { setError(PersianMessages.error(result.error)); return }
-    setRolesFor(null)
-    load(page)
-  }
-
-  return (
-    <section className="users-card">
-      <div className="users-toolbar">
-        <div><span className="active-count">فعال در این صفحه: {activeCount}</span><span className="inactive-count">غیرفعال: {users.length - activeCount}</span></div>
-        <div>
-          <label><Search size={16} /><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="جست‌وجوی کاربر..." /></label>
-          <button onClick={() => load(page)}><RefreshCw size={16} />به‌روزرسانی</button>
-        </div>
-      </div>
-      {error && <p className="login-error" role="alert">{error}</p>}
-      <div className="table-scroll">
-        <table className="users-table">
-          <thead><tr><th>کاربر</th><th>ایمیل</th><th>آخرین ورود</th><th>سمت سازمانی</th><th>وضعیت</th><th>عملیات</th></tr></thead>
-          <tbody>
-            {users.map((user, index) => (
-              <tr key={user.id}>
-                <td><span className={`user-identity tone-${index % 5}`}><i>{initialsOf(user.displayName)}</i><span><strong>{user.displayName}</strong><small>{user.id.slice(0, 8)}</small></span></span></td>
-                <td>{user.email}</td>
-                <td>{formatDateTime(user.lastLoginAtUtc)}</td>
-                <td>{(user.roles || []).map((role) => <span className="access-badge" key={role}><Shield size={13} />{role}</span>)}</td>
-                <td><span className={`user-status ${user.isActive ? 'active' : ''}`}><i />{user.isActive ? 'فعال' : 'غیرفعال'}</span></td>
-                <td>
-                  <span className="row-actions">
-                    <Can permission="users.update"><button title="ویرایش" onClick={() => setEditing(user)}><Pencil size={15} /></button></Can>
-                    <Can permission="users.assign_roles"><button title="سمت سازمانی" onClick={() => setRolesFor(user)}><KeyRound size={15} /></button></Can>
-                    <Can permission="users.update"><button title={user.isActive ? 'غیرفعال کردن' : 'فعال کردن'} onClick={() => toggleActive(user)}>{user.isActive ? <EyeOff size={15} /> : <Eye size={15} />}</button></Can>
-                  </span>
-                </td>
-              </tr>
-            ))}
-            {!loading && !users.length && <tr><td colSpan={6}>کاربری یافت نشد.</td></tr>}
-            {loading && <tr><td colSpan={6}>در حال بارگذاری...</td></tr>}
-          </tbody>
-        </table>
-      </div>
-      <Pagination pageNumber={page} pageSize={PAGE_SIZE} totalCount={total} onChange={setPage} />
-      {/* The Core exposes no delete-user endpoint, so no delete action is offered. */}
-      {editing && <UserEditor user={editing} roles={roles} onClose={() => setEditing(null)} onSaved={() => load(page)} />}
-      {rolesFor && <RoleAssigner user={rolesFor} roles={roles} onClose={() => setRolesFor(null)} onSave={saveRoles} />}
-    </section>
-  )
+    const timer = setTimeout(() => setDebounced(value), delay)
+    return () => clearTimeout(timer)
+  }, [value, delay])
+  return debounced
 }
 
-/* ------------------------------------------------------------------ *
- * Full user editor - four tabs over the Core's identity + profile APIs *
- * ------------------------------------------------------------------ */
+const userFullName = (user) => `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.displayName
 
-const EMPLOYMENT_TYPES = ['تمام‌وقت', 'پاره‌وقت', 'قراردادی', 'پیمانکار', 'کارآموز']
-const UI_LANGUAGES = [['fa', 'فارسی'], ['en', 'English'], ['ar', 'العربية']]
-const TIME_ZONES = ['Asia/Tehran', 'Asia/Dubai', 'Asia/Baku', 'Europe/Istanbul', 'UTC']
-
-const EMPTY_PROFILE = {
-  firstName: '', lastName: '', nationalCode: '', birthDate: '',
-  mobileNumber: '', phoneNumber: '', emergencyContactName: '', emergencyContactPhone: '', address: '',
-  employeeCode: '', jobTitle: '', department: '', officeLocation: '', hireDate: '', employmentType: '',
-  language: '', timeZone: '', notes: '',
-}
-
-/** The Core returns DateOnly as "YYYY-MM-DD", which is exactly what <input type="date"> wants. */
-const toDateInput = (value) => (value ? String(value).slice(0, 10) : '')
-const fromDateInput = (value) => (value ? value : null)
-
-function Field({ label, children, hint }) {
+function Field({ label, children, hint, required, wide }) {
   return (
-    <label className="ue-field">
-      <span>{label}</span>
+    <label className={`ue-field${wide ? ' ue-field--wide' : ''}`}>
+      <span>{label}{required && <b className="ue-required"> *</b>}</span>
       {children}
       {hint && <small>{hint}</small>}
     </label>
   )
 }
 
-function UserEditor({ user, roles, onClose, onSaved }) {
-  const { can } = useAuth()
-  const [tab, setTab] = useState('پایه')
-  const [displayName, setDisplayName] = useState(user.displayName)
-  const [isActive, setIsActive] = useState(user.isActive)
-  const [profile, setProfile] = useState(EMPTY_PROFILE)
-  const [roleIds, setRoleIds] = useState([])
-  const [initialRoleIds, setInitialRoleIds] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState('')
-  const [message, setMessage] = useState('')
+/** Dialogs are drawn straight into <body>: inside the page content they would sit under the top bar. */
+function ModalPortal({ children }) {
+  return createPortal(children, document.body)
+}
 
-  const canEdit = can('users.update')
-  const canEditRoles = can('users.assign_roles')
-
-  // One round trip gives identity fields, current roles and the extended profile.
-  useEffect(() => {
-    let cancelled = false
-    ;(async () => {
-      const result = await usersApi.detail(user.id)
-      if (cancelled) return
-      if (!result.isSuccess) {
-        setError(PersianMessages.error(result.error))
-        setLoading(false)
-        return
-      }
-      const detail = unwrap(result)
-      setDisplayName(detail.displayName)
-      setIsActive(detail.isActive)
-      setRoleIds(detail.roleIds || [])
-      setInitialRoleIds(detail.roleIds || [])
-      setProfile({
-        ...EMPTY_PROFILE,
-        ...Object.fromEntries(Object.entries(detail.profile || {}).map(([k, v]) => [k, v ?? ''])),
-        birthDate: toDateInput(detail.profile?.birthDate),
-        hireDate: toDateInput(detail.profile?.hireDate),
-      })
-      setLoading(false)
-    })()
-    return () => { cancelled = true }
-  }, [user.id])
-
-  const set = (key) => (event) => setProfile((current) => ({ ...current, [key]: event.target.value }))
-
-  const rolesChanged = useMemo(() => {
-    const a = [...roleIds].sort().join(',')
-    const b = [...initialRoleIds].sort().join(',')
-    return a !== b
-  }, [roleIds, initialRoleIds])
-
-  function toggleRole(roleId) {
-    setRoleIds((current) => current.includes(roleId) ? current.filter((id) => id !== roleId) : [...current, roleId])
-  }
-
-  async function save() {
-    setBusy(true)
-    setError('')
-    setMessage('')
-
-    // Three independent Core endpoints, each guarded by its own permission.
-    if (canEdit) {
-      const identityResult = await usersApi.update(user.id, { displayName: displayName.trim(), isActive })
-      if (!identityResult.isSuccess) { setError(PersianMessages.error(identityResult.error)); setBusy(false); return }
-
-      const profileResult = await usersApi.updateProfile(user.id, {
-        ...profile,
-        birthDate: fromDateInput(profile.birthDate),
-        hireDate: fromDateInput(profile.hireDate),
-      })
-      if (!profileResult.isSuccess) { setError(PersianMessages.error(profileResult.error)); setBusy(false); return }
-    }
-
-    if (canEditRoles && rolesChanged) {
-      const rolesResult = await usersApi.assignRoles(user.id, roleIds)
-      if (!rolesResult.isSuccess) { setError(PersianMessages.error(rolesResult.error)); setBusy(false); return }
-      setInitialRoleIds(roleIds)
-    }
-
-    setBusy(false)
-    setMessage('تغییرات ذخیره شد.')
-    onSaved()
-  }
-
-  const tabs = [
-    { key: 'پایه', label: 'اطلاعات پایه', icon: UserRound },
-    { key: 'تماس', label: 'اطلاعات تماس', icon: Smartphone },
-    { key: 'سازمانی', label: 'اطلاعات سازمانی', icon: Building2 },
-    { key: 'تنظیمات', label: 'تنظیمات و یادداشت', icon: SlidersHorizontal },
-  ]
-
+/** The same dialog shell for the user form and the access dialog. */
+function UserDialog({ title, icon: Icon, subtitle, size, onClose, footer, children }) {
   return (
-    <div className="ue-backdrop" role="dialog" aria-modal="true">
-      <div className="ue-modal">
+    <ModalPortal><div className="ue-backdrop" role="dialog" aria-modal="true" aria-label={title} onMouseDown={(e) => { if (e.target === e.currentTarget) onClose() }}>
+      <div className={`ue-modal${size === 'sm' ? ' ue-modal--sm' : ''}`}>
         <header className="ue-head">
-          <span className="user-identity tone-0"><i>{initialsOf(displayName || user.displayName)}</i></span>
+          <span className="ue-head-icon"><Icon size={19} /></span>
           <div className="ue-head-title">
-            <strong>{displayName || user.displayName}</strong>
-            <small>{user.email}</small>
+            <strong>{title}</strong>
+            {subtitle && <small>{subtitle}</small>}
           </div>
-          <span className={`user-status ${isActive ? 'active' : ''}`}><i />{isActive ? 'فعال' : 'غیرفعال'}</span>
           <button type="button" className="ue-close" onClick={onClose} aria-label="بستن"><X size={19} /></button>
         </header>
-
-        <nav className="ue-tabs">
-          {tabs.map(({ key, label, icon: Icon }) => (
-            <button type="button" key={key} className={tab === key ? 'active' : ''} onClick={() => setTab(key)}>
-              <Icon size={16} />{label}
-            </button>
-          ))}
-        </nav>
-
-        <div className="ue-body">
-          {loading && <p className="rz-chat__empty">در حال بارگذاری اطلاعات کاربر...</p>}
-
-          {!loading && tab === 'پایه' && (
-            <>
-              <div className="ue-grid">
-                <Field label="نام"><input value={profile.firstName} onChange={set('firstName')} disabled={!canEdit} /></Field>
-                <Field label="نام خانوادگی"><input value={profile.lastName} onChange={set('lastName')} disabled={!canEdit} /></Field>
-                <Field label="نام نمایشی" hint="این نام در سراسر سامانه دیده می‌شود.">
-                  <input value={displayName} onChange={(e) => setDisplayName(e.target.value)} disabled={!canEdit} />
-                </Field>
-                <Field label="ایمیل" hint="ایمیل شناسه ورود است و از این صفحه قابل تغییر نیست.">
-                  <input value={user.email} disabled readOnly />
-                </Field>
-                <Field label="کد ملی"><input value={profile.nationalCode} onChange={set('nationalCode')} disabled={!canEdit} inputMode="numeric" /></Field>
-                <Field label="تاریخ تولد"><input type="date" value={profile.birthDate} onChange={set('birthDate')} disabled={!canEdit} /></Field>
-              </div>
-              <label className="ue-switch">
-                <input type="checkbox" checked={isActive} onChange={(e) => setIsActive(e.target.checked)} disabled={!canEdit} />
-                <span><strong>حساب کاربری فعال باشد</strong><small>کاربر غیرفعال نمی‌تواند وارد سامانه شود.</small></span>
-              </label>
-              <p className="ue-meta"><Clock3 size={14} />آخرین ورود: {formatDateTime(user.lastLoginAtUtc)}</p>
-            </>
-          )}
-
-          {!loading && tab === 'تماس' && (
-            <div className="ue-grid">
-              <Field label="تلفن همراه"><input value={profile.mobileNumber} onChange={set('mobileNumber')} disabled={!canEdit} inputMode="tel" /></Field>
-              <Field label="تلفن ثابت / داخلی"><input value={profile.phoneNumber} onChange={set('phoneNumber')} disabled={!canEdit} inputMode="tel" /></Field>
-              <Field label="نام فرد رابط اضطراری"><input value={profile.emergencyContactName} onChange={set('emergencyContactName')} disabled={!canEdit} /></Field>
-              <Field label="تلفن رابط اضطراری"><input value={profile.emergencyContactPhone} onChange={set('emergencyContactPhone')} disabled={!canEdit} inputMode="tel" /></Field>
-              <Field label="نشانی" hint="نشانی کامل محل سکونت یا مکاتبه.">
-                <textarea rows={3} value={profile.address} onChange={set('address')} disabled={!canEdit} />
-              </Field>
-            </div>
-          )}
-
-          {!loading && tab === 'سازمانی' && (
-            <>
-              <div className="ue-grid">
-                <Field label="کد پرسنلی"><input value={profile.employeeCode} onChange={set('employeeCode')} disabled={!canEdit} /></Field>
-                <Field label="عنوان شغلی"><input value={profile.jobTitle} onChange={set('jobTitle')} disabled={!canEdit} /></Field>
-                <Field label="واحد / دپارتمان"><input value={profile.department} onChange={set('department')} disabled={!canEdit} /></Field>
-                <Field label="محل استقرار"><input value={profile.officeLocation} onChange={set('officeLocation')} disabled={!canEdit} /></Field>
-                <Field label="تاریخ استخدام"><input type="date" value={profile.hireDate} onChange={set('hireDate')} disabled={!canEdit} /></Field>
-                <Field label="نوع همکاری">
-                  <select value={profile.employmentType} onChange={set('employmentType')} disabled={!canEdit}>
-                    <option value="">انتخاب کنید</option>
-                    {EMPLOYMENT_TYPES.map((item) => <option key={item} value={item}>{item}</option>)}
-                  </select>
-                </Field>
-              </div>
-
-              <div className="ue-section">
-                <h4><Shield size={16} />سمت سازمانی</h4>
-                <p>سمت سازمانی تعیین می‌کند کاربر چه دسترسی‌هایی دارد و در کجای چارت سازمانی قرار می‌گیرد.</p>
-                {roles.length ? (
-                  <ul className="ue-roles">
-                    {roles.map((role) => (
-                      <li key={role.id}>
-                        <label className={canEditRoles ? '' : 'is-locked'}>
-                          <input type="checkbox" checked={roleIds.includes(role.id)} disabled={!canEditRoles} onChange={() => toggleRole(role.id)} />
-                          <span className="access-check"><CheckCheck size={13} /></span>
-                          <span className="access-text">
-                            <strong>{role.name}</strong>
-                            <code>{role.description || `${(role.permissions || []).length} دسترسی`}</code>
-                          </span>
-                        </label>
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <p className="rz-chat__empty">برای مشاهده سمت‌های سازمانی به دسترسی «مشاهده سمت‌های سازمانی» نیاز دارید.</p>
-                )}
-              </div>
-            </>
-          )}
-
-          {!loading && tab === 'تنظیمات' && (
-            <>
-              <div className="ue-grid">
-                <Field label="زبان رابط کاربری">
-                  <select value={profile.language} onChange={set('language')} disabled={!canEdit}>
-                    <option value="">پیش‌فرض سامانه</option>
-                    {UI_LANGUAGES.map(([code, label]) => <option key={code} value={code}>{label}</option>)}
-                  </select>
-                </Field>
-                <Field label="منطقه زمانی">
-                  <select value={profile.timeZone} onChange={set('timeZone')} disabled={!canEdit}>
-                    <option value="">پیش‌فرض سامانه</option>
-                    {TIME_ZONES.map((zone) => <option key={zone} value={zone}>{zone}</option>)}
-                  </select>
-                </Field>
-              </div>
-              <Field label="یادداشت داخلی" hint="این یادداشت فقط برای مدیران سامانه قابل مشاهده است.">
-                <textarea rows={5} value={profile.notes} onChange={set('notes')} disabled={!canEdit} />
-              </Field>
-            </>
-          )}
-        </div>
-
-        <footer className="ue-foot">
-          {error && <span className="ue-error"><TriangleAlert size={15} />{error}</span>}
-          {!error && message && <span className="ue-ok"><CheckCircle2 size={15} />{message}</span>}
-          {!error && !message && !canEdit && <span className="ue-hint"><LockKeyhole size={14} />فقط مشاهده — دسترسی ویرایش ندارید.</span>}
-          <div className="ue-foot-actions">
-            <button type="button" className="ue-cancel" onClick={onClose}>انصراف</button>
-            <button type="button" className="ue-save" onClick={save} disabled={loading || busy || (!canEdit && !canEditRoles)}>
-              {busy ? 'در حال ذخیره...' : 'ذخیره تغییرات'}
-            </button>
-          </div>
-        </footer>
+        <div className="ue-body">{children}</div>
+        <footer className="ue-foot">{footer}</footer>
       </div>
-    </div>
+    </div></ModalPortal>
   )
 }
 
-function RoleAssigner({ user, roles, onClose, onSave }) {
-  const [selected, setSelected] = useState(() => roles.filter((r) => (user.roles || []).includes(r.name)).map((r) => r.id))
-
-  return (
-    <aside className="notification-drawer">
-      <header><div><KeyRound size={19} /><h3>نقش‌های کاربر</h3></div><button onClick={onClose}><X size={18} /></button></header>
-      <p>{user.displayName}</p>
-      <div className="notify-methods">
-        <strong>نقش‌های موجود</strong>
-        {roles.map((role) => (
-          <label key={role.id}>
-            <input type="checkbox" checked={selected.includes(role.id)} onChange={(e) => setSelected((current) => e.target.checked ? [...current, role.id] : current.filter((id) => id !== role.id))} />
-            <span><Shield size={16} />{role.name}</span>
-          </label>
-        ))}
-        {!roles.length && <p>برای مشاهده نقش‌ها به دسترسی roles.view نیاز دارید.</p>}
-      </div>
-      <button className="drawer-save" onClick={() => onSave(user.id, selected)}>ذخیره نقش‌ها</button>
-    </aside>
-  )
-}
-
-/** Login history is derived from the platform audit log (identity.login / identity.login_failed). */
-function LoginHistory() {
-  const { user } = useAuth()
+function UsersTable() {
+  const { user: currentUser, can } = useAuth()
+  const tenantId = currentUser?.tenantId || DEFAULT_TENANT_ID
   const PAGE_SIZE = 10
-  const [logs, setLogs] = useState([])
+  const [users, setUsers] = useState([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
-  const [onlyLogins, setOnlyLogins] = useState(true)
+  const [search, setSearch] = useState('')
+  const debouncedSearch = useDebounced(search)
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
+  const [reloadKey, setReloadKey] = useState(0)
+  const [notice, setNotice] = useState(null)
+  const [editing, setEditing] = useState(null)
+  const [accessOf, setAccessOf] = useState(null)
 
-  async function load(targetPage = page) {
-    setLoading(true)
-    const result = await platformApi.auditLogs({ tenantId: user?.tenantId, pageNumber: targetPage, pageSize: PAGE_SIZE })
-    if (!result.isSuccess) setError(PersianMessages.error(result.error))
-    else setError('')
-    const paged = unwrap(result)
-    setLogs(paged?.items || [])
-    setTotal(paged?.totalCount || 0)
-    setLoading(false)
+  // What the signed-in user may do here (the Core checks every one of them again).
+  const rights = {
+    create: can('users.create'),
+    update: can('users.update'),
+    changeStatus: can('users.change_status'),
+    assignRoles: can('users.assign_roles'),
+    assignPermissions: can('users.assign_permissions'),
   }
 
-  useEffect(() => { load(page) }, [page])
+  // Any new search starts from the first page.
+  useEffect(() => { setPage(1) }, [debouncedSearch])
 
-  // The Core has no server-side action filter, so the toggle narrows the current page only.
-  const shown = onlyLogins ? logs.filter((log) => log.action.startsWith('identity.login')) : logs
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    usersApi.list({ tenantId, pageNumber: page, pageSize: PAGE_SIZE, search: debouncedSearch }).then((result) => {
+      if (cancelled) return
+      if (!result.isSuccess) setNotice({ type: 'error', text: PersianMessages.error(result.error) })
+      const paged = unwrap(result)
+      setUsers(paged?.items || [])
+      setTotal(paged?.totalCount || 0)
+      setLoading(false)
+    })
+    return () => { cancelled = true }
+  }, [tenantId, page, debouncedSearch, reloadKey])
 
-  const actionLabels = {
-    'identity.login': 'ورود موفق',
-    'identity.login_failed': 'ورود ناموفق',
-    'identity.forgot_password': 'درخواست بازیابی رمز',
-    'identity.reset_password': 'تغییر رمز عبور',
-    'users.create': 'ایجاد کاربر',
-    'users.update': 'ویرایش کاربر',
-    'users.assign_roles': 'تغییر سمت سازمانی',
-    'users.assign_permissions': 'تغییر دسترسی کاربر',
-    'roles.create': 'ایجاد سمت سازمانی',
-    'roles.update': 'ویرایش سمت سازمانی',
-    'roles.assign_permissions': 'تغییر دسترسی سمت سازمانی',
+  const reload = () => setReloadKey((key) => key + 1)
+
+  async function toggleStatus(user) {
+    const enable = !user.isActive
+    if (!enable && !window.confirm(`حساب «${userFullName(user)}» غیرفعال شود؟ کاربر بلافاصله از سامانه خارج می‌شود.`)) return
+    const result = await usersApi.setStatus(user.id, enable)
+    if (!result.isSuccess) { setNotice({ type: 'error', text: PersianMessages.error(result.error) }); return }
+    setNotice({ type: 'success', text: `حساب «${userFullName(user)}» ${enable ? 'فعال' : 'غیرفعال'} شد.` })
+    reload()
   }
 
   return (
     <section className="users-card">
-      <div className="history-notice">
-        <History size={21} />
-        <div><strong>گزارش ورود و رویدادهای امنیتی</strong><p>سوابق از سرویس platform/audit-logs دریافت می‌شود.</p></div>
-        <button onClick={() => load(page)}>به‌روزرسانی</button>
-      </div>
       <div className="users-toolbar">
-        <label className="check-row"><input type="checkbox" checked={onlyLogins} onChange={(e) => setOnlyLogins(e.target.checked)} /><span>فقط رویدادهای ورود</span></label>
+        <label className="users-search"><Search size={16} /><input type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="جستجو در نام، کد ملی، موبایل، ایمیل، نقش..." /></label>
+        {rights.create && <button type="button" className="users-add" onClick={() => setEditing('new')}><UserPlus size={16} />کاربر جدید</button>}
       </div>
-      {error && <p className="login-error" role="alert">{error}</p>}
+      {notice && (
+        <div className={`users-notice ${notice.type}`} role={notice.type === 'error' ? 'alert' : 'status'}>
+          {notice.type === 'error' ? <CircleAlert size={16} /> : <CheckCircle2 size={16} />}
+          <span>{notice.text}</span>
+          <button type="button" onClick={() => setNotice(null)} aria-label="بستن"><X size={15} /></button>
+        </div>
+      )}
       <div className="table-scroll">
         <table className="users-table">
-          <thead><tr><th>رویداد</th><th>تاریخ و زمان</th><th>نشانی IP</th><th>کاربر</th><th>وضعیت</th></tr></thead>
-          <tbody>
-            {shown.map((log) => (
-              <tr key={log.id}>
-                <td><strong>{actionLabels[log.action] || log.action}</strong></td>
-                <td>{formatDateTime(log.occurredAtUtc)}</td>
-                <td><code>{log.ipAddress || '—'}</code></td>
-                <td>{log.details || '—'}</td>
-                <td>
-                  {log.action === 'identity.login' && <span className="login-result success">موفق</span>}
-                  {log.action === 'identity.login_failed' && <span className="login-result failed">ناموفق</span>}
-                  {!log.action.startsWith('identity.login') && <span>—</span>}
-                </td>
-              </tr>
+          <thead><tr><th>کاربر</th><th>نام کاربری (کد ملی)</th><th>شماره موبایل</th><th>نقش</th><th>آخرین ورود</th><th>وضعیت</th><th>عملیات</th></tr></thead>
+          <tbody className={loading ? 'is-loading' : ''}>
+            {users.map((user, index) => {
+              const isSelf = user.id === currentUser?.id
+              const lockedReason = user.isSystem ? 'مدیر اصلی سیستم از این بخش قابل تغییر نیست.' : isSelf ? 'این عملیات برای حساب خودتان مجاز نیست.' : ''
+              return (
+                <tr key={user.id}>
+                  <td>
+                    <span className={`user-identity tone-${index % 5}`}>
+                      <i>{initialsOf(userFullName(user))}</i>
+                      <span>
+                        <strong>{userFullName(user)}{user.isSystem && <em className="user-system" title="ایجادشده توسط سیستم؛ قابل حذف، غیرفعال‌سازی یا تغییر دسترسی نیست"><Lock size={12} />مدیر اصلی</em>}</strong>
+                        {user.email && <small className="ltr-cell">{user.email}</small>}
+                      </span>
+                    </span>
+                  </td>
+                  <td className="ltr-cell">{user.username ? toPersianDigits(user.username) : <span className="users-missing">ثبت نشده</span>}</td>
+                  <td className="ltr-cell">{user.phoneNumber ? toPersianDigits(user.phoneNumber) : '—'}</td>
+                  <td>{(user.roles || []).length ? user.roles.map((role) => <span className="access-badge" key={role}><Shield size={13} />{role}</span>) : <span className="users-missing">بدون نقش</span>}</td>
+                  <td>{user.lastLoginAtUtc ? formatDateTime(user.lastLoginAtUtc) : 'ثبت نشده'}</td>
+                  <td><span className={`user-status ${user.isActive ? 'active' : ''}`}><i />{user.isActive ? 'فعال' : 'غیرفعال'}</span></td>
+                  <td>
+                    <span className="row-actions">
+                      {rights.update && (
+                        <button type="button" title={user.isSystem ? 'مشخصات مدیر اصلی سیستم از این بخش قابل تغییر نیست؛ رمز خود را از «تنظیمات» تغییر می‌دهد.' : 'ویرایش'} aria-label="ویرایش" disabled={user.isSystem} onClick={() => setEditing(user)}><Pencil size={15} /></button>
+                      )}
+                      {(rights.assignRoles || rights.assignPermissions) && (
+                        <button type="button" title={lockedReason || 'دسترسی‌ها'} aria-label="دسترسی‌ها" disabled={Boolean(lockedReason)} onClick={() => setAccessOf(user)}><ShieldCheck size={15} /></button>
+                      )}
+                      {rights.changeStatus && (user.isActive
+                        ? <button type="button" className="danger" title={lockedReason || 'غیرفعال‌سازی'} aria-label="غیرفعال‌سازی" disabled={Boolean(lockedReason)} onClick={() => toggleStatus(user)}><EyeOff size={15} /></button>
+                        : <button type="button" className="ok" title="فعال‌سازی" aria-label="فعال‌سازی" onClick={() => toggleStatus(user)}><Eye size={15} /></button>)}
+                    </span>
+                  </td>
+                </tr>
+              )
+            })}
+            {loading && !users.length && <tr><td colSpan={7} className="users-empty"><LoaderCircle size={18} className="spin" /></td></tr>}
+            {!loading && !users.length && <tr><td colSpan={7} className="users-empty">کاربری یافت نشد.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+      <Pagination pageNumber={page} pageSize={PAGE_SIZE} totalCount={total} onChange={setPage} />
+      {/* The Core exposes a delete endpoint, but disabling is the safe default: a user is referenced by tasks and chats. */}
+      {editing && (
+        <UserFormDialog
+          user={editing === 'new' ? null : editing}
+          tenantId={tenantId}
+          canAssignRoles={rights.assignRoles}
+          onClose={() => setEditing(null)}
+          onSaved={(result) => { setEditing(null); setNotice(result); reload() }}
+        />
+      )}
+      {accessOf && (
+        <UserAccessDialog
+          user={accessOf}
+          tenantId={tenantId}
+          rights={rights}
+          onClose={() => setAccessOf(null)}
+          onSaved={(result) => { setAccessOf(null); setNotice(result); reload() }}
+        />
+      )}
+    </section>
+  )
+}
+
+/* Create / edit one account: the fields the Core keeps - name, national code (the username),
+   mobile number, e-mail and password. Roles can be picked while creating; later changes (and
+   direct permissions) live in the access dialog. */
+function UserFormDialog({ user, tenantId, canAssignRoles, onClose, onSaved }) {
+  const isNew = !user
+  const [form, setForm] = useState({
+    firstName: user?.firstName || (user && !user.lastName ? user.displayName : ''),
+    lastName: user?.lastName || '',
+    username: user?.username || '',
+    phoneNumber: user?.phoneNumber || '',
+    email: user?.email || '',
+    password: '',
+  })
+  const [passwordConfirm, setPasswordConfirm] = useState('')
+  const [roles, setRoles] = useState([])
+  const [roleIds, setRoleIds] = useState([])
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  // The role list needs roles.view; without it the account is still created, just without roles.
+  useEffect(() => {
+    if (!isNew || !canAssignRoles) return
+    rolesApi.list(tenantId).then((result) => setRoles(unwrap(result, []) || []))
+  }, [isNew, canAssignRoles, tenantId])
+
+  const set = (key) => (event) => {
+    const value = key === 'username' || key === 'phoneNumber' ? toLatinDigits(event.target.value) : event.target.value
+    setForm((current) => ({ ...current, [key]: value }))
+  }
+
+  // An older username (from before the national-code rule) may stay as it is.
+  const usernameChanged = isNew || form.username.trim() !== (user?.username || '')
+  const passwordMismatch = Boolean(passwordConfirm) && form.password !== passwordConfirm
+
+  function validate() {
+    if (!form.firstName.trim() || !form.lastName.trim()) return 'نام و نام خانوادگی را وارد کنید.'
+    if (usernameChanged && !NATIONAL_CODE.test(form.username.trim())) return 'نام کاربری باید کد ملی ۱۰ رقمی باشد (فقط عدد).'
+    if (!form.phoneNumber.trim()) return 'شماره موبایل را وارد کنید.'
+    if (!PHONE_NUMBER.test(form.phoneNumber.replace(/[\s\-()]/g, ''))) return 'شماره موبایل معتبر نیست (مثال: 09121234567).'
+    if (form.email.trim() && !EMAIL_ADDRESS.test(form.email.trim())) return 'ایمیل معتبر نیست.'
+    if (isNew && form.password.length < 8) return 'رمز عبور اولیه باید حداقل ۸ کاراکتر باشد.'
+    if (!isNew && form.password && form.password.length < 8) return 'رمز عبور جدید باید حداقل ۸ کاراکتر باشد.'
+    if (form.password !== passwordConfirm) return 'رمز عبور و تکرار آن یکسان نیستند.'
+    return ''
+  }
+
+  async function submit(event) {
+    event.preventDefault()
+    const problem = validate()
+    if (problem) { setError(problem); return }
+    setSaving(true)
+    setError('')
+    const firstName = form.firstName.trim()
+    const lastName = form.lastName.trim()
+    const fullName = `${firstName} ${lastName}`.trim()
+
+    if (isNew) {
+      const created = await usersApi.create({
+        tenantId,
+        username: form.username.trim(),
+        firstName,
+        lastName,
+        phoneNumber: form.phoneNumber.trim(),
+        password: form.password,
+        email: form.email.trim() || null,
+        isActive: true,
+      })
+      if (!created.isSuccess) { setSaving(false); setError(PersianMessages.error(created.error)); return }
+      if (canAssignRoles && roleIds.length) {
+        const assigned = await usersApi.assignRoles(unwrap(created).id, roleIds)
+        if (!assigned.isSuccess) {
+          onSaved({ type: 'error', text: `کاربر «${fullName}» ایجاد شد، اما نقش‌ها ذخیره نشد: ${PersianMessages.error(assigned.error)} از دکمه‌ی «دسترسی‌ها» دوباره امتحان کنید.` })
+          return
+        }
+      }
+      onSaved({ type: 'success', text: `کاربر «${fullName}» ایجاد شد.` })
+      return
+    }
+
+    const saved = await usersApi.update(user.id, {
+      displayName: fullName || user.displayName,
+      isActive: user.isActive,
+      firstName,
+      lastName,
+      username: form.username.trim(),
+      phoneNumber: form.phoneNumber.trim(),
+      email: form.email.trim(),
+      password: form.password.trim() || null,
+    })
+    if (!saved.isSuccess) { setSaving(false); setError(PersianMessages.error(saved.error)); return }
+    onSaved({ type: 'success', text: `مشخصات «${fullName}» ذخیره شد.` })
+  }
+
+  return (
+    <UserDialog
+      size="sm"
+      icon={isNew ? UserPlus : Pencil}
+      title={isNew ? 'ایجاد کاربر جدید' : `ویرایش «${userFullName(user)}»`}
+      onClose={onClose}
+      footer={(
+        <>
+          {error && <span className="ue-error"><TriangleAlert size={15} />{error}</span>}
+          <div className="ue-foot-actions">
+            <button type="button" className="ue-cancel" onClick={onClose}>انصراف</button>
+            <button type="submit" form="user-form" className="ue-save" disabled={saving}>{saving ? 'در حال ذخیره...' : isNew ? 'ایجاد کاربر' : 'ذخیره تغییرات'}</button>
+          </div>
+        </>
+      )}
+    >
+      <form id="user-form" onSubmit={submit} noValidate>
+        <div className="ue-card">
+          <div className="ue-grid">
+            <Field label="نام" required><input value={form.firstName} onChange={set('firstName')} maxLength={80} autoFocus /></Field>
+            <Field label="نام خانوادگی" required><input value={form.lastName} onChange={set('lastName')} maxLength={80} /></Field>
+            <Field label="نام کاربری (کد ملی)" required hint={!isNew && user?.username && !NATIONAL_CODE.test(user.username) ? 'نام کاربری فعلی پیش از قانون کد ملی ثبت شده؛ اگر تغییرش دهید باید کد ملی ۱۰ رقمی باشد.' : 'دقیقاً ۱۰ رقم، فقط عدد.'}>
+              <input className="ltr-input" value={form.username} onChange={set('username')} inputMode="numeric" maxLength={usernameChanged ? 10 : 64} autoComplete="off" />
+            </Field>
+            <Field label="شماره موبایل" required hint="برای ورود و دریافت پیامک.">
+              <input className="ltr-input" value={form.phoneNumber} onChange={set('phoneNumber')} inputMode="tel" placeholder="09121234567" autoComplete="off" />
+            </Field>
+            <Field label="ایمیل" hint="اختیاری؛ برای ارسال لینک بازیابی رمز عبور." wide>
+              <input className="ltr-input" type="email" value={form.email} onChange={set('email')} autoComplete="off" />
+            </Field>
+          </div>
+        </div>
+
+        <div className="ue-card ue-card--accent">
+          <div className="ue-grid">
+            <Field label={isNew ? 'رمز عبور اولیه' : 'رمز عبور جدید'} required={isNew} hint={isNew ? 'حداقل ۸ کاراکتر.' : 'خالی بگذارید تا رمز فعلی بماند.'}>
+              <input className="ltr-input" type="password" value={form.password} onChange={set('password')} autoComplete="new-password" />
+            </Field>
+            <Field label="تکرار رمز عبور" required={isNew} hint={passwordMismatch ? 'رمزها یکسان نیستند.' : undefined}>
+              <input className={`ltr-input${passwordMismatch ? ' is-invalid' : ''}`} type="password" value={passwordConfirm} onChange={(e) => setPasswordConfirm(e.target.value)} autoComplete="new-password" aria-invalid={passwordMismatch} />
+            </Field>
+          </div>
+        </div>
+
+        {isNew && canAssignRoles && roles.length > 0 && (
+          <div className="ue-card ue-card--accent">
+            <h5 className="ue-card-title">نقش‌ها</h5>
+            <ul className="ue-roles ue-roles--wrap">
+              {roles.map((role) => (
+                <li key={role.id}>
+                  <label>
+                    <input type="checkbox" checked={roleIds.includes(role.id)} onChange={(e) => setRoleIds((ids) => e.target.checked ? [...ids, role.id] : ids.filter((id) => id !== role.id))} />
+                    <span className="access-check"><CheckCheck size={13} /></span>
+                    <span className="access-text"><strong>{role.name}</strong></span>
+                  </label>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </form>
+    </UserDialog>
+  )
+}
+
+/* Where a permission reaches one user from, and whether it is in effect for them. */
+function accessIsEffective(entry, direct, denied) {
+  if (denied.has(entry.permissionId)) return false
+  return direct.has(entry.permissionId) || entry.grantedByRole || entry.grantedByGroup || Boolean(entry.grantedAsPrerequisite)
+}
+
+/* Turning one permission on or off for this user. Off: the direct grant goes, and when a role,
+   a group or another permission would still give it, it is denied to the user. On: a denial goes,
+   and it is granted directly only when nothing else gives it. */
+function toggleUserAccess(entry, enable, direct, denied) {
+  const nextDirect = new Set(direct)
+  const nextDenied = new Set(denied)
+  const inherited = entry.grantedByRole || entry.grantedByGroup || Boolean(entry.grantedAsPrerequisite)
+  if (enable) {
+    nextDenied.delete(entry.permissionId)
+    if (!inherited) nextDirect.add(entry.permissionId)
+  } else {
+    nextDirect.delete(entry.permissionId)
+    if (inherited) nextDenied.add(entry.permissionId)
+  }
+  return { direct: nextDirect, denied: nextDenied }
+}
+
+function AccessSourceBadges({ entry, direct, denied }) {
+  const roles = (entry.grantingRoles || []).join('، ')
+  const groups = (entry.grantingGroups || []).join('، ')
+  if (denied.has(entry.permissionId)) {
+    const despite = [entry.grantedByRole && `سمت ${roles}`, entry.grantedByGroup && `گروه ${groups}`].filter(Boolean).join(' و ')
+    return (
+      <span className="access-inherited access-inherited--denied" title={despite ? `با وجود دسترسی از طریق ${despite}، برای این کاربر ممنوع شده است.` : 'برای این کاربر ممنوع شده است.'}>
+        غیرفعال برای این کاربر
+      </span>
+    )
+  }
+  return (
+    <>
+      {direct.has(entry.permissionId) && <span className="access-inherited access-inherited--direct">دسترسی مستقیم</span>}
+      {entry.grantedByRole && <span className="access-inherited" title={roles}><ShieldCheck size={13} />نقش: {roles}</span>}
+      {entry.grantedByGroup && <span className="access-inherited access-inherited--group" title={groups}><Users2 size={13} />گروه: {groups}</span>}
+      {entry.grantedAsPrerequisite && !direct.has(entry.permissionId) && !entry.grantedByRole && !entry.grantedByGroup && (
+        <span className="access-inherited access-inherited--prereq" title="مجوز دیگری از این کاربر به آن نیاز دارد.">لازمه‌ی مجوزی دیگر</span>
+      )}
+    </>
+  )
+}
+
+/* The roles of one user and, permission by permission, what they actually have and why. */
+function UserAccessDialog({ user, tenantId, rights, onClose, onSaved }) {
+  const [roles, setRoles] = useState([])
+  const [access, setAccess] = useState(null)
+  const [roleIds, setRoleIds] = useState([])
+  const [direct, setDirect] = useState(new Set())
+  const [denied, setDenied] = useState(new Set())
+  const [filter, setFilter] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    let cancelled = false
+    // The role list needs roles.view; without it the permissions are still shown.
+    Promise.all([rolesApi.list(tenantId), usersApi.permissions(user.id)]).then(([roleResult, accessResult]) => {
+      if (cancelled) return
+      if (!accessResult.isSuccess) { setError(PersianMessages.error(accessResult.error)); return }
+      const roleList = unwrap(roleResult, []) || []
+      const userAccess = unwrap(accessResult)
+      setRoles(roleList)
+      setAccess(userAccess)
+      setRoleIds(roleList.filter((role) => (userAccess.roles || []).includes(role.name)).map((role) => role.id))
+      setDirect(new Set(userAccess.permissions.filter((p) => p.grantedDirectly).map((p) => p.permissionId)))
+      setDenied(new Set(userAccess.permissions.filter((p) => p.deniedForUser).map((p) => p.permissionId)))
+    })
+    return () => { cancelled = true }
+  }, [user.id, tenantId])
+
+  const modules = useMemo(() => {
+    const term = filter.trim().toLowerCase()
+    const grouped = new Map()
+    for (const entry of access?.permissions || []) {
+      if (term && !`${labelForPermission(entry)} ${entry.name} ${labelForModule(entry.module)}`.toLowerCase().includes(term)) continue
+      if (!grouped.has(entry.module)) grouped.set(entry.module, [])
+      grouped.get(entry.module).push(entry)
+    }
+    return Array.from(grouped, ([module, permissions]) => ({ module, permissions }))
+  }, [access, filter])
+
+  async function save() {
+    if (!access) return
+    setSaving(true)
+    setError('')
+    const originalRoleIds = roles.filter((role) => (access.roles || []).includes(role.name)).map((role) => role.id).sort().join(',')
+    if (rights.assignRoles && [...roleIds].sort().join(',') !== originalRoleIds) {
+      const result = await usersApi.assignRoles(user.id, roleIds)
+      if (!result.isSuccess) { setSaving(false); setError(PersianMessages.error(result.error)); return }
+    }
+    const originalDirect = access.permissions.filter((p) => p.grantedDirectly).map((p) => p.permissionId).sort().join(',')
+    const originalDenied = access.permissions.filter((p) => p.deniedForUser).map((p) => p.permissionId).sort().join(',')
+    if (rights.assignPermissions && ([...direct].sort().join(',') !== originalDirect || [...denied].sort().join(',') !== originalDenied)) {
+      const result = await usersApi.assignPermissions(user.id, [...direct], [...denied])
+      if (!result.isSuccess) { setSaving(false); setError(PersianMessages.error(result.error)); return }
+    }
+    onSaved({ type: 'success', text: `دسترسی‌های «${userFullName(user)}» ذخیره شد. تغییرات پس از ورود دوباره‌ی کاربر اعمال می‌شود.` })
+  }
+
+  const nothingEditable = !rights.assignRoles && !rights.assignPermissions
+
+  return (
+    <UserDialog
+      icon={ShieldCheck}
+      title={`دسترسی‌های «${userFullName(user)}»`}
+      subtitle={user.email || undefined}
+      onClose={onClose}
+      footer={(
+        <>
+          {error && <span className="ue-error"><TriangleAlert size={15} />{error}</span>}
+          <div className="ue-foot-actions">
+            <button type="button" className="ue-cancel" onClick={onClose}>انصراف</button>
+            <button type="button" className="ue-save" onClick={save} disabled={saving || !access || nothingEditable}>{saving ? 'در حال ذخیره...' : 'ذخیره دسترسی‌ها'}</button>
+          </div>
+        </>
+      )}
+    >
+      {!access ? (
+        error ? null : <p className="users-empty"><LoaderCircle size={18} className="spin" /></p>
+      ) : (
+        <>
+          <section className="ue-section ue-section--first">
+            <h4><Shield size={16} />نقش‌ها</h4>
+            {roles.length ? (
+              <ul className="ue-roles ue-roles--wrap">
+                {roles.map((role) => (
+                  <li key={role.id}>
+                    <label className={rights.assignRoles ? '' : 'is-locked'}>
+                      <input type="checkbox" disabled={!rights.assignRoles} checked={roleIds.includes(role.id)} onChange={(e) => setRoleIds((ids) => e.target.checked ? [...ids, role.id] : ids.filter((id) => id !== role.id))} />
+                      <span className="access-check"><CheckCheck size={13} /></span>
+                      <span className="access-text">
+                        <strong>{role.name}</strong>
+                        <code>{toPersianDigits((role.permissions || []).length)} مجوز</code>
+                      </span>
+                    </label>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="ue-note">برای دیدن و تغییر نقش‌ها به دسترسی «مشاهده نقش‌ها» نیاز دارید.</p>
+            )}
+          </section>
+
+          <section className="ue-section">
+            <div className="ue-section-head">
+              <h4><KeyRound size={16} />مجوزهای این کاربر</h4>
+              <label className="users-search users-search--sm"><Search size={15} /><input type="search" value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="جستجوی مجوز..." /></label>
+            </div>
+            <p className="ue-note">
+              تیک هر مجوز یعنی این کاربر واقعاً آن را دارد. برداشتن تیک مجوزی که از نقش یا گروه می‌آید، آن را فقط برای همین کاربر غیرفعال می‌کند و نقش یا گروه تغییر نمی‌کند؛ با زدن دوباره‌ی تیک، دسترسی برمی‌گردد. فقط مجوزهایی را می‌توانید بدهید یا غیرفعال کنید که خودتان دارید.
+            </p>
+            {modules.map((group) => (
+              <div className="access-group" key={group.module}>
+                <h5>{labelForModule(group.module)}</h5>
+                <ul>
+                  {group.permissions.map((entry) => (
+                    <li key={entry.permissionId}>
+                      <label className={rights.assignPermissions ? '' : 'is-locked'}>
+                        <input
+                          type="checkbox"
+                          disabled={!rights.assignPermissions}
+                          checked={accessIsEffective(entry, direct, denied)}
+                          onChange={(e) => {
+                            const next = toggleUserAccess(entry, e.target.checked, direct, denied)
+                            setDirect(next.direct)
+                            setDenied(next.denied)
+                          }}
+                        />
+                        <span className="access-check"><CheckCheck size={13} /></span>
+                        <span className="access-text">
+                          <strong>{labelForPermission(entry)}</strong>
+                          <code>{entry.name}</code>
+                        </span>
+                        <span className="access-inherited-wrap"><AccessSourceBadges entry={entry} direct={direct} denied={denied} /></span>
+                      </label>
+                    </li>
+                  ))}
+                </ul>
+              </div>
             ))}
-            {loading && <tr><td colSpan={5}>در حال بارگذاری...</td></tr>}
-            {!loading && !shown.length && <tr><td colSpan={5}>رکوردی در این صفحه یافت نشد.</td></tr>}
+            {!modules.length && <p className="ue-note">مجوزی پیدا نشد.</p>}
+          </section>
+        </>
+      )}
+    </UserDialog>
+  )
+}
+
+/** Sign-in history, derived from the platform audit log (identity.login*). */
+const LOGIN_OUTCOMES = {
+  'identity.login': { label: 'ورود موفق', tone: 'success' },
+  'identity.login_failed': { label: 'ورود ناموفق', tone: 'failed' },
+  'identity.login_blocked': { label: 'مسدود (تلاش زیاد)', tone: 'warn' },
+  'identity.login_captcha_failed': { label: 'کد امنیتی نادرست', tone: 'warn' },
+}
+
+const LOGIN_REASONS = {
+  'unknown account': 'حساب ناموجود',
+  'wrong password': 'رمز نادرست',
+  'account disabled': 'حساب غیرفعال',
+}
+
+/** "0912... (wrong password)" -> the identifier that was typed and a Persian reason. */
+function describeLogin(details) {
+  if (!details) return { identifier: '—', reason: null }
+  const match = /^(.*) \(([^)]+)\)$/.exec(details)
+  return match ? { identifier: match[1], reason: LOGIN_REASONS[match[2]] || match[2] } : { identifier: details, reason: null }
+}
+
+const jalaliDate = new Intl.DateTimeFormat('fa-IR', { year: 'numeric', month: '2-digit', day: '2-digit' })
+const jalaliTime = new Intl.DateTimeFormat('fa-IR', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
+
+function LoginHistory() {
+  const { user } = useAuth()
+  const PAGE_SIZE = 15
+  const [logs, setLogs] = useState([])
+  const [total, setTotal] = useState(0)
+  const [page, setPage] = useState(1)
+  const [search, setSearch] = useState('')
+  const debouncedSearch = useDebounced(search)
+  const [newestFirst, setNewestFirst] = useState(true)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+
+  // A new search or sort order starts from the first page.
+  useEffect(() => { setPage(1) }, [debouncedSearch, newestFirst])
+
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    // The Core filters by action prefix ("identity.login" also covers failed / blocked attempts).
+    platformApi.auditLogs({
+      tenantId: user?.tenantId, pageNumber: page, pageSize: PAGE_SIZE,
+      action: 'identity.login', search: debouncedSearch.trim(), sort: newestFirst ? 'desc' : 'asc',
+    }).then((result) => {
+      if (cancelled) return
+      setError(result.isSuccess ? '' : PersianMessages.error(result.error))
+      const paged = unwrap(result)
+      setLogs(paged?.items || [])
+      setTotal(paged?.totalCount || 0)
+      setLoading(false)
+    })
+    return () => { cancelled = true }
+  }, [user?.tenantId, page, debouncedSearch, newestFirst])
+
+  return (
+    <section className="users-card">
+      <div className="users-toolbar">
+        <label className="users-search"><Search size={16} /><input type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="جستجو در کاربر، نام کاربری، IP، رویداد..." /></label>
+        <span className="users-toolbar-note">داده‌ها از رویدادهای ثبت‌شده‌ی سامانه خوانده می‌شوند.</span>
+      </div>
+      {error && <div className="users-notice error" role="alert"><CircleAlert size={16} /><span>{error}</span></div>}
+      <div className="table-scroll">
+        <table className="users-table">
+          <thead>
+            <tr>
+              <th>کاربر</th>
+              <th>نام کاربری / شناسه واردشده</th>
+              <th><button type="button" className="th-sort" onClick={() => setNewestFirst((value) => !value)} title="تغییر ترتیب">تاریخ <ArrowDownUp size={13} /></button></th>
+              <th>ساعت</th>
+              <th>وضعیت</th>
+              <th>علت</th>
+              <th>IP</th>
+            </tr>
+          </thead>
+          <tbody className={loading ? 'is-loading' : ''}>
+            {logs.map((log) => {
+              const outcome = LOGIN_OUTCOMES[log.action] || { label: log.action, tone: 'neutral' }
+              const { identifier, reason } = describeLogin(log.details)
+              const when = new Date(log.occurredAtUtc)
+              return (
+                <tr key={log.id}>
+                  <td><strong>{log.userDisplayName || <span className="users-missing">نامشخص</span>}</strong></td>
+                  <td className="ltr-cell">{toPersianDigits(log.username || identifier)}</td>
+                  <td>{jalaliDate.format(when)}</td>
+                  <td>{jalaliTime.format(when)}</td>
+                  <td><span className={`login-result ${outcome.tone}`}>{outcome.label}</span></td>
+                  <td>{reason || '—'}</td>
+                  <td className="ltr-cell"><code>{log.ipAddress || '—'}</code></td>
+                </tr>
+              )
+            })}
+            {loading && !logs.length && <tr><td colSpan={7} className="users-empty"><LoaderCircle size={18} className="spin" /></td></tr>}
+            {!loading && !logs.length && <tr><td colSpan={7} className="users-empty">رویدادی یافت نشد.</td></tr>}
           </tbody>
         </table>
       </div>
@@ -2850,43 +4007,8 @@ function UserAccessPanel() {
   )
 }
 
-function UserCreator({ onClose, onCreated }) {
-  const { user } = useAuth()
-  const [email, setEmail] = useState('')
-  const [displayName, setDisplayName] = useState('')
-  const [password, setPassword] = useState('')
-  const [error, setError] = useState('')
-  const [busy, setBusy] = useState(false)
-
-  async function save() {
-    setBusy(true); setError('')
-    const result = await usersApi.create({
-      tenantId: user?.tenantId || DEFAULT_TENANT_ID,
-      email: email.trim(),
-      displayName: displayName.trim(),
-      password,
-      isActive: true,
-    })
-    setBusy(false)
-    if (!result.isSuccess) { setError(PersianMessages.error(result.error)); return }
-    onCreated()
-  }
-
-  return (
-    <aside className="notification-drawer">
-      <header><div><UserPlus size={19} /><h3>کاربر جدید</h3></div><button onClick={onClose}><X size={18} /></button></header>
-      <label>ایمیل<input type="email" value={email} onChange={(e) => setEmail(e.target.value)} /></label>
-      <label>نام نمایشی<input value={displayName} onChange={(e) => setDisplayName(e.target.value)} /></label>
-      <label>رمز عبور (حداقل ۸ کاراکتر)<input type="password" value={password} onChange={(e) => setPassword(e.target.value)} /></label>
-      {error && <p className="login-error" role="alert">{error}</p>}
-      <button className="drawer-save" onClick={save} disabled={busy}>{busy ? 'در حال ایجاد...' : 'ایجاد کاربر'}</button>
-    </aside>
-  )
-}
-
 function UserManagement() {
   const [tab, setTab] = useState('کاربران')
-  const [creating, setCreating] = useState(false)
   const { canReach } = useAuth()
   const tabs = [
     { label: 'کاربران', icon: UsersRound, permissions: sectionPermissions.users },
@@ -2899,10 +4021,874 @@ function UserManagement() {
   useEffect(() => {
     if (tabs.length && !tabs.some((item) => item.label === tab)) setTab(tabs[0].label)
   }, [tabs, tab])
-  return <div className="user-management"><div className="task-page-header"><div><span>تنظیمات سازمانی</span><h1>مدیریت کاربران</h1><p>مدیریت حساب‌ها، ساختار سازمانی و سطوح دسترسی</p></div>{tab === 'کاربران' && <Can permission="users.create"><button onClick={() => setCreating(true)}><UserPlus size={18} />کاربر جدید</button></Can>}</div><nav className="user-tabs">{tabs.map(({label,icon:Icon}) => <button key={label} className={tab === label ? 'active' : ''} onClick={() => setTab(label)}><Icon size={17} />{label}</button>)}</nav>{tab === 'کاربران' && <UsersTable />}{tab === 'تاریخچه ورود' && <LoginHistory />}{tab === 'چارت سازمانی' && <OrgChart />}{tab === 'نقش‌ها و دسترسی‌ها' && <AccessControl />}{creating && <UserCreator onClose={() => setCreating(false)} onCreated={() => { setCreating(false); setTab('کاربران') }} />}</div>
+  return <div className="user-management"><div className="task-page-header"><div><span>تنظیمات سازمانی</span><h1>مدیریت کاربران</h1><p>مدیریت حساب‌ها، ساختار سازمانی و سطوح دسترسی</p></div></div><nav className="user-tabs">{tabs.map(({ label, icon: Icon }) => <button key={label} className={tab === label ? 'active' : ''} onClick={() => setTab(label)}><Icon size={17} />{label}</button>)}</nav>{tab === 'کاربران' && <UsersTable />}{tab === 'تاریخچه ورود' && <LoginHistory />}{tab === 'چارت سازمانی' && <OrgChart />}{tab === 'نقش‌ها و دسترسی‌ها' && <AccessControl />}</div>
 }
 
-function UserProfile() {
+// «تنظیمات»: a tabbed settings page (today just «پروفایل»; more tabs land here later,
+// each a sibling of ProfileTab, the same way UserManagement's own tabs are laid out).
+function SystemSettings() {
+  const { canReach } = useAuth()
+  const [tab, setTab] = useState('پروفایل')
+  const tabs = [
+    { label: 'پروفایل', icon: UserCog },
+    // Shown to those given their teams to see (groups.view_own) or to build (groups.manage_own).
+    ...(canReach(['groups.view_own', 'groups.manage_own']) ? [{ label: 'مدیریت تیم کاری', icon: Users }] : []),
+    { label: 'ظاهر سامانه', icon: Palette },
+    ...(canReach('sms_settings.view') ? [{ label: 'پنل پیامکی', icon: MessageSquareText }] : []),
+    ...(canReach([...sectionPermissions.users, ...sectionPermissions.loginHistory]) ? [{ label: 'مدیریت کاربران', icon: UsersRound }] : []),
+  ]
+  const current = tabs.some((item) => item.label === tab) ? tab : tabs[0].label
+
+  return (
+    <section className="profile-page">
+      <div className="task-page-header">
+        <div><span>تنظیمات شخصی</span><h1>تنظیمات</h1><p>پروفایل، امنیت و تنظیمات حساب کاربری شما</p></div>
+      </div>
+      <nav className="user-tabs">{tabs.map(({ label, icon: Icon }) => <button key={label} className={current === label ? 'active' : ''} onClick={() => setTab(label)}><Icon size={17} />{label}</button>)}</nav>
+      {current === 'پروفایل' && <ProfileTab />}
+      {current === 'مدیریت تیم کاری' && <CollapsibleCard icon={Users} title="مدیریت تیم کاری من"><MyWorkTeams /></CollapsibleCard>}
+      {current === 'ظاهر سامانه' && <AppearanceTab />}
+      {current === 'پنل پیامکی' && <SmsPanelTab />}
+      {current === 'مدیریت کاربران' && <UsersSettingsTab />}
+    </section>
+  )
+}
+
+/**
+ * Settings → «مدیریت کاربران»: the user list and the sign-in history, as sub-tabs. The same
+ * panels as the «مدیریت کاربران» page of the side menu; LDAP and SSO are deliberately not here.
+ */
+function UsersSettingsTab() {
+  const { canReach } = useAuth()
+  const [tab, setTab] = useState('مدیریت کاربران')
+  const tabs = [
+    { label: 'مدیریت کاربران', icon: UsersRound, permissions: sectionPermissions.users },
+    { label: 'تاریخچه ورود', icon: History, permissions: sectionPermissions.loginHistory },
+  ].filter((item) => canReach(item.permissions))
+  const current = tabs.some((item) => item.label === tab) ? tab : tabs[0]?.label
+
+  return (
+    <div className="users-settings">
+      <div className="settings-subtabs-row">
+        <nav className="settings-subtabs">
+          {tabs.map(({ label, icon: Icon }) => (
+            <button key={label} type="button" className={current === label ? 'active' : ''} onClick={() => setTab(label)}><Icon size={16} />{label}</button>
+          ))}
+        </nav>
+      </div>
+      {current === 'مدیریت کاربران' && <UsersTable />}
+      {current === 'تاریخچه ورود' && <LoginHistory />}
+    </div>
+  )
+}
+
+/* «پنل پیامکی» ---------------------------------------------------------------------------- */
+
+const SMS_TEMPLATE_MAX_LENGTH = 1000
+// Offered by every template when the server has a product name configured.
+const SMS_PRODUCT_NAME_PLACEHOLDER = 'ProductName'
+const SMS_PLACEHOLDER = /\{([A-Za-z][A-Za-z0-9_]*)\}/g
+
+const toLatinDigits = (value) => String(value || '')
+  .replace(/[۰-۹]/g, (d) => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(d)))
+  .replace(/[٠-٩]/g, (d) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)))
+
+/** The Core's SMS settings in the shape the panel edits; secrets always start empty (write-only). */
+function normalizeSmsSettings(sms) {
+  const toProvider = (item, fallbackId) => ({
+    id: item?.id || fallbackId,
+    name: item?.name || (item?.provider === 'kavenegar' ? 'کاوه‌نگار' : 'سرویس‌دهنده پیامک'),
+    provider: item?.provider || 'kavenegar',
+    enabled: !!item?.enabled,
+    apiUrl: item?.apiUrl || '',
+    apiKey: '',
+    lineNumber: item?.lineNumber || '',
+    username: '',
+    password: '',
+    apiKeyConfigured: !!item?.apiKeyConfigured,
+    usernameConfigured: !!item?.usernameConfigured,
+    passwordConfigured: !!item?.passwordConfigured,
+  })
+  // Settings saved before the provider list existed hold one provider at the top level; it is
+  // shown as that provider (by default an unconfigured «کاوه‌نگار»).
+  const providers = Array.isArray(sms?.providers)
+    ? sms.providers.map((item, index) => toProvider(item, `provider-${index}`))
+    : [toProvider(sms, '00000000-0000-0000-0000-000000000001')]
+  return { provider: sms?.provider || 'kavenegar', providers }
+}
+
+/** The body for PUT /notification-channels: the list, with the active provider mirrored on top. */
+function smsSettingsBody(settings, providers) {
+  const active = providers.find((item) => item.enabled)
+  const clean = (value) => (value || '').trim() || null
+  return {
+    enabled: !!active,
+    provider: active?.provider ?? settings.provider,
+    apiUrl: clean(active?.apiUrl),
+    apiKey: clean(active?.apiKey),
+    username: clean(active?.username),
+    password: active?.password || null,
+    lineNumber: clean(active?.lineNumber),
+    providers: providers.map((item) => ({
+      id: item.id,
+      name: item.name.trim(),
+      provider: item.provider,
+      enabled: item.enabled,
+      apiUrl: clean(item.apiUrl),
+      apiKey: clean(item.apiKey),
+      username: clean(item.username),
+      password: item.password || null,
+      lineNumber: clean(item.lineNumber),
+    })),
+  }
+}
+
+const usedSmsPlaceholders = (text) => Array.from(new Set(Array.from(String(text || '').matchAll(SMS_PLACEHOLDER), (m) => m[1])))
+
+/** The same rules the Core applies on save, in Persian; null when the text is fine. */
+function validateSmsTemplate(template) {
+  const title = template.title || template.key
+  const text = template.text ?? ''
+  if (!text.trim()) return `متن پیامک «${title}» نمی‌تواند خالی باشد.`
+  if (text.trim().length > SMS_TEMPLATE_MAX_LENGTH) return `متن پیامک «${title}» نباید بیشتر از ${SMS_TEMPLATE_MAX_LENGTH.toLocaleString('fa-IR')} کاراکتر باشد.`
+  const allowed = new Set([...(template.placeholders || []), SMS_PRODUCT_NAME_PLACEHOLDER].map((p) => p.toLowerCase()))
+  const unknown = usedSmsPlaceholders(text).filter((p) => !allowed.has(p.toLowerCase()))
+  if (unknown.length) return `متن پیامک «${title}» عبارت ناشناخته دارد: ${unknown.map((p) => `{${p}}`).join('، ')}`
+  const used = new Set(usedSmsPlaceholders(text).map((p) => p.toLowerCase()))
+  const missing = (template.requiredPlaceholders || []).filter((p) => !used.has(p.toLowerCase()))
+  if (missing.length) return `متن پیامک «${title}» باید ${missing.map((p) => `{${p}}`).join('، ')} را داشته باشد.`
+  return null
+}
+
+const errorText = (result, fallback) => (result?.error ? PersianMessages.error(result.error) : fallback)
+
+function SmsPanelTab() {
+  const { can } = useAuth()
+  const canUpdate = can('sms_settings.update')
+  const canTest = can('sms_settings.test')
+
+  const [providerOptions, setProviderOptions] = useState([])
+  const [settings, setSettings] = useState(null)
+  const [templates, setTemplates] = useState([])
+  const [editor, setEditor] = useState(null)
+  const [isNewProvider, setIsNewProvider] = useState(false)
+  const [testPhone, setTestPhone] = useState('')
+  const [testMessage, setTestMessage] = useState('')
+  const [busy, setBusy] = useState(null) // 'save' | 'test' | 'provider'
+  const [notice, setNotice] = useState(null)
+  const [loadError, setLoadError] = useState('')
+
+  useEffect(() => {
+    let alive = true
+    Promise.all([smsPanelApi.providers(), smsPanelApi.settings(), smsPanelApi.templates()]).then(([p, s, t]) => {
+      if (!alive) return
+      const failed = [p, s, t].find((result) => !result.isSuccess)
+      if (failed) { setLoadError(errorText(failed, 'دریافت تنظیمات پنل پیامکی ممکن نشد.')); return }
+      setProviderOptions(unwrap(p, []) || [])
+      setSettings(normalizeSmsSettings(unwrap(s)?.sms))
+      setTemplates(unwrap(t, []) || [])
+    })
+    return () => { alive = false }
+  }, [])
+
+  if (!settings) {
+    return (
+      <div className="profile-form sms-loading">
+        {loadError ? <p className="login-error" role="alert">{loadError}</p> : <><LoaderCircle size={20} className="spin" />در حال دریافت تنظیمات پنل پیامکی...</>}
+      </div>
+    )
+  }
+
+  const locked = !canUpdate || busy !== null
+  const selectedOption = providerOptions.find((item) => item.key === editor?.provider)
+  const updateEditor = (changes) => setEditor((current) => (current ? { ...current, ...changes } : current))
+
+  /** Stores the provider list; the screen then shows the settings exactly as the Core returns them. */
+  async function persistProviders(providers) {
+    const result = await smsPanelApi.saveSettings(smsSettingsBody(settings, providers))
+    if (!result.isSuccess) throw new Error(errorText(result, 'ذخیره تنظیمات انجام نشد.'))
+    const reloaded = await smsPanelApi.settings()
+    setSettings(reloaded.isSuccess ? normalizeSmsSettings(unwrap(reloaded)?.sms) : { ...settings, providers })
+  }
+
+  async function runProviderChange(change, successText) {
+    setBusy('provider'); setNotice(null)
+    try {
+      await change()
+      setNotice({ type: 'success', text: successText })
+      return true
+    } catch (err) {
+      setNotice({ type: 'error', text: err.message })
+      return false
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  function addProvider() {
+    setEditor({
+      id: crypto.randomUUID(), name: '', provider: providerOptions[0]?.key ?? 'kavenegar', enabled: false,
+      apiUrl: '', apiKey: '', lineNumber: '', username: '', password: '',
+      apiKeyConfigured: false, usernameConfigured: false, passwordConfigured: false,
+    })
+    setIsNewProvider(true)
+    setNotice(null)
+  }
+
+  async function saveProvider() {
+    if (!editor) return
+    if (!editor.name.trim()) { setNotice({ type: 'error', text: 'نام سرویس‌دهنده را وارد کنید.' }); return }
+    if (editor.enabled && !editor.apiKey.trim() && !editor.apiKeyConfigured) {
+      setNotice({ type: 'error', text: 'برای فعال‌کردن این سرویس‌دهنده، کلید API را وارد کنید.' })
+      return
+    }
+    const item = { ...editor, name: editor.name.trim() }
+    const list = isNewProvider ? [...settings.providers, item] : settings.providers.map((current) => (current.id === item.id ? item : current))
+    // Only one provider sends at a time: turning this one on turns the others off.
+    const providers = item.enabled ? list.map((current) => ({ ...current, enabled: current.id === item.id })) : list
+    const ok = await runProviderChange(() => persistProviders(providers), isNewProvider ? 'سرویس‌دهنده اضافه شد.' : 'تغییرات سرویس‌دهنده ذخیره شد.')
+    if (ok) setEditor(null)
+  }
+
+  async function deleteProvider(item) {
+    if (!window.confirm(`سرویس‌دهنده «${item.name}» حذف شود؟`)) return
+    const ok = await runProviderChange(() => persistProviders(settings.providers.filter((current) => current.id !== item.id)), 'سرویس‌دهنده حذف شد.')
+    if (ok && editor?.id === item.id) setEditor(null)
+  }
+
+  async function setProviderActive(item, enabled) {
+    if (enabled && !item.apiKeyConfigured && !item.apiKey.trim()) {
+      setNotice({ type: 'error', text: 'برای فعال‌کردن سرویس‌دهنده، ابتدا کلید API آن را در بخش ویرایش ثبت کنید.' })
+      return
+    }
+    await runProviderChange(
+      () => persistProviders(settings.providers.map((current) => ({ ...current, enabled: enabled && current.id === item.id }))),
+      enabled ? 'سرویس‌دهنده فعال شد.' : 'سرویس‌دهنده غیرفعال شد.',
+    )
+  }
+
+  /** Saves the texts (and the provider list as it stands); false when something stopped it. */
+  async function saveAll() {
+    const active = settings.providers.find((item) => item.enabled)
+    const hasKey = active?.apiKeyConfigured || active?.apiKey.trim()
+    const hasLogin = (active?.usernameConfigured || active?.username.trim()) && (active?.passwordConfigured || active?.password)
+    if (active && !hasKey && !hasLogin) {
+      setNotice({ type: 'error', text: 'برای فعال کردن پنل پیامکی، کلید API یا نام کاربری و رمز عبور را وارد کنید.' })
+      return false
+    }
+    const invalid = templates.map(validateSmsTemplate).find(Boolean)
+    if (invalid) { setNotice({ type: 'error', text: invalid }); return false }
+    await persistProviders(settings.providers)
+    const saved = await smsPanelApi.saveTemplates(templates.map((t) => ({ key: t.key, text: t.text })))
+    if (!saved.isSuccess) throw new Error(errorText(saved, 'ذخیره متن پیامک‌ها انجام نشد.'))
+    setTemplates(unwrap(saved, templates) || templates)
+    return true
+  }
+
+  async function handleSave() {
+    setBusy('save'); setNotice(null)
+    try {
+      if (await saveAll()) setNotice({ type: 'success', text: 'تنظیمات و متن پیامک‌ها ذخیره شد.' })
+    } catch (err) {
+      setNotice({ type: 'error', text: err.message || 'ذخیره تنظیمات انجام نشد.' })
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  async function handleSaveAndTest() {
+    if (!testPhone.trim()) { setNotice({ type: 'error', text: 'شماره موبایل آزمایشی را وارد کنید.' }); return }
+    setBusy('test'); setNotice(null)
+    try {
+      if (canUpdate && !(await saveAll())) return
+      const result = await smsPanelApi.test(testPhone.trim(), testMessage.trim())
+      const value = unwrap(result)
+      if (!result.isSuccess) setNotice({ type: 'error', text: errorText(result, 'ارسال پیامک آزمایشی انجام نشد.') })
+      else setNotice({ type: value?.success === false ? 'error' : 'success', text: value?.message ? PersianMessages.error(value.message) : 'پیامک آزمایشی ارسال شد.' })
+    } catch (err) {
+      setNotice({ type: 'error', text: err.message || 'ارسال پیامک آزمایشی انجام نشد.' })
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  return (
+    <div className="sms-panel">
+      {notice && (
+        <div className={`team-notice ${notice.type}`} role={notice.type === 'error' ? 'alert' : 'status'}>
+          <span>{notice.type === 'success' ? <CheckCircle2 size={16} /> : <CircleAlert size={16} />}{notice.text}</span>
+          <button type="button" onClick={() => setNotice(null)} title="بستن"><X size={14} /></button>
+        </div>
+      )}
+
+      <section className="profile-form sms-card">
+        <div className="sms-card-head">
+          <div>
+            <h3>سرویس‌دهنده پیامک</h3>
+            <p>پیامک‌های سامانه از طریق این سرویس و توسط سرور ارسال می‌شوند.</p>
+          </div>
+          {canUpdate && <button type="button" className="sms-primary" onClick={addProvider} disabled={busy !== null}><Plus size={16} />افزودن سرویس</button>}
+        </div>
+
+        <div className="sms-providers">
+          {settings.providers.length === 0 && <p className="sms-empty">هنوز سرویس‌دهنده‌ای ثبت نشده است.</p>}
+          {settings.providers.map((item) => (
+            <div key={item.id} className="sms-provider">
+              <div>
+                <strong>{item.name || 'سرویس‌دهنده پیامک'}</strong>
+                <small className={item.enabled ? 'on' : ''}>{item.enabled ? 'فعال و در حال استفاده' : 'غیرفعال'}</small>
+              </div>
+              {canUpdate && (
+                <div className="sms-provider-actions">
+                  <button type="button" className={item.enabled ? 'sms-off' : 'sms-on'} onClick={() => setProviderActive(item, !item.enabled)} disabled={busy !== null}>{item.enabled ? 'غیرفعال‌کردن' : 'فعال‌کردن'}</button>
+                  <button type="button" className="sms-edit" onClick={() => { setEditor({ ...item }); setIsNewProvider(false); setNotice(null) }} disabled={busy !== null}><Pencil size={14} />ویرایش</button>
+                  <button type="button" className="sms-delete" onClick={() => deleteProvider(item)} disabled={busy !== null}><Trash2 size={14} />حذف</button>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+
+        {editor && (
+          <div className="sms-editor">
+            <div className="sms-editor-head">
+              <h4>{isNewProvider ? 'افزودن سرویس‌دهنده' : `ویرایش ${editor.name}`}</h4>
+              <button type="button" className="team-icon-button" onClick={() => setEditor(null)} disabled={busy !== null} aria-label="بستن فرم سرویس‌دهنده"><X size={16} /></button>
+            </div>
+            <label className="sms-switch">
+              <input type="checkbox" checked={editor.enabled} onChange={(e) => updateEditor({ enabled: e.target.checked })} disabled={locked} />
+              <span className="sms-switch-track" aria-hidden="true" />
+              <span><strong>فعال بودن این سرویس‌دهنده</strong><small>فقط یک سرویس‌دهنده می‌تواند هم‌زمان برای ارسال پیامک فعال باشد.</small></span>
+            </label>
+            <div className="sms-fields">
+              <label>سرویس‌دهنده (Service Provider) *
+                <input value={editor.name} onChange={(e) => updateEditor({ name: e.target.value })} disabled={locked} placeholder="مثلاً پنل پیامکی شرکت ..." />
+                <small>نامی که برای تشخیص این پنل در سامانه نمایش داده می‌شود</small>
+              </label>
+              {providerOptions.length > 1 && (
+                <label>نوع پنل
+                  <select value={editor.provider} onChange={(e) => updateEditor({ provider: e.target.value })} disabled={locked}>
+                    {providerOptions.map((option) => <option key={option.key} value={option.key}>{option.displayName}</option>)}
+                  </select>
+                </label>
+              )}
+              <label>آدرس سرویس (Base URL)
+                <input value={editor.apiUrl} onChange={(e) => updateEditor({ apiUrl: e.target.value })} disabled={locked} placeholder={selectedOption?.defaultBaseUrl} dir="ltr" />
+                {selectedOption && <small>خالی = آدرس رسمی: {selectedOption.defaultBaseUrl}</small>}
+              </label>
+              <label>کلید API (API Key)
+                <input type="password" value={editor.apiKey} onChange={(e) => updateEditor({ apiKey: e.target.value })} disabled={locked} autoComplete="new-password" placeholder={editor.apiKeyConfigured ? '••••••••••••' : ''} dir="ltr" />
+                <small>{editor.apiKeyConfigured ? 'کلید فعلی نمایش داده نمی‌شود؛ برای تغییر، کلید جدید را وارد کنید.' : 'برای کاوه‌نگار الزامی است.'}</small>
+              </label>
+              <label>نام کاربری پنل (اختیاری)
+                <input value={editor.username} onChange={(e) => updateEditor({ username: e.target.value })} disabled={locked} autoComplete="off" placeholder={editor.usernameConfigured ? '••••••••' : ''} dir="ltr" />
+                <small>{editor.usernameConfigured ? 'نام کاربری فعلی نمایش داده نمی‌شود؛ برای تغییر، مقدار جدید را وارد کنید.' : 'کاوه‌نگار به این مورد نیاز ندارد.'}</small>
+              </label>
+              <label>رمز عبور پنل (اختیاری)
+                <input type="password" value={editor.password} onChange={(e) => updateEditor({ password: e.target.value })} disabled={locked} autoComplete="new-password" placeholder={editor.passwordConfigured ? '••••••••••••' : ''} dir="ltr" />
+                <small>{editor.passwordConfigured ? 'رمز فعلی نمایش داده نمی‌شود؛ برای تغییر، رمز جدید را وارد کنید.' : 'کاوه‌نگار به این مورد نیاز ندارد.'}</small>
+              </label>
+              <label>شماره فرستنده (اختیاری)
+                <input value={editor.lineNumber} onChange={(e) => updateEditor({ lineNumber: toLatinDigits(e.target.value).replace(/\D/g, '') })} disabled={locked} inputMode="numeric" dir="ltr" />
+                <small>خالی = خط پیش‌فرض حساب</small>
+              </label>
+            </div>
+            <div className="sms-actions">
+              <button type="button" className="sms-secondary" onClick={() => setEditor(null)} disabled={busy !== null}>انصراف</button>
+              <button type="button" className="profile-save" onClick={saveProvider} disabled={busy !== null}>{busy === 'provider' ? <LoaderCircle size={16} className="spin" /> : <Save size={16} />}{isNewProvider ? 'ثبت سرویس‌دهنده' : 'ذخیره تغییرات'}</button>
+            </div>
+          </div>
+        )}
+      </section>
+
+      <section className="profile-form sms-card">
+        <h3><MessageSquareText size={18} />متن پیامک‌ها</h3>
+        <p className="sms-hint">عبارت‌های داخل آکولاد هنگام ارسال با مقدار واقعی جایگزین می‌شوند. عبارت‌های ستاره‌دار باید در متن بمانند.</p>
+        {templates.length === 0 && <p className="sms-hint">متنی برای ویرایش وجود ندارد.</p>}
+        <div className="sms-templates">
+          {templates.map((template, index) => {
+            const error = validateSmsTemplate(template)
+            const required = new Set((template.requiredPlaceholders || []).map((p) => p.toLowerCase()))
+            const update = (text) => setTemplates((list) => list.map((t, i) => (i === index ? { ...t, text } : t)))
+            return (
+              <div key={template.key} className="sms-template">
+                <div className="sms-template-head">
+                  <div>
+                    <strong>{template.title}</strong>
+                    <small dir="ltr">{template.key}</small>
+                  </div>
+                  {template.defaultText && template.text !== template.defaultText && canUpdate && (
+                    <button type="button" className="sms-reset" onClick={() => update(template.defaultText)}><RotateCcw size={12} />متن پیش‌فرض</button>
+                  )}
+                </div>
+                {/* Always rendered (empty when there is none) so each row of the grid lines up. */}
+                <p className="sms-hint">{template.description || ''}</p>
+                <textarea value={template.text} maxLength={SMS_TEMPLATE_MAX_LENGTH} disabled={!canUpdate} aria-label={template.title} aria-invalid={error ? true : undefined} onChange={(e) => update(e.target.value)} />
+                <span className="sms-placeholders">
+                  {(template.placeholders || []).map((placeholder) => (
+                    <button key={placeholder} type="button" disabled={!canUpdate} title={required.has(placeholder.toLowerCase()) ? 'الزامی' : 'افزودن به متن'} onClick={() => update(`${template.text}{${placeholder}}`)} dir="ltr">
+                      {`{${placeholder}}`}{required.has(placeholder.toLowerCase()) && <em>*</em>}
+                    </button>
+                  ))}
+                </span>
+                <p className="sms-error" role={error ? 'alert' : undefined}>{error || ''}</p>
+              </div>
+            )
+          })}
+        </div>
+      </section>
+
+      <section className="profile-form sms-card">
+        <h3><Send size={18} />ارسال آزمایشی</h3>
+        <div className="sms-test-fields">
+          <label>شماره موبایل آزمایشی
+            <input value={testPhone} onChange={(e) => setTestPhone(toLatinDigits(e.target.value))} inputMode="tel" placeholder="09121234567" dir="ltr" />
+          </label>
+          <label>متن آزمایشی
+            <input value={testMessage} onChange={(e) => setTestMessage(e.target.value)} maxLength={500} placeholder="پیامک آزمایشی سامانه" />
+          </label>
+        </div>
+        <div className="sms-actions">
+          {canUpdate && <button type="button" className="sms-secondary" onClick={handleSave} disabled={busy !== null}>{busy === 'save' ? <LoaderCircle size={16} className="spin" /> : <Save size={16} />}ذخیره تنظیمات</button>}
+          {canTest && <button type="button" className="profile-save" onClick={handleSaveAndTest} disabled={busy !== null}>{busy === 'test' ? <LoaderCircle size={16} className="spin" /> : <Send size={16} />}{canUpdate ? 'ذخیره و ارسال تست' : 'ارسال تست'}</button>}
+        </div>
+      </section>
+    </div>
+  )
+}
+
+/* «ظاهر سامانه»: per-user accent palette and background pattern, stored on the user
+   (PUT /auth/me/preferences: colorPalette and theme) so they follow the user to any device. */
+const COLOR_PALETTES = [
+  { id: 'navy', name: 'سرمه‌ای روزت (پیش‌فرض)', preview: 'linear-gradient(110deg, #071944, #0f477d 70%, #1d766f)' },
+  { id: 'indigo', name: 'نیلی / بنفش', preview: 'linear-gradient(110deg, #4f46e5, #7c3aed)' },
+  { id: 'emerald', name: 'زمردی / سبز', preview: 'linear-gradient(110deg, #059669, #0d9488)' },
+  { id: 'rose', name: 'سرخ / گلبهی', preview: 'linear-gradient(110deg, #e11d48, #db2777)' },
+  { id: 'amber', name: 'طلایی / کهربایی', preview: 'linear-gradient(110deg, #d97706, #ea580c)' },
+  { id: 'cyan', name: 'فیروزه‌ای / آبی', preview: 'linear-gradient(110deg, #0891b2, #2563eb)' },
+  { id: 'slate', name: 'زغالی / تیره', preview: 'linear-gradient(110deg, #334155, #0f172a)' },
+]
+const BACKGROUND_PATTERNS = [
+  { id: 'default', name: 'ساده و مدرن', description: 'زمینه خنثی' },
+  { id: 'checkerboard', name: 'طرح شطرنجی', description: 'مربع‌های ریز' },
+  { id: 'diagonal', name: 'خطوط مورب', description: 'خطوط اریب' },
+  { id: 'grid', name: 'طرح شبکه‌ای', description: 'جدول هندسی' },
+  { id: 'dots', name: 'طرح نقطه‌ای', description: 'نقطه‌چین ظریف' },
+  { id: 'cross', name: 'چهارخانه', description: 'متقاطع ریز' },
+  { id: 'waves', name: 'طرح موجی', description: 'قوس‌های دایره‌ای' },
+]
+
+const THEME_MODES = [
+  { id: 'light', name: 'طرح روشن (روز)', icon: Sun },
+  { id: 'dark', name: 'طرح تیره (شب)', icon: Moon },
+]
+
+/** The user's saved mode/palette/pattern ids, or the defaults for missing or unknown values. */
+function appearanceOf(user) {
+  return {
+    mode: user?.themeMode === 'dark' ? 'dark' : 'light',
+    palette: COLOR_PALETTES.some((p) => p.id === user?.colorPalette) ? user.colorPalette : 'navy',
+    pattern: BACKGROUND_PATTERNS.some((p) => p.id === user?.theme) ? user.theme : 'default',
+  }
+}
+
+function AppearanceTab() {
+  const { user, can, refreshMe } = useAuth()
+  const { mode, palette, pattern } = appearanceOf(user)
+  const [pending, setPending] = useState('') // the option being saved
+  const [notice, setNotice] = useState(null)
+
+  async function save(change, key) {
+    if (pending) return
+    setPending(key); setNotice(null)
+    const next = { mode, palette, pattern, ...change }
+    const result = await accountApi.updatePreferences({
+      colorPalette: next.palette === 'navy' ? null : next.palette,
+      theme: next.pattern === 'default' ? null : next.pattern,
+      themeMode: next.mode,
+    })
+    if (result.isSuccess) await refreshMe()
+    else setNotice({ type: 'error', text: PersianMessages.error(result.error) })
+    setPending('')
+  }
+
+  return (
+    <>
+      {notice && (
+        <div className={`team-notice ${notice.type} appearance-notice`} role="alert">
+          <span><CircleAlert size={16} />{notice.text}</span>
+          <button type="button" onClick={() => setNotice(null)} title="بستن"><X size={14} /></button>
+        </div>
+      )}
+
+      {can('settings.update') && <UploadLimitCard />}
+
+      <CollapsibleCard icon={Sun} title="حالت روز / شب (طرح روشن و تیره)">
+        <div className="appearance-grid modes">
+          {THEME_MODES.map(({ id, name, icon: Icon }) => (
+            <button key={id} type="button" className={`appearance-option mode-option${mode === id ? ' active' : ''}`} onClick={() => save({ mode: id }, `mode:${id}`)} disabled={!!pending} aria-pressed={mode === id}>
+              <span><Icon size={20} className={`mode-icon ${id}`} /><strong>{name}</strong></span>
+              {pending === `mode:${id}` ? <LoaderCircle size={16} className="spin" /> : mode === id && <Check size={16} className="mode-check" />}
+            </button>
+          ))}
+        </div>
+      </CollapsibleCard>
+
+      <CollapsibleCard icon={Palette} title="پالت رنگی اصلی سامانه">
+        <p className="appearance-hint">رنگ دکمه‌ها، منوی فعال، بنر و حاشیه‌ها هم‌زمان تغییر می‌کند و برای حساب شما ذخیره می‌شود.</p>
+        <div className="appearance-grid palettes">
+          {COLOR_PALETTES.map((option) => (
+            <button key={option.id} type="button" className={`appearance-option${palette === option.id ? ' active' : ''}`} onClick={() => save({ palette: option.id }, `palette:${option.id}`)} disabled={!!pending} aria-pressed={palette === option.id}>
+              <span className="appearance-swatch" style={{ background: option.preview }}>
+                {pending === `palette:${option.id}` ? <LoaderCircle size={14} className="spin" /> : palette === option.id && <Check size={13} />}
+              </span>
+              <strong>{option.name}</strong>
+            </button>
+          ))}
+        </div>
+      </CollapsibleCard>
+
+      <CollapsibleCard icon={Grid3x3} title="طرح بافت زمینه (پترن گرافیکی)">
+        <p className="appearance-hint">الگوی زمینه‌ی صفحه‌ها؛ با رنگ پالت انتخابی کشیده می‌شود و برای حساب شما ذخیره می‌شود.</p>
+        <div className="appearance-grid patterns">
+          {BACKGROUND_PATTERNS.map((option) => (
+            <button key={option.id} type="button" className={`appearance-option${pattern === option.id ? ' active' : ''}`} onClick={() => save({ pattern: option.id }, `pattern:${option.id}`)} disabled={!!pending} aria-pressed={pattern === option.id}>
+              <span className={`appearance-swatch pattern-preview pattern-${option.id}`}>
+                {pending === `pattern:${option.id}` ? <LoaderCircle size={14} className="spin" /> : pattern === option.id && <Check size={13} />}
+              </span>
+              <strong>{option.name}</strong>
+              <small>{option.description}</small>
+            </button>
+          ))}
+        </div>
+      </CollapsibleCard>
+    </>
+  )
+}
+
+/** Admin only (settings.update): the system-wide maximum upload size, in KB. */
+function UploadLimitCard() {
+  const [valueKb, setValueKb] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [notice, setNotice] = useState(null)
+
+  useEffect(() => {
+    let alive = true
+    uploadPolicyApi.get().then((result) => {
+      if (!alive) return
+      setValueKb(String(unwrap(result)?.maxFileSizeKb ?? 200))
+      setLoading(false)
+    })
+    return () => { alive = false }
+  }, [])
+
+  async function submit(event) {
+    event.preventDefault()
+    const kb = Number(valueKb)
+    if (!Number.isFinite(kb) || kb <= 0) { setNotice({ type: 'error', text: 'مقدار واردشده معتبر نیست.' }); return }
+    setSaving(true); setNotice(null)
+    const result = await uploadPolicyApi.setMaxFileSizeKb(Math.max(1, Math.round(kb)))
+    setSaving(false)
+    setNotice(result.isSuccess
+      ? { type: 'success', text: 'حداکثر حجم فایل آپلودی ذخیره شد.' }
+      : { type: 'error', text: PersianMessages.error(result.error) })
+  }
+
+  return (
+    <CollapsibleCard icon={CloudUpload} title="محدودیت حجم فایل آپلودی">
+      {notice && (
+        <div className={`team-notice ${notice.type}`} role={notice.type === 'error' ? 'alert' : 'status'}>
+          <span>{notice.type === 'success' ? <CheckCircle2 size={16} /> : <CircleAlert size={16} />}{notice.text}</span>
+          <button type="button" onClick={() => setNotice(null)} title="بستن"><X size={14} /></button>
+        </div>
+      )}
+      <form className="upload-limit-form" onSubmit={submit}>
+        <label>حداکثر حجم مجاز (کیلوبایت)
+          <input type="number" min={1} value={valueKb} onChange={(e) => setValueKb(e.target.value)} disabled={loading} dir="ltr" />
+          <small>پیش‌فرض: ۲۰۰ کیلوبایت</small>
+        </label>
+        <button type="submit" className="profile-save" disabled={saving || loading}>{saving ? <LoaderCircle size={16} className="spin" /> : <Save size={16} />}ذخیره</button>
+      </form>
+      <p className="appearance-hint">این مقدار برای بارگذاری فایل در کل سامانه اعمال می‌شود.</p>
+    </CollapsibleCard>
+  )
+}
+
+const TEAM_MANAGER_ROLE = 'مدیر تیم'
+const TEAM_MEMBER_ROLE = 'عضو تیم'
+
+/** Every user of the tenant (the Core pages /users at 100 at most). */
+async function loadAllTenantUsers(tenantId) {
+  const users = []
+  for (let page = 1; page <= 50; page += 1) {
+    const result = await usersApi.list({ tenantId, pageNumber: page, pageSize: 100 })
+    if (!result.isSuccess) return { users, error: result.error }
+    const value = unwrap(result) || {}
+    users.push(...(value.items || []))
+    if (!value.items?.length || users.length >= (value.totalCount ?? 0) || page >= (value.totalPages ?? page)) break
+  }
+  return { users, error: null }
+}
+
+/**
+ * «تیم کاری من»: the teams the user belongs to (their own and others'). With groups.manage_own
+ * they build teams and choose the members of the ones they own; the rest is read only. Every
+ * change goes to the server first and the screen then shows the teams exactly as it returns them.
+ */
+function MyWorkTeams() {
+  const { user, can } = useAuth()
+  const tenantId = user?.tenantId || DEFAULT_TENANT_ID
+  const canBuildTeams = can('groups.manage_own')
+
+  const [teams, setTeams] = useState([])
+  const [activeTeamId, setActiveTeamId] = useState('')
+  const [allUsers, setAllUsers] = useState([])
+  const [memberScope, setMemberScope] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [notice, setNotice] = useState(null) // { type: 'success' | 'error', text }
+  const [creating, setCreating] = useState(false)
+  const [newTeamName, setNewTeamName] = useState('')
+  const [searchTerm, setSearchTerm] = useState('')
+
+  async function fetchTeams() {
+    const result = await myTeamsApi.list()
+    if (!result.isSuccess) throw new Error(PersianMessages.error(result.error))
+    return (unwrap(result, []) || []).filter((team) => team.isActive)
+  }
+
+  useEffect(() => {
+    let alive = true
+      ; (async () => {
+        setLoading(true)
+        try {
+          const list = await fetchTeams()
+          if (!alive) return
+          setTeams(list)
+          setActiveTeamId(list[0]?.id || '')
+          // The people to add are only needed by a team builder (groups.manage_own brings users.view).
+          if (canBuildTeams) {
+            const [{ users }, scopeResult] = await Promise.all([loadAllTenantUsers(tenantId), myTeamsApi.memberScope()])
+            if (!alive) return
+            setAllUsers(users)
+            // Without an organization structure (or if the call fails) nobody is filtered out
+            // here - the server still refuses whoever it does not allow.
+            setMemberScope(unwrap(scopeResult))
+          }
+        } catch (err) {
+          if (alive) setNotice({ type: 'error', text: err.message })
+        } finally {
+          if (alive) setLoading(false)
+        }
+      })()
+    return () => { alive = false }
+  }, [user?.id, tenantId, canBuildTeams])
+
+  const activeTeam = teams.find((team) => team.id === activeTeamId) || teams[0] || null
+  const canManageActiveTeam = canBuildTeams && !!activeTeam && activeTeam.ownerUserId === user?.id
+  const usersById = useMemo(() => new Map(allUsers.map((u) => [u.id, u])), [allUsers])
+
+  /** Sends one change, then reloads the teams from the server. False when it failed. */
+  async function applyChange(send, successText, nextActiveId) {
+    if (saving) return false
+    setSaving(true)
+    try {
+      const result = await send()
+      if (!result.isSuccess) throw new Error(PersianMessages.error(result.error))
+      const list = await fetchTeams()
+      setTeams(list)
+      const preferred = nextActiveId === undefined ? unwrap(result)?.id : nextActiveId
+      setActiveTeamId(list.some((team) => team.id === preferred) ? preferred : list[0]?.id || '')
+      setNotice({ type: 'success', text: successText })
+      return true
+    } catch (err) {
+      setNotice({ type: 'error', text: err.message || 'تغییر تیم کاری ذخیره نشد. لطفاً دوباره تلاش کنید.' })
+      return false
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function createTeam(event) {
+    event.preventDefault()
+    const name = newTeamName.trim()
+    if (!name) return
+    if (await applyChange(() => myTeamsApi.create(name), `تیم کاری جدید «${name}» با موفقیت ایجاد شد.`)) {
+      setNewTeamName('')
+      setCreating(false)
+    }
+  }
+
+  const memberIds = (team) => (team?.members || []).map((member) => member.userId)
+
+  function addMember(candidate) {
+    if (!canManageActiveTeam) return
+    if (memberIds(activeTeam).includes(candidate.id)) {
+      setNotice({ type: 'error', text: 'این کاربر قبلاً در تیم قرار دارد.' })
+      return
+    }
+    applyChange(
+      () => myTeamsApi.setMembers(activeTeam.id, [...memberIds(activeTeam), candidate.id]),
+      `«${candidate.displayName || candidate.username}» به تیم ${activeTeam.name} اضافه شد.`,
+    )
+  }
+
+  function removeMember(memberUserId) {
+    if (!canManageActiveTeam) return
+    if (memberUserId === user?.id) {
+      setNotice({ type: 'error', text: 'امکان حذف سازنده تیم وجود ندارد.' })
+      return
+    }
+    applyChange(
+      () => myTeamsApi.setMembers(activeTeam.id, memberIds(activeTeam).filter((id) => id !== memberUserId)),
+      'عضو موردنظر از تیم حذف شد.',
+    )
+  }
+
+  function deleteTeam() {
+    if (!canManageActiveTeam) return
+    if (!window.confirm(`آیا از حذف تیم کاری «${activeTeam.name}» اطمینان دارید؟`)) return
+    applyChange(() => myTeamsApi.remove(activeTeam.id), 'تیم کاری حذف شد.', null)
+  }
+
+  // Search results: active colleagues the server would accept; members already in the active
+  // team stay listed, marked as such.
+  const allowedIds = memberScope?.limited ? new Set(memberScope.allowedUserIds || []) : null
+  const query = searchTerm.trim().toLowerCase()
+  const candidates = query
+    ? allUsers.filter((u) =>
+      u.id !== user?.id
+      && u.isActive !== false
+      && (!allowedIds || allowedIds.has(u.id))
+      && [u.displayName, u.username, u.email].some((value) => (value || '').toLowerCase().includes(query)))
+    : []
+
+  const avatarOf = (person, fallbackName) => {
+    const url = person?.avatarUrl
+    return url ? <img src={url} alt="" /> : <span>{initialsOf(fallbackName || person?.displayName || person?.username)}</span>
+  }
+
+  return (
+    <div className="work-teams">
+      {notice && (
+        <div className={`team-notice ${notice.type}`} role={notice.type === 'error' ? 'alert' : 'status'}>
+          <span>{notice.type === 'success' ? <CheckCircle2 size={16} /> : <CircleAlert size={16} />}{notice.text}</span>
+          <button type="button" onClick={() => setNotice(null)} title="بستن"><X size={14} /></button>
+        </div>
+      )}
+
+      <div className="team-bar">
+        <div className="team-chips">
+          {teams.length === 0 ? (
+            <span className="team-empty">شما هنوز عضو هیچ تیم کاری نیستید.</span>
+          ) : teams.map((team) => (
+            <button key={team.id} type="button" className={activeTeam?.id === team.id ? 'active' : ''} onClick={() => setActiveTeamId(team.id)}>
+              <Users size={14} />{team.name}<small>({(team.members || []).length})</small>
+            </button>
+          ))}
+        </div>
+        {canBuildTeams && (
+          <button type="button" className="team-create-toggle" onClick={() => setCreating((value) => !value)}>
+            <Plus size={16} />ساخت تیم کاری جدید
+          </button>
+        )}
+      </div>
+
+      {canBuildTeams && creating && (
+        <form className="team-create-form" onSubmit={createTeam}>
+          <input value={newTeamName} onChange={(e) => setNewTeamName(e.target.value)} placeholder="نام تیم کاری (مثلاً: تیم پروژه طراحی UI)" maxLength={128} required autoFocus />
+          <button type="submit" disabled={saving || !newTeamName.trim()}>{saving && <LoaderCircle size={14} className="spin" />}ایجاد تیم</button>
+          <button type="button" className="team-icon-button" onClick={() => setCreating(false)} title="انصراف"><X size={16} /></button>
+        </form>
+      )}
+
+      {loading ? (
+        <div className="team-loading"><LoaderCircle size={20} className="spin" />در حال بارگذاری اعضا و تیم‌های کاری...</div>
+      ) : activeTeam ? (
+        <>
+          <div className="team-panel">
+            <div className="team-panel-head">
+              <div>
+                <h4><Users size={16} />تیم کاری: {activeTeam.name}</h4>
+                <small>تعداد اعضا: {(activeTeam.members || []).length} نفر</small>
+              </div>
+              {canManageActiveTeam && (
+                <button type="button" className="team-danger" onClick={deleteTeam} disabled={saving}><Trash2 size={14} />حذف تیم</button>
+              )}
+            </div>
+
+            {!canManageActiveTeam && (
+              <p className="team-readonly">شما عضو این تیم هستید؛ اعضا را می‌توانید ببینید و در گفتگوی داخلی با آن‌ها صحبت کنید. مدیریت اعضا فقط با مدیر تیم است.</p>
+            )}
+
+            {canManageActiveTeam && (
+              <div className="team-search">
+                <label htmlFor="team-member-search">جستجو و اضافه کردن کاربر به {activeTeam.name}:</label>
+                {memberScope?.limited && (
+                  <p className="team-scope-hint">
+                    {memberScope.scopeName ? `فقط همکاران معاونت «${memberScope.scopeName}» را می‌توانید به تیم اضافه کنید.` : 'فقط همکاران معاونت خودتان را می‌توانید به تیم اضافه کنید.'}
+                  </p>
+                )}
+                <div className="team-search-input">
+                  <Search size={16} />
+                  <input id="team-member-search" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} placeholder="نام یا نام کاربری همکار خود را جستجو کنید..." />
+                </div>
+                {query && (
+                  <div className="team-results">
+                    {candidates.length === 0 ? (
+                      <p className="team-results-empty">کاربری با این مشخصات پیدا نشد.</p>
+                    ) : candidates.map((candidate) => {
+                      const inTeam = memberIds(activeTeam).includes(candidate.id)
+                      return (
+                        <div key={candidate.id} className="team-person">
+                          <div className="team-person-info">
+                            <span className="team-avatar">{avatarOf(candidate)}</span>
+                            <div>
+                              <strong>{candidate.displayName || candidate.username}</strong>
+                              <small dir="ltr">{candidate.username}{candidate.email ? ` (${candidate.email})` : ''}</small>
+                            </div>
+                          </div>
+                          <button type="button" className="team-add" disabled={inTeam || saving} onClick={() => addMember(candidate)}>
+                            <UserPlus size={14} />{inTeam ? 'عضو تیم' : 'افزودن به تیم'}
+                          </button>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          <div className="team-members">
+            <h5><span>لیست اعضای فعلی {activeTeam.name}:</span><small>{(activeTeam.members || []).length} عضو</small></h5>
+            {(activeTeam.members || []).map((member) => {
+              const isOwner = member.userId === activeTeam.ownerUserId
+              const person = usersById.get(member.userId)
+              return (
+                <div key={member.userId} className="team-person">
+                  <div className="team-person-info">
+                    <span className="team-avatar">{avatarOf(person, member.displayName)}</span>
+                    <div>
+                      <strong>{member.displayName}<em className={isOwner ? 'owner' : ''}>{isOwner ? TEAM_MANAGER_ROLE : TEAM_MEMBER_ROLE}</em></strong>
+                      {(person?.username || member.email) && <small dir="ltr">{person?.username || member.email}</small>}
+                    </div>
+                  </div>
+                  {canManageActiveTeam && member.userId !== user?.id && (
+                    <button type="button" className="team-danger" onClick={() => removeMember(member.userId)} disabled={saving} title="حذف از تیم"><Trash2 size={14} />حذف</button>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        </>
+      ) : null}
+    </div>
+  )
+}
+
+function ProfileTab() {
   const { user } = useAuth()
   const fields = [
     ['نام کاربر', user?.displayName || 'ثبت نشده'],
@@ -2914,10 +4900,7 @@ function UserProfile() {
   ]
 
   return (
-    <section className="profile-page">
-      <div className="task-page-header">
-        <div><span>حساب کاربری</span><h1>پروفایل کاربر</h1><p>مشخصات نشست فعلی و نقش‌های اختصاص داده شده</p></div>
-      </div>
+    <>
       <div className="profile-hero">
         <span className="avatar">{initialsOf(user?.displayName || user?.email)}</span>
         <div>
@@ -2934,7 +4917,163 @@ function UserProfile() {
           </article>
         ))}
       </div>
-    </section>
+      <ProfileEditCard />
+      <ChangePasswordCard />
+    </>
+  )
+}
+
+/** Avatar, mobile number and SMS notifications - the fields the self-service endpoint allows. */
+function ProfileEditCard() {
+  const { user, refreshMe } = useAuth()
+  const [avatarUrl, setAvatarUrl] = useState(user?.avatarUrl || '')
+  const [phoneNumber, setPhoneNumber] = useState(user?.phoneNumber || '')
+  const [notifySms, setNotifySms] = useState(user?.notifySms ?? true)
+  const [busy, setBusy] = useState(false)
+  const [message, setMessage] = useState('')
+  const [error, setError] = useState('')
+  const [avatarError, setAvatarError] = useState('')
+  const fileRef = useRef(null)
+
+  // Re-sync only when the signed-in user actually changes, not on every background /me refresh -
+  // otherwise a pending edit would be wiped out from under the person typing it.
+  useEffect(() => {
+    setAvatarUrl(user?.avatarUrl || '')
+    setPhoneNumber(user?.phoneNumber || '')
+    setNotifySms(user?.notifySms ?? true)
+  }, [user?.id])
+
+  async function onPickAvatar(event) {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file) return
+    if (!file.type.startsWith('image/')) { setAvatarError('یک فایل تصویری انتخاب کنید.'); return }
+    setAvatarError('')
+    try {
+      let dataUrl = await compressImageToDataUrl(file, 220, 0.8)
+      if (dataUrl.length * 0.75 > AVATAR_MAX_BYTES) dataUrl = await compressImageToDataUrl(file, 160, 0.65)
+      setAvatarUrl(dataUrl)
+      setMessage('')
+    } catch {
+      setAvatarError('بارگذاری تصویر انجام نشد.')
+    }
+  }
+
+  async function save() {
+    setBusy(true); setError(''); setAvatarError(''); setMessage('')
+    const result = await accountApi.updateProfile({
+      displayName: user?.displayName || '',
+      avatarUrl: avatarUrl || null,
+      phoneNumber: phoneNumber.trim() || null,
+      notifySms,
+    })
+    setBusy(false)
+    if (!result.isSuccess) { setError(PersianMessages.error(result.error)); return }
+    await refreshMe()
+    setMessage('تغییرات ذخیره شد.')
+  }
+
+  return (
+    <CollapsibleCard icon={UserRound} title="پروفایل و آواتار کاربری">
+      {avatarError && <p className="login-error" role="alert">{avatarError}</p>}
+      <div className="avatar-panel">
+        <div className="avatar-picker">
+          {avatarUrl ? <img src={avatarUrl} alt="آواتار" /> : <span className="avatar">{initialsOf(user?.displayName)}</span>}
+          <button type="button" onClick={() => fileRef.current?.click()} title="بارگذاری تصویر شخصی"><Camera size={15} /></button>
+          <input ref={fileRef} type="file" accept="image/*" hidden onChange={onPickAvatar} />
+        </div>
+        <div className="avatar-panel-body">
+          <h4>تصویر آواتار کاربر</h4>
+          <p>می‌توانید از آلبوم آواتارهای پیش‌فرض انتخاب کنید یا تصویر دلخواه خود را بارگذاری نمایید.</p>
+          <div className="avatar-notice">
+            <strong><i />حجم قابل قبول: حداکثر ۲۰۰ کیلوبایت (200 KB)</strong>
+            <small>فرمت‌های مجاز: JPG, PNG, WEBP, GIF (تصاویر بزرگ‌تر به‌صورت خودکار فشرده‌سازی می‌شوند).</small>
+          </div>
+          <button type="button" className="avatar-upload" onClick={() => fileRef.current?.click()}><Upload size={16} />بارگذاری تصویر شخصی (حداکثر ۲۰۰ KB)</button>
+        </div>
+      </div>
+
+      <span className="profile-field-label">انتخاب از آلبوم آواتارهای پیش‌فرض:</span>
+      <div className="avatar-album">
+        {PRESET_AVATARS.map((avatar) => (
+          <button key={avatar.id} type="button" title={avatar.name} className={avatarUrl === avatar.url ? 'active' : ''} onClick={() => { setAvatarUrl(avatar.url); setMessage('') }}>
+            <img src={avatar.url} alt={avatar.name} />
+          </button>
+        ))}
+      </div>
+
+      {/* Identity fields are shown for reference; changing them needs an administrator. */}
+      <div className="profile-identity">
+        <label>نام و نام خانوادگی *<input value={user?.displayName || ''} readOnly title="نام ثبت‌شده در پروفایل شخصی قابل تغییر نیست." /></label>
+        <label>نام کاربری (ورود به سیستم)<input value={user?.username || ''} readOnly dir="ltr" title="نام کاربری فقط توسط مدیر سامانه قابل تغییر است." /></label>
+      </div>
+      <p className="avatar-hint">نام، نام خانوادگی و شناسهٔ ورود از این صفحه قابل ویرایش نیستند. برای اصلاح اطلاعات هویتی با مدیر سامانه تماس بگیرید.</p>
+
+      <span className="profile-field-label profile-section-title"><Bell size={16} />اطلاع‌رسانی پیامکی</span>
+      <div className="profile-sms-grid">
+        <label><span className="profile-label-icon"><Smartphone size={15} />شماره تلفن همراه (ورود و پیامک):</span><input value={phoneNumber} onChange={(e) => { setPhoneNumber(e.target.value); setMessage('') }} placeholder="09121234567" dir="ltr" inputMode="tel" autoComplete="tel" /></label>
+        <span />
+        <label className={`profile-sms-toggle${notifySms ? ' active' : ''}`}>
+          <span><MessageCircle size={16} />اطلاع‌رسانی با پیامک (SMS)</span>
+          <input type="checkbox" checked={notifySms} onChange={(e) => { setNotifySms(e.target.checked); setMessage('') }} />
+        </label>
+      </div>
+
+      {/* Next to the save button, so the outcome is seen without scrolling back up. */}
+      {error && <p className="login-error" role="alert">{error}</p>}
+      {message && <p className="profile-success">{message}</p>}
+      <div className="profile-actions">
+        <button className="profile-save" onClick={save} disabled={busy}><Check size={16} />{busy ? 'در حال ذخیره...' : 'ذخیره آواتار و تنظیمات پیامک'}</button>
+      </div>
+    </CollapsibleCard>
+  )
+}
+
+/** A settings card whose body folds away under its title; starts closed. */
+function CollapsibleCard({ icon: Icon, title, children }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className={`profile-form collapsible-card${open ? ' open' : ''}`}>
+      <button type="button" className="collapsible-head" onClick={() => setOpen((value) => !value)} aria-expanded={open}>
+        <span><Icon size={18} />{title}</span>
+        <ChevronDown size={18} />
+      </button>
+      {open && <div className="collapsible-body">{children}</div>}
+    </div>
+  )
+}
+
+function ChangePasswordCard() {
+  const [currentPassword, setCurrentPassword] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [confirm, setConfirm] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [message, setMessage] = useState('')
+  const [error, setError] = useState('')
+
+  async function save() {
+    setError(''); setMessage('')
+    if (newPassword.length < 8) { setError('رمز عبور جدید باید حداقل ۸ کاراکتر باشد.'); return }
+    if (newPassword !== confirm) { setError('تکرار رمز عبور با رمز جدید یکسان نیست.'); return }
+    setBusy(true)
+    const result = await accountApi.changePassword(currentPassword, newPassword)
+    setBusy(false)
+    if (!result.isSuccess) { setError(PersianMessages.error(result.error)); return }
+    setCurrentPassword(''); setNewPassword(''); setConfirm('')
+    setMessage('رمز عبور شما تغییر کرد.')
+  }
+
+  return (
+    <CollapsibleCard icon={LockKeyhole} title="تغییر رمز عبور">
+      <label>رمز عبور فعلی<input type="password" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} autoComplete="current-password" /></label>
+      <label>رمز عبور جدید (حداقل ۸ کاراکتر)<input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} autoComplete="new-password" /></label>
+      <label>تکرار رمز عبور جدید<input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} autoComplete="new-password" /></label>
+      {error && <p className="login-error" role="alert">{error}</p>}
+      {message && <p className="profile-success">{message}</p>}
+      <div className="profile-actions">
+        <button className="profile-save" onClick={save} disabled={busy}><KeyRound size={16} />{busy ? 'در حال ذخیره...' : 'تغییر رمز عبور'}</button>
+      </div>
+    </CollapsibleCard>
   )
 }
 
@@ -3009,26 +5148,26 @@ function DashboardHome({ onOpenProjects }) {
 
   const cards = summary
     ? [
-        { label: 'کل پروژه‌ها', value: summary.projectCount, unit: 'پروژه', note: 'همه پروژه‌های سازمان', icon: FolderOpen, tone: 'gold' },
-        { label: 'پروژه‌های در جریان', value: summary.runningProjectCount, unit: 'پروژه', note: mine ? `از این تعداد ${Number(mine.myRunningProjectCount).toLocaleString('fa-IR')} پروژه با شما است` : 'فعال یا متوقف', icon: TrendingUp, tone: 'blue' },
-        { label: 'کل اقدام‌ها', value: summary.actionCount, unit: 'اقدام', note: 'همه اقدام‌های سازمان', icon: ListTodo, tone: 'cyan' },
-        { label: 'اقدام‌های در جریان', value: summary.runningActionCount, unit: 'اقدام', note: mine ? `از این تعداد ${Number(mine.myRunningActionCount).toLocaleString('fa-IR')} اقدام با شما است` : 'باز یا در حال انجام', icon: CheckCircle2, tone: 'violet' },
-      ]
+      { label: 'کل پروژه‌ها', value: summary.projectCount, unit: 'پروژه', note: 'همه پروژه‌های سازمان', icon: FolderOpen, tone: 'gold' },
+      { label: 'پروژه‌های در جریان', value: summary.runningProjectCount, unit: 'پروژه', note: mine ? `از این تعداد ${Number(mine.myRunningProjectCount).toLocaleString('fa-IR')} پروژه با شما است` : 'فعال یا متوقف', icon: TrendingUp, tone: 'blue' },
+      { label: 'کل اقدام‌ها', value: summary.actionCount, unit: 'اقدام', note: 'همه اقدام‌های سازمان', icon: ListTodo, tone: 'cyan' },
+      { label: 'اقدام‌های در جریان', value: summary.runningActionCount, unit: 'اقدام', note: mine ? `از این تعداد ${Number(mine.myRunningActionCount).toLocaleString('fa-IR')} اقدام با شما است` : 'باز یا در حال انجام', icon: CheckCircle2, tone: 'violet' },
+    ]
     : mine
       ? [
-          { label: 'پروژه‌های در جریان من', value: mine.myRunningProjectCount, unit: 'پروژه', note: 'پروژه‌هایی که مالک یا مدیر آن هستید', icon: TrendingUp, tone: 'blue' },
-          { label: 'اقدام‌های در جریان من', value: mine.myRunningActionCount, unit: 'اقدام', note: 'اقدام‌هایی که مسئول یا مالک آن هستید', icon: CheckCircle2, tone: 'violet' },
-        ]
+        { label: 'پروژه‌های در جریان من', value: mine.myRunningProjectCount, unit: 'پروژه', note: 'پروژه‌هایی که مالک یا مدیر آن هستید', icon: TrendingUp, tone: 'blue' },
+        { label: 'اقدام‌های در جریان من', value: mine.myRunningActionCount, unit: 'اقدام', note: 'اقدام‌هایی که مسئول یا مالک آن هستید', icon: CheckCircle2, tone: 'violet' },
+      ]
       : []
 
   // Organisation-wide counts when the caller may see them, otherwise what their own list contains.
   const byStatus = summary
     ? summary.projectsByStatus.map(({ key, count }) => [key, count])
     : Object.entries(projects.reduce((map, project) => {
-        const key = statusKey(project.status)
-        map[key] = (map[key] || 0) + 1
-        return map
-      }, {}))
+      const key = statusKey(project.status)
+      map[key] = (map[key] || 0) + 1
+      return map
+    }, {}))
   const bars = CHART_STATUS_ORDER
     .map((key) => [key, byStatus.find(([k]) => k === key)?.[1] || 0])
     .filter(([key, count]) => count > 0 || key !== 'Archived')
@@ -3106,9 +5245,26 @@ function Dashboard() {
   const [active, setActive] = useState(dashboardLabel)
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const projectData = useProjectManagementData()
+  const { mode, palette, pattern } = appearanceOf(user)
+
+  // Palette and mode live on <html> so everything (menus, modals, dropdowns) picks them up;
+  // they are removed again on sign-out so the login page keeps Rozet's own light colors.
+  useEffect(() => {
+    const root = document.documentElement
+    if (palette === 'navy') root.removeAttribute('data-palette')
+    else root.setAttribute('data-palette', palette)
+    return () => root.removeAttribute('data-palette')
+  }, [palette])
+
+  useEffect(() => {
+    const root = document.documentElement
+    if (mode === 'dark') root.setAttribute('data-mode', 'dark')
+    else root.removeAttribute('data-mode')
+    return () => root.removeAttribute('data-mode')
+  }, [mode])
 
   return (
-    <div className="app-shell" dir="rtl">
+    <div className={`app-shell pattern-${pattern}`} dir="rtl">
       <Sidebar active={active} onSelect={setActive} open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
       <div className="app-main">
         <header className="topbar">
@@ -3137,7 +5293,7 @@ function Dashboard() {
           ) : active === 'مدیریت کاربران' ? (
             <UserManagement />
           ) : active === userProfileLabel ? (
-            <UserProfile />
+            <SystemSettings />
           ) : submenuLabels.includes(active) ? (
             <section className="empty-page">
               <div><Boxes size={38} /></div><h1>{active}</h1><p>ساخت محتوای این بخش در مرحله بعدی انجام می‌شود.</p><button onClick={() => setActive(dashboardLabel)}>بازگشت به داشبورد</button>

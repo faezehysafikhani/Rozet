@@ -114,6 +114,13 @@ export function AuthProvider({ children }) {
     return { ok: true }
   }, [applySession])
 
+  // Re-reads /me after a self-service profile change, so the topbar/profile page reflect it
+  // without a full page reload.
+  const refreshMe = useCallback(async () => {
+    const payload = unwrap(await identityApi.me())
+    if (payload?.user) applySession(payload)
+  }, [applySession])
+
   const value = useMemo(() => ({
     user,
     permissions,
@@ -122,6 +129,7 @@ export function AuthProvider({ children }) {
     isAuthenticated: Boolean(user),
     signIn,
     signOut,
+    refreshMe,
 
     /** Can the user perform this action? Uses the effective set. */
     can: (permission) => !permission || permissions.includes(permission),
@@ -136,7 +144,7 @@ export function AuthProvider({ children }) {
       const list = Array.isArray(wanted) ? wanted : [wanted]
       return list.length === 0 || list.some((p) => grantedPermissions.includes(p))
     },
-  }), [user, permissions, grantedPermissions, booting, signIn, signOut])
+  }), [user, permissions, grantedPermissions, booting, signIn, signOut, refreshMe])
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }
