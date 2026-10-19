@@ -460,6 +460,13 @@ export const suppliersApi = {
   create: (payload) => api.post(suppliersBase, payload),
   update: (id, payload) => api.put(`${suppliersBase}/${id}`, payload),
   remove: (id) => api.delete(`${suppliersBase}/${id}`),
+  // Periodic evaluations: four scores 1-5 (quality, timeliness, compliance, cooperation) for a period, optionally for one contract.
+  // metrics is what the records say about that period (milestones due / late, obligations due / missed), shown before scoring.
+  evaluations: (id) => api.get(`${suppliersBase}/${id}/evaluations`),
+  evaluationMetrics: (id, { from, to, contractId }) => api.get(`${suppliersBase}/${id}/evaluation-metrics?${projectQuery({ from, to, contractId })}`),
+  createEvaluation: (id, payload) => api.post(`${suppliersBase}/${id}/evaluations`, payload),
+  updateEvaluation: (id, evaluationId, payload) => api.put(`${suppliersBase}/${id}/evaluations/${evaluationId}`, payload),
+  deleteEvaluation: (id, evaluationId) => api.delete(`${suppliersBase}/${id}/evaluations/${evaluationId}`),
 }
 
 /** Cost against progress of one project (earned value) and the physical S-curve. */

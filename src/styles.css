@@ -1517,6 +1517,7 @@ margin-top: 18px;
 /* --- Cost management --- */
 .ctl-subtabs { margin-top: 16px; }
 .neg { color: #a5423c; }
+.pos { color: #2f7a4a; }
 .cost-unit { margin: 12px 2px 0; }
 .cost-health { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 14px 0; }
 .cost-index { display: flex; flex-direction: column; gap: 3px; padding: 12px 14px; border: 1px solid #e6e9f0; border-radius: 12px; background: #fafbfd; }
@@ -1646,6 +1647,7 @@ margin-top: 18px;
 
 /* --- Cost management --- */
 :root[data-mode="dark"] .neg { color: #fca5a5; }
+:root[data-mode="dark"] .pos { color: #86efac; }
 :root[data-mode="dark"] .cost-index { border-color: var(--d-border); background: var(--d-surface-2); }
 :root[data-mode="dark"] .cost-index small, :root[data-mode="dark"] .cost-index span { color: var(--d-muted); }
 :root[data-mode="dark"] .cost-index strong { color: var(--d-text); }

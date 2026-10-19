@@ -3289,6 +3289,176 @@ function SupplierFormDialog({ supplier, onClose, onSaved }) {
   )
 }
 
+/* ---- Periodic evaluation of a supplier ---- */
+
+const evaluationCriteria = [
+  ['qualityScore', 'کیفیت کار'],
+  ['timelinessScore', 'زمان‌بندی'],
+  ['complianceScore', 'پایبندی به تعهدات'],
+  ['cooperationScore', 'همکاری و پاسخ‌گویی'],
+]
+const scoreText = (value) => (value === null || value === undefined ? '—' : toPersianDigits(Number(value).toFixed(2).replace(/\.?0+$/, '')))
+const scoreClass = (value) => (value === null || value === undefined ? '' : value >= 4 ? 'pos' : value < 2.5 ? 'neg' : '')
+
+/** What the records say about a period, in one line. */
+function EvaluationMetricsLine({ metrics }) {
+  if (!metrics) return null
+  return (
+    <span>
+      نقاط عطف: {toPersianDigits(metrics.milestonesInPeriod)} سررسید، <span className={metrics.lateMilestones ? 'neg' : ''}>{toPersianDigits(metrics.lateMilestones)} با تأخیر</span>
+      {' · '}تعهدات: {toPersianDigits(metrics.obligationsInPeriod)} سررسید، <span className={metrics.missedObligations ? 'neg' : ''}>{toPersianDigits(metrics.missedObligations)} ایفانشده</span>
+    </span>
+  )
+}
+
+function SupplierEvaluationsDialog({ supplier, projects, canEvaluate, onClose, onChanged }) {
+  const [items, setItems] = useState(null)
+  const [contracts, setContracts] = useState([])
+  const [reloadKey, setReloadKey] = useState(0)
+  const [notice, setNotice] = useState(null)
+  const [form, setForm] = useState(null)
+  const reload = () => { setReloadKey((value) => value + 1); onChanged() }
+
+  useEffect(() => {
+    let cancelled = false
+    suppliersApi.evaluations(supplier.id).then((result) => {
+      if (cancelled) return
+      if (!result.isSuccess) setNotice({ type: 'error', text: PersianMessages.error(result.error) })
+      setItems(result.isSuccess ? arrayPayload(result) : [])
+    })
+    return () => { cancelled = true }
+  }, [supplier.id, reloadKey])
+
+  useEffect(() => {
+    let cancelled = false
+    suppliersApi.get(supplier.id).then((result) => { if (!cancelled && result.isSuccess) setContracts(unwrap(result)?.contracts || []) })
+    return () => { cancelled = true }
+  }, [supplier.id])
+
+  const contractTitle = (id) => {
+    const contract = contracts.find((item) => item.id === id)
+    if (!contract) return 'قرارداد'
+    const project = projects.find((item) => item.id === contract.projectId)
+    return `${contract.title}${project ? ` · ${projectDisplayName(project)}` : ''}`
+  }
+  const remove = (item) => {
+    if (!window.confirm('این ارزیابی حذف شود؟')) return
+    runAction(() => suppliersApi.deleteEvaluation(supplier.id, item.id), 'ارزیابی حذف شد.', setNotice, reload)
+  }
+
+  return (
+    <ControlDialog
+      icon={ClipboardCheck} title={`ارزیابی‌های «${supplier.name}»`} subtitle="ارزیابی دوره‌ای عملکرد بر اساس امتیاز ارزیاب و سوابق ثبت‌شده" onClose={onClose}
+      footer={<div className="ue-foot-actions"><button type="button" className="ue-cancel" onClick={onClose}>بستن</button></div>}
+    >
+      <PageNotice notice={notice} onClose={() => setNotice(null)} />
+      <section className="ue-section">
+        <div className="ue-section-head"><h4><ClipboardCheck size={16} />ارزیابی‌ها</h4>{canEvaluate && <button type="button" className="ctl-link" onClick={() => setForm({ item: null })}><Plus size={14} /> ارزیابی تازه</button>}</div>
+        {items === null ? <p className="ue-note">در حال بارگذاری...</p> : !items.length ? <p className="ue-note">این تأمین‌کننده هنوز ارزیابی نشده است.</p> : (
+          <div className="table-scroll"><table className="cost-sub">
+            <thead><tr><th>دوره</th><th>امتیاز کل</th>{evaluationCriteria.map(([, label]) => <th key={label}>{label}</th>)}<th>سوابق دوره</th><th /></tr></thead>
+            <tbody>{items.map((item) => (
+              <tr key={item.id}>
+                <td>{item.periodStartFa} تا {item.periodEndFa}<small className="ctl-sp"> {item.contractId ? contractTitle(item.contractId) : 'همه‌ی قراردادها'}</small>{item.notes && <small className="ctl-sp"> · {item.notes}</small>}</td>
+                <td><strong className={scoreClass(item.overallScore)}>{scoreText(item.overallScore)}</strong></td>
+                {evaluationCriteria.map(([key]) => <td key={key}>{toPersianDigits(item[key])}</td>)}
+                <td><small><EvaluationMetricsLine metrics={item.metrics} /></small></td>
+                <td>{canEvaluate && (
+                  <span className="row-actions">
+                    <button type="button" title="ویرایش" aria-label="ویرایش" onClick={() => setForm({ item })}><Pencil size={15} /></button>
+                    <button type="button" className="danger" title="حذف" aria-label="حذف" onClick={() => remove(item)}><Trash2 size={15} /></button>
+                  </span>
+                )}</td>
+              </tr>
+            ))}</tbody>
+          </table></div>
+        )}
+      </section>
+      {form && (
+        <EvaluationFormDialog
+          supplier={supplier} item={form.item} contracts={contracts} contractTitle={contractTitle}
+          onClose={() => setForm(null)} onSaved={(result) => { setForm(null); setNotice(result); reload() }}
+        />
+      )}
+    </ControlDialog>
+  )
+}
+
+function EvaluationFormDialog({ supplier, item, contracts, contractTitle, onClose, onSaved }) {
+  const [form, setForm] = useState({
+    periodStart: item?.periodStart || '', periodEnd: item?.periodEnd || '', contractId: item?.contractId || '', notes: item?.notes || '',
+    qualityScore: String(item?.qualityScore ?? 3), timelinessScore: String(item?.timelinessScore ?? 3),
+    complianceScore: String(item?.complianceScore ?? 3), cooperationScore: String(item?.cooperationScore ?? 3),
+  })
+  const [metrics, setMetrics] = useState(null)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const set = (key) => (event) => setForm((current) => ({ ...current, [key]: event.target.value }))
+  const overall = evaluationCriteria.reduce((sum, [key]) => sum + Number(form[key]), 0) / evaluationCriteria.length
+
+  // The facts of the period, read again whenever the period or the contract changes.
+  useEffect(() => {
+    let cancelled = false
+    setMetrics(null)
+    if (!form.periodStart || !form.periodEnd || form.periodEnd < form.periodStart) return undefined
+    suppliersApi.evaluationMetrics(supplier.id, { from: form.periodStart, to: form.periodEnd, contractId: form.contractId || null })
+      .then((result) => { if (!cancelled && result.isSuccess) setMetrics(unwrap(result)) })
+    return () => { cancelled = true }
+  }, [supplier.id, form.periodStart, form.periodEnd, form.contractId])
+
+  async function submit(event) {
+    event.preventDefault()
+    if (!form.periodStart || !form.periodEnd) { setError('ابتدا و انتهای دوره را وارد کنید.'); return }
+    if (form.periodEnd < form.periodStart) { setError('انتهای دوره نمی‌تواند قبل از ابتدای آن باشد.'); return }
+    setSaving(true); setError('')
+    const payload = {
+      periodStart: form.periodStart, periodEnd: form.periodEnd, contractId: form.contractId || null, notes: emptyToNull(form.notes.trim()),
+      qualityScore: Number(form.qualityScore), timelinessScore: Number(form.timelinessScore),
+      complianceScore: Number(form.complianceScore), cooperationScore: Number(form.cooperationScore),
+    }
+    const result = item ? await suppliersApi.updateEvaluation(supplier.id, item.id, payload) : await suppliersApi.createEvaluation(supplier.id, payload)
+    setSaving(false)
+    if (!result.isSuccess) { setError(PersianMessages.error(result.error)); return }
+    onSaved({ type: 'success', text: item ? 'ارزیابی ذخیره شد.' : 'ارزیابی ثبت شد.' })
+  }
+
+  return (
+    <ControlDialog
+      size="sm" icon={item ? Pencil : Plus} title={item ? 'ویرایش ارزیابی' : 'ارزیابی تازه'} subtitle={supplier.name} onClose={onClose}
+      footer={(
+        <>
+          {error && <span className="ue-error"><TriangleAlert size={15} />{error}</span>}
+          <div className="ue-foot-actions"><button type="button" className="ue-cancel" onClick={onClose}>انصراف</button><button type="submit" form="evaluation-form" className="ue-save" disabled={saving}>{saving ? 'در حال ذخیره...' : 'ذخیره'}</button></div>
+        </>
+      )}
+    >
+      <form id="evaluation-form" onSubmit={submit} noValidate>
+        <div className="ue-card"><div className="ue-grid">
+          <CtlField label="ابتدای دوره" required><input type="date" value={form.periodStart} onChange={set('periodStart')} autoFocus /></CtlField>
+          <CtlField label="انتهای دوره" required><input type="date" value={form.periodEnd} onChange={set('periodEnd')} /></CtlField>
+          <CtlField label="قرارداد" wide hint="خالی بماند، همه‌ی قراردادهای این تأمین‌کننده">
+            <select value={form.contractId} onChange={set('contractId')}>
+              <option value="">— همه‌ی قراردادها —</option>
+              {contracts.map((contract) => <option key={contract.id} value={contract.id}>{contractTitle(contract.id)}</option>)}
+            </select>
+          </CtlField>
+        </div>
+        <p className="ue-note">{metrics ? <>سوابق این دوره: <EvaluationMetricsLine metrics={metrics} /></> : 'با تعیین دوره، سوابق آن (نقاط عطف و تعهدات) این‌جا نشان داده می‌شود.'}</p>
+        </div>
+        <div className="ue-card ue-card--accent"><div className="ue-grid">
+          {evaluationCriteria.map(([key, label]) => (
+            <CtlField key={key} label={label} hint="۱ ضعیف تا ۵ عالی">
+              <select value={form[key]} onChange={set(key)}>{[1, 2, 3, 4, 5].map((value) => <option key={value} value={value}>{toPersianDigits(value)}</option>)}</select>
+            </CtlField>
+          ))}
+          <CtlField label="امتیاز کل" hint="میانگین چهار معیار"><input value={scoreText(Math.round(overall * 100) / 100)} readOnly /></CtlField>
+          <CtlField label="یادداشت" wide><textarea rows={2} value={form.notes} onChange={set('notes')} maxLength={2000} /></CtlField>
+        </div></div>
+      </form>
+    </ControlDialog>
+  )
+}
+
 function SuppliersPage({ data }) {
   const { can } = useAuth()
   const suppliers = useSuppliers()
@@ -3297,6 +3467,7 @@ function SuppliersPage({ data }) {
   const [search, setSearch] = useState('')
   const [open, setOpen] = useState(null)
   const [detail, setDetail] = useState(null)
+  const [evaluating, setEvaluating] = useState(null)
   const canManage = can('Contracts.ManageSuppliers')
   const projectName = (id) => projectDisplayName(data.projects.find((project) => project.id === id))
   const items = suppliers.items || []
@@ -3349,7 +3520,7 @@ function SuppliersPage({ data }) {
               </div>
               <DataState loading={suppliers.items === null} empty={!shown.length}>
                 <div className="table-scroll"><table>
-                  <thead><tr><th>تأمین‌کننده</th><th>نوع</th><th>قرارداد</th><th>مبلغ (ریال)</th><th>صورت‌حساب‌شده</th><th>پرداخت‌شده</th><th>بدهی معوق</th><th>وضعیت</th>{canManage && <th>عملیات</th>}</tr></thead>
+                  <thead><tr><th>تأمین‌کننده</th><th>نوع</th><th>قرارداد</th><th>مبلغ (ریال)</th><th>صورت‌حساب‌شده</th><th>پرداخت‌شده</th><th>بدهی معوق</th><th>امتیاز</th><th>وضعیت</th><th>عملیات</th></tr></thead>
                   <tbody>
                     {shown.map((item) => (
                       <Fragment key={item.id}>
@@ -3361,20 +3532,22 @@ function SuppliersPage({ data }) {
                           <td>{rialsText(moneyRials(item.stats?.invoicedAmount))}</td>
                           <td>{rialsText(moneyRials(item.stats?.paidAmount))}</td>
                           <td className={moneyRials(item.stats?.outstandingPayable) > 0 ? 'neg' : ''}>{rialsText(moneyRials(item.stats?.outstandingPayable))}</td>
+                          <td title={item.stats?.evaluationCount ? `آخرین ارزیابی تا ${item.stats.latestPeriodEndFa} · میانگین ${scoreText(item.stats.averageScore)} از ${toPersianDigits(item.stats.evaluationCount)} ارزیابی` : 'ارزیابی نشده'}>
+                            {item.stats?.evaluationCount ? <strong className={scoreClass(item.stats.latestScore)}>{scoreText(item.stats.latestScore)}</strong> : '—'}
+                          </td>
                           <td>{enumLabel(item.status, supplierStatusLabels)}</td>
-                          {canManage && (
-                            <td onClick={(e) => e.stopPropagation()}>
-                              <span className="row-actions">
-                                <button type="button" title="ویرایش" aria-label="ویرایش" onClick={() => setForm({ supplier: item })}><Pencil size={15} /></button>
-                                <button type="button" className="danger" title="حذف" aria-label="حذف" onClick={() => remove(item)}><Trash2 size={15} /></button>
-                              </span>
-                            </td>
-                          )}
+                          <td onClick={(e) => e.stopPropagation()}>
+                            <span className="row-actions">
+                              <button type="button" title="ارزیابی‌های دوره‌ای" aria-label="ارزیابی‌های دوره‌ای" onClick={() => setEvaluating(item)}><ClipboardCheck size={15} /></button>
+                              {canManage && <button type="button" title="ویرایش" aria-label="ویرایش" onClick={() => setForm({ supplier: item })}><Pencil size={15} /></button>}
+                              {canManage && <button type="button" className="danger" title="حذف" aria-label="حذف" onClick={() => remove(item)}><Trash2 size={15} /></button>}
+                            </span>
+                          </td>
                         </tr>
                         {open === item.id && (detail === null
-                          ? <tr className="cost-subrow"><td colSpan={canManage ? 9 : 8}>در حال بارگذاری...</td></tr>
+                          ? <tr className="cost-subrow"><td colSpan={10}>در حال بارگذاری...</td></tr>
                           : !(detail.contracts || []).length
-                            ? <tr className="cost-subrow"><td colSpan={canManage ? 9 : 8}>{detail.error || 'این تأمین‌کننده هنوز قراردادی ندارد.'}</td></tr>
+                            ? <tr className="cost-subrow"><td colSpan={10}>{detail.error || 'این تأمین‌کننده هنوز قراردادی ندارد.'}</td></tr>
                             : detail.contracts.map((contract) => (
                               <tr key={contract.id} className="cost-subrow">
                                 <td colSpan={2}>{contract.title} <small className="ctl-sp">شماره {contract.contractNumberFa} · {projectName(contract.projectId)}</small></td>
@@ -3383,7 +3556,8 @@ function SuppliersPage({ data }) {
                                 <td>{contract.approvalStatus === 2 ? rialsText(moneyRials(contract.summary?.invoicedAmount)) : '—'}</td>
                                 <td>{contract.approvalStatus === 2 ? rialsText(moneyRials(contract.summary?.paidAmount)) : '—'}</td>
                                 <td>{contract.approvalStatus === 2 ? rialsText(moneyRials(contract.summary?.outstandingPayable)) : '—'}</td>
-                                <td colSpan={canManage ? 2 : 1}><ApprovalBadge status={contract.approvalStatus} /></td>
+                                <td />
+                                <td colSpan={2}><ApprovalBadge status={contract.approvalStatus} /></td>
                               </tr>
                             )))}
                       </Fragment>
@@ -3392,6 +3566,12 @@ function SuppliersPage({ data }) {
                 </table></div>
               </DataState>
             </section>
+            {evaluating && (
+              <SupplierEvaluationsDialog
+                supplier={evaluating} projects={data.projects} canEvaluate={can('Contracts.EvaluateSuppliers')}
+                onClose={() => setEvaluating(null)} onChanged={suppliers.reload}
+              />
+            )}
             {form && (
               <SupplierFormDialog
                 supplier={form.supplier} onClose={() => setForm(null)}
