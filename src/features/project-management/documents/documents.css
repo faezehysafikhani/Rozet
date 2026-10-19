@@ -1,0 +1,30 @@
+.docs-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 16px; }
+.docs-toolbar label.docs-search { flex: 1 1 220px; display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 12px; border: 1px solid #dfe3ea; border-radius: 9px; background: #fff; color: #8b92a2; }
+.docs-toolbar label.docs-search input { flex: 1; min-width: 0; border: 0; outline: 0; font: inherit; color: #333d51; background: none; }
+.docs-toolbar select { height: 40px; padding: 0 10px; border: 1px solid #dfe3ea; border-radius: 9px; font: inherit; color: #333d51; background: #fff; }
+.docs-count { margin-inline-start: auto; color: #8e96a7; font-size: .9375rem; }
+
+.docs-title { display: flex; flex-direction: column; gap: 2px; min-width: 180px; }
+.docs-title small { color: #9ba2af; direction: ltr; text-align: right; overflow-wrap: anywhere; }
+.docs-version { display: inline-block; min-width: 26px; padding: 2px 8px; border-radius: 8px; text-align: center; color: #326fa4; background: #e7f1fa; }
+.status-pill.rejected { color: #ac4d49; background: #fbeae9; }
+.row-actions button:disabled { opacity: .4; cursor: not-allowed; }
+
+.docs-notice { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; padding: 10px 14px; border-radius: 10px; font-size: .9375rem; }
+.docs-notice.success { color: #3d855b; background: #e6f4eb; border: 1px solid #c8e4d3; }
+.docs-notice.error { color: #a5423c; background: #fbeae9; border: 1px solid #f1c9c9; }
+.docs-notice button { margin-inline-start: auto; border: 0; background: none; color: inherit; cursor: pointer; }
+
+.docs-modal { width: min(560px, 100%); }
+.docs-versions { display: flex; flex-direction: column; gap: 8px; margin: 0 0 18px; padding: 0; list-style: none; }
+.docs-versions li { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid #eceef2; border-radius: 10px; }
+.docs-versions li.current { border-color: #bcd5ee; background: #f3f8fd; }
+.docs-versions .ver-no { min-width: 34px; font-weight: 700; color: #26304a; }
+.docs-versions .ver-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.docs-versions .ver-info small { color: #929aa9; }
+.docs-versions .ver-info span { overflow-wrap: anywhere; direction: ltr; text-align: right; }
+.docs-newversion { display: grid; gap: 10px; padding-top: 14px; border-top: 1px solid #eceef2; }
+.docs-hint { margin: 0; color: #98a0ae; font-size: .8125rem; line-height: 1.8; }
+
+/* The dialogs wrap body and footer in a <form>; keep the modal's flex layout (scrollable body) intact. */
+.docs-modal form { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }

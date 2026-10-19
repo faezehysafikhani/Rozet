@@ -179,6 +179,10 @@ export const pmApi = {
     create: (payload) => api.post('/api/integrations/project-strategy-alignment', payload),
     update: (id, payload) => api.put(`/api/integrations/project-strategy-alignment/${id}`, payload),
   },
+  platform: {
+    /** { maxFileSizeKb, allowedExtensions }: the system-wide upload rules, readable by any signed-in user. */
+    uploadPolicy: () => api.get('/api/platform/upload-policy'),
+  },
   /** One-time setup of the approval chains the "submit for approval" buttons rely on (needs workflow settings access). */
   applyApprovalDefaults: () => api.post('/api/integrations/project-workflow/settings/apply-defaults'),
 }

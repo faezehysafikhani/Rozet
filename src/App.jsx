@@ -69,6 +69,7 @@ import { PersianMessages, groupsApi, identityApi, labelForModule, labelForPermis
 import { DEFAULT_TENANT_ID } from './services/config'
 import { useChat } from './hooks/useChat'
 import { useNotifications } from './hooks/useNotifications'
+import DocumentsPage from './features/project-management/documents/DocumentsPage'
 import { useDashboard } from './hooks/useDashboard'
 
 // A sidebar entry is a container for several sections, so it is shown when ANY of the
@@ -1143,23 +1144,6 @@ function ProjectPlanning({ data }) {
   )
 }
 
-function ProjectDocuments({ data }) {
-  return (
-    <>
-      <TaskPageHeader title="مدیریت مستندات" description="لیست مستندات پروژه از Project Documents API" actionNode={<CreateButton kind="document" data={data} label="آپلود سند" />}>
-        <ProjectSelector data={data} />
-      </TaskPageHeader>
-      <section className="task-panel task-table-panel">
-        <DataState loading={data.loading || data.loadingDetails} error={data.error} empty={!data.documents.length}>
-          <div className="table-scroll"><table><thead><tr><th>عنوان/توضیح</th><th>نوع</th><th>فایل</th><th>حجم</th><th>تاریخ ثبت</th><th>وضعیت تأیید</th></tr></thead><tbody>
-            {data.documents.map((item) => <tr key={item.id}><td><strong>{item.description}</strong></td><td>{enumLabel(item.documentType, documentTypeLabels)}</td><td>{item.fileName}</td><td>{formatBytes(item.sizeBytes)}</td><td>{formatDateOnly(item.registerDate)}</td><td>{enumLabel(item.approvalStatus, approvalLabels)}</td></tr>)}
-          </tbody></table></div>
-        </DataState>
-      </section>
-    </>
-  )
-}
-
 function ProjectProgress({ data }) {
   const latest = [...data.progressUpdates].sort((a, b) => String(b.registerDate).localeCompare(String(a.registerDate)))[0]
   return (
@@ -1265,7 +1249,7 @@ function TaskManagement({ active, data }) {
 
 function ProjectManagement({ active, data }) {
   if (active === 'برنامه‌ریزی پروژه') return <ProjectPlanning data={data} />
-  if (active === 'مدیریت مستندات') return <ProjectDocuments data={data} />
+  if (active === 'مدیریت مستندات') return <DocumentsPage data={data} />
   if (active === 'کنترل پیشرفت پروژه') return <ProjectProgress data={data} />
   if (active === 'مدیریت استراتژیک پروژه‌ها') return <ProjectStrategic data={data} />
   return <ProjectPlanning data={data} />
