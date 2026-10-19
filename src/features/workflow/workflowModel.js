@@ -83,6 +83,8 @@ const MESSAGES = [
 
 export function explainWorkflowError(result) {
   const text = typeof result?.error === 'string' ? result.error : ''
+  // A route the server does not have (an older Core): no problem details come with the 404.
+  if (result?.status === 404 && !result?.code) return 'این امکان در سرور فعلی نصب نیست.'
   const known = MESSAGES.find(([pattern]) => pattern.test(text))
   return known ? known[1] : explainPmError(result)
 }
@@ -113,3 +115,6 @@ export function validateRows(rows) {
   }
   return ''
 }
+
+/** When the last decision of an approval was made (ISO instant), or null. */
+export const lastDecisionAt = (instance) => [...(instance.decisions || [])].sort((a, b) => String(b.decidedAtUtc).localeCompare(String(a.decidedAtUtc)))[0]?.decidedAtUtc || null

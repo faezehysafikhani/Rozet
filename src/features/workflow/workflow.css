@@ -41,3 +41,4 @@
   .wf-edit-row { grid-template-columns: 26px 1fr; }
   .wf-edit-row > * { grid-column: span 1; }
 }
+.wf-views { margin: 0 0 12px; }

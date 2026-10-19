@@ -72,6 +72,8 @@ const VALUES = {
   FinishToStart: 'پایان به شروع', StartToStart: 'شروع به شروع', FinishToFinish: 'پایان به پایان', StartToFinish: 'شروع به پایان',
   Baseline: 'خط مبنا', ProgressInformation: 'اطلاعات پیشرفت',
   Low: 'کم', Medium: 'متوسط', High: 'زیاد', None: 'ندارد',
+  // agile task status / priority
+  ToDo: 'برای انجام', Done: 'تکمیل شده', UnderReview: 'نیازمند بررسی', Critical: 'بحرانی',
   True: 'بله', False: 'خیر',
 }
 

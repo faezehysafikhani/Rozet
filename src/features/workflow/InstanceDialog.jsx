@@ -8,7 +8,7 @@ import { explainWorkflowError, instanceStatusOf, subjectLabel } from './workflow
 const dayOf = (value) => (value ? formatJalali(String(value).slice(0, 10)) : '')
 
 /** The approval chain of one request: who each step waits for, what was decided so far, and (for a pending step) approve / reject. */
-export default function InstanceDialog({ instance, name, projectName, data, perms, canDecide, onClose, onDone }) {
+export default function InstanceDialog({ instance, name, projectName, data, perms, canDecide, readOnlyNote, onClose, onDone }) {
   const [comment, setComment] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState('')
@@ -56,7 +56,7 @@ export default function InstanceDialog({ instance, name, projectName, data, perm
             <textarea rows={3} maxLength={2000} value={comment} onChange={(e) => { setComment(e.target.value); setError('') }} />
           </Field>
         )}
-        {pending && !canDecide && <p className="docs-hint">برای تأیید یا رد، دسترسی «تأیید» یا «رد» گردش کار لازم است.</p>}
+        {pending && !canDecide && <p className="docs-hint">{readOnlyNote || 'برای تأیید یا رد، دسترسی «تأیید» یا «رد» گردش کار لازم است.'}</p>}
       </div>
       <footer className="ue-foot">
         {error && <span className="ue-error" role="alert">{error}</span>}

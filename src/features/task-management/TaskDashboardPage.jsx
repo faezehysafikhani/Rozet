@@ -1,9 +1,12 @@
 import { useMemo, useState } from 'react'
 import { CheckCircle2, CircleAlert, Clock3, ListTodo, Plus, TriangleAlert, UserRound } from 'lucide-react'
 import { useAuth } from '../../services/AuthContext'
+import { formatInstant } from '../project-management/history/historyModel'
+import { pmApi } from '../project-management/pmApi'
+import { useLoader } from '../project-management/useLoader'
 import { formatJalali, todayIso } from '../../utils/jalali'
 import TaskDialog from './TaskDialog'
-import { fmt, isDone, isOverdue, priorityOf, statusOf, taskPerms } from './taskModel'
+import { explainTaskError, fmt, isDone, isOverdue, priorityOf, statusOf, taskPerms } from './taskModel'
 import { delegationsByTask } from './taskModel'
 import { useTaskExtras, useTasksOfProjects } from './useTasks'
 import './tasks.css'
@@ -44,6 +47,10 @@ export default function TaskDashboardPage({ data }) {
   const upcoming = useMemo(() => [...open].filter((task) => task.dueDate).sort((a, b) => a.dueDate.localeCompare(b.dueDate)).slice(0, 8), [open])
   const given = extras.delegations.filter((item) => item.delegatorUserId === user?.id)
   const received = extras.delegations.filter((item) => item.delegateUserId === user?.id)
+  const [showEnded, setShowEnded] = useState(false)
+  const trail = useLoader(() => pmApi.delegations.list(false), 'delegation-trail', showEnded && perms.viewDelegations, { list: true, explain: explainTaskError })
+  const isTaskItem = (item) => item.itemType === 1 || item.itemType === 'AgileTask'
+  const shown = (showEnded ? trail.value : [...received, ...given]).filter(isTaskItem)
   const taskById = useMemo(() => Object.fromEntries(all.map((task) => [task.id, task])), [all])
   const changed = () => { reload(); extras.reload(); data.refresh() }
 
@@ -107,14 +114,27 @@ export default function TaskDashboardPage({ data }) {
 
             {(perms.viewDelegations || given.length > 0 || received.length > 0) && (
               <section className="task-panel">
-                <div className="task-panel-title"><div><h3>ارجاع‌های فعال من</h3><p>کارهایی که به دیگری سپرده‌اید یا به شما سپرده شده است</p></div></div>
-                {!given.length && !received.length ? <p className="data-state">ارجاع فعالی ندارید.</p> : (
-                  <ul className="tk-delegations">
-                    {[...received.map((item) => ({ item, text: `از ${data.userName(item.delegatorUserId)} به شما`, tone: 'doing' })), ...given.map((item) => ({ item, text: `از شما به ${data.userName(item.delegateUserId)}`, tone: 'todo' }))].filter(({ item }) => item.itemType === 1 || item.itemType === 'AgileTask').map(({ item, text, tone }) => (
-                      <li key={item.id}><UserRound size={15} /><strong>{taskById[item.itemId]?.title || 'وظیفه‌ی حذف‌شده'}</strong><span className={`status-pill ${tone}`}>{text}</span>{taskById[item.itemId] && <button type="button" onClick={() => setDialogState({ task: taskById[item.itemId] })}>جزئیات</button>}</li>
-                    ))}
-                  </ul>
-                )}
+                <div className="task-panel-title">
+                  <div><h3>{showEnded ? 'سابقه‌ی ارجاع‌های من' : 'ارجاع‌های فعال من'}</h3><p>کارهایی که به دیگری سپرده‌اید یا به شما سپرده شده است</p></div>
+                  {perms.viewDelegations && <label className="tk-toggle"><input type="checkbox" checked={showEnded} onChange={(e) => setShowEnded(e.target.checked)} />نمایش ارجاع‌های پایان‌یافته</label>}
+                </div>
+                {showEnded && trail.error ? <p className="data-state data-state--error">{trail.error}</p>
+                  : showEnded && trail.loading && !trail.value.length ? <p className="data-state">در حال دریافت سابقه...</p>
+                  : !shown.length ? <p className="data-state">{showEnded ? 'ارجاعی ثبت نشده است.' : 'ارجاع فعالی ندارید.'}</p> : (
+                    <ul className="tk-delegations">
+                      {shown.map((item) => {
+                        const mine = item.delegateUserId === user?.id
+                        const task = taskById[item.itemId]
+                        return (
+                          <li key={item.id}><UserRound size={15} /><strong>{task?.title || 'وظیفه‌ی حذف‌شده'}</strong>
+                            <span className={`status-pill ${mine ? 'doing' : 'todo'}`}>{mine ? `از ${data.userName(item.delegatorUserId)} به شما` : `از شما به ${data.userName(item.delegateUserId)}`}</span>
+                            {showEnded && <span className={`status-pill ${item.isActive ? 'doing' : 'done'}`}>{item.isActive ? 'فعال' : 'پایان‌یافته'}</span>}
+                            {showEnded && <small className="bl-note">{formatInstant(item.delegatedAtUtc).day}{item.endedAtUtc ? ` تا ${formatInstant(item.endedAtUtc).day}` : ''}</small>}
+                            {task && <button type="button" onClick={() => setDialogState({ task })}>جزئیات</button>}</li>
+                        )
+                      })}
+                    </ul>
+                  )}
               </section>
             )}
           </>

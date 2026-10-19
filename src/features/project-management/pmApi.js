@@ -161,7 +161,15 @@ export const pmApi = {
   },
 
   history: {
+    /** params: projectId, entityName, entityId, kind, userId, from, to, skip, take. */
     list: (params) => api.get(`${BASE}/history${query(params)}`),
+  },
+
+  /** The RACI matrix of a project: flat rows (item, person, role). Optional module: a server without it answers 404. */
+  raci: {
+    list: (projectId) => api.get(`${BASE}/raci${query({ projectId })}`),
+    /** Replaces the roles of one item; the answer is the project's whole matrix. entries: [{ userId, role }]. */
+    setItem: (payload) => api.put(`${BASE}/raci/items`, payload),
   },
 
   // Beyond /api/project-management: what the project calendar and the strategy screen read.
@@ -218,6 +226,8 @@ export const pmApi = {
     list: (activeOnly = true) => api.get(`${BASE}/delegations${query({ activeOnly })}`),
     create: (payload) => api.post(`${BASE}/delegations`, payload),
     end: (id) => api.post(`${BASE}/delegations/${id}/end`),
+    /** The trail of hand-overs of one item (itemType + itemId) or of a project, ended ones included. */
+    history: (params) => api.get(`${BASE}/delegations/history${query(params)}`),
   },
   /** Actions of the tenant, or of one project. */
   actions: {
@@ -281,6 +291,10 @@ export const pmApi = {
     /** Pending approvals whose current step is mine (or that I stand in for). Needs Workflow.View. */
     pending: () => api.get('/api/workflow/approval-center'),
     get: (id) => api.get(`/api/workflow/approval-center/${id}`),
+    /** What I decided a step of, most recent first. */
+    decided: (take = 50) => api.get(`/api/workflow/approval-center/decided${query({ take })}`),
+    /** What I submitted for approval, newest first. */
+    requested: (take = 50) => api.get(`/api/workflow/approval-center/requested${query({ take })}`),
     approve: (id, comment) => api.post(`/api/workflow/approval-center/${id}/approve`, { comment }),
     reject: (id, comment) => api.post(`/api/workflow/approval-center/${id}/reject`, { comment }),
     delegations: {

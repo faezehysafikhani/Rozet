@@ -1,0 +1,10 @@
+.users-table.rc-table td:first-child { display: table-cell; }
+.rc-people td:first-child { display: table-cell; }
+.rc-cell { display: inline-flex; gap: 4px; min-width: 24px; }
+.rc-person { display: inline-block; max-width: 110px; overflow: hidden; text-overflow: ellipsis; }
+.rc-gap { display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; color: #8a5a00; background: #fff4dc; }
+.rc-summary { margin-right: auto; color: #607087; }
+.rc-add { margin-bottom: 12px; }
+.rc-warn { color: #8a5a00; }
+.rc-people th { text-align: center; }
+.rc-people td:not(:first-child) { text-align: center; }

@@ -6,6 +6,7 @@ import { Field, Footer, Shell } from '../project-management/DialogParts'
 import { approvalOf } from '../project-management/documents/documentUtils'
 import { listOf, pmApi } from '../project-management/pmApi'
 import { useLoader } from '../project-management/useLoader'
+import TaskTrail from './TaskTrail'
 import { PRIORITIES, delegateTask, explainTaskError, priorityOf, sprintStatusOf, taskPayload, takeBackTask } from './taskModel'
 
 const orNull = (value) => (String(value ?? '').trim() === '' ? null : String(value).trim())
@@ -169,6 +170,7 @@ export default function TaskDialog({ task, project, projects, data, perms, myDel
               </div>
               <Checklist task={task} canEdit={perms.edit} />
               {(perms.delegate || perms.viewDelegations) && <Delegation task={task} data={data} perms={perms} myDelegations={(myDelegations || []).filter((item) => item.itemId === task.id)} onChanged={onChanged} />}
+              <TaskTrail task={task} data={data} />
             </>
           )}
         </div></div>
