@@ -71,6 +71,9 @@ import { useNotifications } from './hooks/useNotifications'
 import DocumentsPage from './features/project-management/documents/DocumentsPage'
 import CalendarPage from './features/project-management/calendar/CalendarPage'
 import ProjectsSection from './features/project-management/projects/ProjectsSection'
+import BoardPage from './features/task-management/board/BoardPage'
+import AllTasksPage from './features/task-management/AllTasksPage'
+import TaskDashboardPage from './features/task-management/TaskDashboardPage'
 import StrategyPage from './features/project-management/strategy/StrategyPage'
 import ProgressPage from './features/project-management/progress/ProgressPage'
 import PlanToolsPanel from './features/project-management/baselines/PlanToolsPanel'
@@ -1035,12 +1038,12 @@ function UnsupportedProjectArea({ title, message }) {
 }
 
 function TaskManagement({ active, data }) {
-  if (active === 'همه وظایف') return <AllTasks data={data} />
-  if (active === 'برد کانبان') return <KanbanBoard data={data} />
+  if (active === 'همه وظایف') return <AllTasksPage data={data} />
+  if (active === 'برد کانبان') return <BoardPage data={data} />
   if (active === 'جلسات و صورت‌جلسات') return <Meetings />
   if (active === 'گردش کار و الگوها') return <Workflows />
   if (active === 'ماتریس مسئولیت‌ها (RACI)') return <RaciMatrix data={data} />
-  return <TaskDashboard data={data} />
+  return <TaskDashboardPage data={data} />
 }
 
 function ProjectManagement({ active, data }) {

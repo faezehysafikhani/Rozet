@@ -169,6 +169,56 @@ export const pmApi = {
     /** Agile tasks of several projects in one call. */
     forProjects: (projectIds) => api.post(`${BASE}/agile/tasks/for-projects`, { projectIds }),
   },
+
+  /** The agile board: tasks, the four-column board, backlog, sprints, charts and status-change requests. */
+  agile: {
+    tasks: {
+      list: (projectId, sprintNumber) => api.get(`${BASE}/agile/tasks${query({ projectId, sprintNumber })}`),
+      get: (id) => api.get(`${BASE}/agile/tasks/${id}`),
+      create: (payload) => api.post(`${BASE}/agile/tasks`, payload),
+      /** Omitting storyPoints leaves the estimate alone; use `estimate` to clear it. */
+      update: (id, payload) => api.put(`${BASE}/agile/tasks/${id}`, payload),
+      remove: (id) => api.delete(`${BASE}/agile/tasks/${id}`),
+      submitForApproval: (id) => api.post(`${BASE}/agile/tasks/${id}/submit-for-approval`),
+      /** Direct move into a column (AgileTasks.Edit), before `beforeTaskId` or at the end; no approval step. */
+      move: (id, status, beforeTaskId) => api.post(`${BASE}/agile/tasks/${id}/move`, { status, beforeTaskId: beforeTaskId || null }),
+      estimate: (id, storyPoints) => api.put(`${BASE}/agile/tasks/${id}/estimate`, { storyPoints }),
+      checklist: {
+        list: (id) => api.get(`${BASE}/agile/tasks/${id}/checklist`),
+        add: (id, text) => api.post(`${BASE}/agile/tasks/${id}/checklist`, { text }),
+        update: (id, itemId, payload) => api.put(`${BASE}/agile/tasks/${id}/checklist/${itemId}`, payload),
+        remove: (id, itemId) => api.delete(`${BASE}/agile/tasks/${id}/checklist/${itemId}`),
+      },
+    },
+    board: (params) => api.get(`${BASE}/agile/board${query(params)}`),
+    backlog: (projectId) => api.get(`${BASE}/agile/backlog${query({ projectId })}`),
+    velocity: (projectId, sprints, metric) => api.get(`${BASE}/agile/velocity${query({ projectId, sprints, metric })}`),
+    sprintProgress: (projectId, metric) => api.get(`${BASE}/agile/sprint-progress${query({ projectId, metric })}`),
+    /** A column change that goes through the approval workflow (AgileStatus.Submit); applied at once when no chain is defined. */
+    statusSubmissions: {
+      list: (taskId) => api.get(`${BASE}/agile/status-submissions${query({ taskId })}`),
+      forProjects: (projectIds) => api.post(`${BASE}/agile/status-submissions/for-projects`, { projectIds }),
+      submit: (payload) => api.post(`${BASE}/agile/status-submissions`, payload),
+    },
+    sprints: {
+      list: (projectId) => api.get(`${BASE}/agile/sprints${query({ projectId })}`),
+      create: (payload) => api.post(`${BASE}/agile/sprints`, payload),
+      update: (id, payload) => api.put(`${BASE}/agile/sprints/${id}`, payload),
+      remove: (id) => api.delete(`${BASE}/agile/sprints/${id}`),
+      start: (id, payload) => api.post(`${BASE}/agile/sprints/${id}/start`, payload),
+      complete: (id, moveIncompleteToSprintId) => api.post(`${BASE}/agile/sprints/${id}/complete`, { moveIncompleteToSprintId: moveIncompleteToSprintId || null }),
+      assignTasks: (id, taskIds) => api.post(`${BASE}/agile/sprints/${id}/tasks`, { taskIds }),
+      removeTask: (id, taskId) => api.delete(`${BASE}/agile/sprints/${id}/tasks/${taskId}`),
+      burn: (id, metric) => api.get(`${BASE}/agile/sprints/${id}/burn${query({ metric })}`),
+    },
+  },
+
+  /** Hand-overs of work (ItemDelegation.*). The record is kept for the trail; the screen sets the task's responsible person itself. */
+  delegations: {
+    list: (activeOnly = true) => api.get(`${BASE}/delegations${query({ activeOnly })}`),
+    create: (payload) => api.post(`${BASE}/delegations`, payload),
+    end: (id) => api.post(`${BASE}/delegations/${id}/end`),
+  },
   /** Actions of the tenant, or of one project. */
   actions: {
     list: (projectId) => api.get(`/api/actions${query({ projectId })}`),

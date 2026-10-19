@@ -69,7 +69,7 @@ export default function ProgressPage({ data }) {
         </div>
       )}
 
-      {data.loading ? <section className="task-panel"><p className="data-state">در حال دریافت پروژه‌ها...</p></section>
+      {(data.loading && !data.projects.length) ? <section className="task-panel"><p className="data-state">در حال دریافت پروژه‌ها...</p></section>
         : data.error ? <section className="task-panel"><p className="data-state data-state--error">{data.error}</p></section>
         : !project ? <section className="task-panel"><p className="data-state">ابتدا یک پروژه ایجاد کنید؛ گزارش پیشرفت به یک پروژه تعلق دارد.</p></section>
         : (

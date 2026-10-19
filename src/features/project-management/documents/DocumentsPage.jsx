@@ -109,7 +109,7 @@ export default function DocumentsPage({ data }) {
 
       <section className="task-panel task-table-panel">
         {!canView ? <p className="data-state">برای مشاهده‌ی مستندات به دسترسی «مشاهده‌ی مستندات پروژه» نیاز دارید.</p>
-          : data.loading ? <p className="data-state">در حال دریافت پروژه‌ها...</p>
+          : (data.loading && !data.projects.length) ? <p className="data-state">در حال دریافت پروژه‌ها...</p>
           : data.error ? <p className="data-state data-state--error">{data.error}</p>
           : !project ? <p className="data-state">ابتدا یک پروژه ایجاد کنید؛ مستندات به یک پروژه تعلق دارند.</p>
           : (

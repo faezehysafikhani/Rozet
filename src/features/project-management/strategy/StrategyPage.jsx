@@ -63,9 +63,9 @@ export default function StrategyPage({ data }) {
         <div className="bl-tabs" role="tablist">
           {TABS.map(({ key, label }) => <button key={key} type="button" role="tab" aria-selected={tab === key} className={tab === key ? 'active' : ''} onClick={() => { setTab(key); setNotice(null) }}>{label}</button>)}
         </div>
-        {tab === 'portfolio' && (data.loading ? <p className="data-state">در حال دریافت پروژه‌ها...</p> : data.error ? <p className="data-state data-state--error">{data.error}</p> : <PortfolioTab data={data} perms={perms} />)}
+        {tab === 'portfolio' && ((data.loading && !data.projects.length) ? <p className="data-state">در حال دریافت پروژه‌ها...</p> : data.error ? <p className="data-state data-state--error">{data.error}</p> : <PortfolioTab data={data} perms={perms} />)}
         {tab === 'tree' && <StrategyTreeTab data={data} perms={perms} confirm={confirm} say={say} onSaved={() => setAlignmentKey((value) => value + 1)} />}
-        {needsProject && (data.loading ? <p className="data-state">در حال دریافت پروژه‌ها...</p>
+        {needsProject && ((data.loading && !data.projects.length) ? <p className="data-state">در حال دریافت پروژه‌ها...</p>
           : data.error ? <p className="data-state data-state--error">{data.error}</p>
           : !project ? <p className="data-state">ابتدا یک پروژه ایجاد کنید.</p>
           : tab === 'deliverables' ? <DeliverablesTab key={project.id} project={project} data={data} perms={perms} confirm={confirm} say={say} />
