@@ -1,0 +1,14 @@
+.hst-filters { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; margin-bottom: 14px; }
+.hst-filters label { display: flex; flex-direction: column; gap: 4px; color: #626c7e; font-size: .875rem; }
+.hst-filters select { height: 38px; min-width: 150px; padding: 0 10px; border: 1px solid #dfe3ea; border-radius: 9px; background: #fff; font: inherit; }
+.hst-list { display: flex; flex-direction: column; gap: 8px; }
+.hst-item { border: 1px solid #e4e7ed; border-radius: 10px; background: #fff; overflow: hidden; }
+.hst-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; width: 100%; padding: 10px 14px; border: 0; background: none; font: inherit; text-align: right; cursor: pointer; }
+.hst-head:disabled { cursor: default; }
+.hst-head:not(:disabled):hover { background: #f7f8fa; }
+.hst-head strong { color: #26304a; }
+.hst-who { color: #4c5568; }
+.hst-when { margin-inline-start: auto; color: #8b92a2; white-space: nowrap; }
+.hst-head small { color: #8b92a2; }
+.hst-changes { margin: 0; border-top: 1px solid #eceef2; }
+.hst-more { display: flex; justify-content: center; margin-top: 12px; }

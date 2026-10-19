@@ -44,7 +44,6 @@ import {
   Shield,
   ShieldCheck,
   Target,
-  Trash2,
   TrendingUp,
   TriangleAlert,
   Truck,
@@ -505,12 +504,7 @@ const projectStatusLabels = { 0: 'پیش‌نویس', 1: 'فعال', 2: 'متو�
 const projectTypeLabels = { 0: 'آبشاری', 1: 'چابک', Waterfall: 'آبشاری', Agile: 'چابک' }
 const agileStatusLabels = { 0: 'برای انجام', 1: 'در حال انجام', 2: 'تکمیل شده', ToDo: 'برای انجام', InProgress: 'در حال انجام', Done: 'تکمیل شده' }
 const agilePriorityLabels = { 0: 'کم', 1: 'متوسط', 2: 'بالا', 3: 'بحرانی', Low: 'کم', Medium: 'متوسط', High: 'بالا', Critical: 'بحرانی' }
-const approvalLabels = { 0: 'ثبت اولیه', 1: 'در انتظار تأیید', 2: 'تأیید شده', 3: 'رد شده', NotSubmitted: 'ثبت اولیه', PendingApproval: 'در انتظار تأیید', Approved: 'تأیید شده', Rejected: 'رد شده' }
-const performanceLabels = { 0: 'طبق برنامه', 1: 'در معرض ریسک', 2: 'عقب‌افتاده', OnTrack: 'طبق برنامه', AtRisk: 'در معرض ریسک', Behind: 'عقب‌افتاده' }
-const documentTypeLabels = { 0: 'گزارش', 1: 'نامه', 2: 'صورت‌جلسه', 3: 'سایر', Report: 'گزارش', Letter: 'نامه', MeetingMinutes: 'صورت‌جلسه', Other: 'سایر' }
-const deliverableStatusLabels = { 0: 'باز', 1: 'در حال انجام', 2: 'تحویل شده', 3: 'پذیرفته شده', Open: 'باز', InProgress: 'در حال انجام', Delivered: 'تحویل شده', Accepted: 'پذیرفته شده' }
 const stakeholderLevelLabels = { 0: 'کم', 1: 'متوسط', 2: 'زیاد', Low: 'کم', Medium: 'متوسط', High: 'زیاد' }
-const kpiTypeLabels = { 0: 'کیفی', 1: 'کمی', Quality: 'کیفی', Quantity: 'کمی' }
 const compactEnumLabel = (value, labels) => enumLabel(value, labels, value === undefined || value === null || value === '' ? '—' : String(value))
 
 function arrayPayload(result) {
@@ -542,17 +536,7 @@ function projectDisplayName(project) {
   return 'پروژه ثبت‌شده'
 }
 
-function formatBytes(value) {
-  const size = Number(value || 0)
-  if (!size) return '—'
-  if (size < 1024) return `${size.toLocaleString('fa-IR')} بایت`
-  if (size < 1024 * 1024) return `${Math.round(size / 1024).toLocaleString('fa-IR')} کیلوبایت`
-  return `${(size / 1024 / 1024).toFixed(1).replace('.', '/')} مگابایت`
-}
 
-function todayInputValue() {
-  return new Date().toISOString().slice(0, 10)
-}
 
 function emptyToNull(value) {
   return value === undefined || value === null || value === '' ? null : value
@@ -706,13 +690,8 @@ function UserSelect({ data, value, onChange, required = false }) {
 }
 
 const creationTitles = {
-  project: 'ایجاد پروژه',
   task: 'ایجاد وظیفه',
   activity: 'افزودن فعالیت برنامه‌ریزی',
-  progress: 'ثبت گزارش پیشرفت',
-  document: 'آپلود سند پروژه',
-  deliverable: 'تعریف خروجی پروژه',
-  kpi: 'تعریف KPI',
   risk: 'ثبت ریسک',
   stakeholder: 'ثبت ذینفع',
   member: 'افزودن عضو پروژه',
@@ -720,13 +699,8 @@ const creationTitles = {
 }
 
 const creationInitialState = (kind, data) => ({
-  project: { name: '', code: '', type: '1', startDate: '', endDate: '', cost: '', goal: '', description: '' },
   task: { title: '', description: '', responsibleUserId: '', approverUserId: '', dueDate: '', priority: '1', sprintNumber: '' },
   activity: { name: '', description: '', responsibleUserId: '', approverUserId: '', startDate: '', endDate: '', durationDays: '', manHours: '', weight: '1' },
-  progress: { statusDescription: '', registerDate: todayInputValue(), plannedProgress: '0', actualProgress: '0', delayReasons: '' },
-  document: { description: '', documentType: '0', file: null },
-  deliverable: { title: '', description: '', acceptanceCriteria: '', responsibleUserId: '', targetDate: '' },
-  kpi: { deliverableId: data.deliverables[0]?.id || '', type: '1', description: '', formula: '', targetValue: '' },
   risk: { description: '', probabilityScore: '1', severityScore: '1', impactScore: '1', responsePlan: '', riskOwnerUserId: '' },
   stakeholder: { name: '', isInternal: 'true', expectations: '', notes: '', power: '1', interest: '1', engagementStrategy: '', requirements: '' },
   member: { userId: '', roleTitle: '' },
@@ -742,41 +716,14 @@ function CreateProjectItemModal({ kind, data, onClose }) {
 
   const submit = async (event) => {
     event.preventDefault()
-    if (kind !== 'project' && !selectedProjectId) {
+    if (!selectedProjectId) {
       setError('ابتدا یک پروژه انتخاب کنید.')
-      return
-    }
-    if (kind === 'kpi' && !form.deliverableId) {
-      setError('برای تعریف KPI ابتدا باید یک خروجی پروژه بسازید.')
-      return
-    }
-    if (kind === 'document' && !form.file) {
-      setError('فایل سند را انتخاب کنید.')
       return
     }
     setBusy(true)
     setError('')
     const base = { tenantId: data.tenantId, projectId: selectedProjectId }
     const result = await ({
-      project: () => projectManagementApi.createProject({
-        tenantId: data.tenantId,
-        name: form.name,
-        code: form.code,
-        type: Number(form.type),
-        managerUserId: null,
-        ownerUserId: null,
-        organizationUnitId: null,
-        workCalendarId: null,
-        startDate: emptyToNull(form.startDate),
-        endDate: emptyToNull(form.endDate),
-        cost: numberOrNull(form.cost),
-        goal: emptyToNull(form.goal),
-        requirements: null,
-        constraints: null,
-        assumptions: null,
-        description: emptyToNull(form.description),
-        charter: null,
-      }),
       task: () => projectManagementApi.createAgileTask({
         ...base,
         title: form.title,
@@ -800,36 +747,6 @@ function CreateProjectItemModal({ kind, data, onClose }) {
         durationDays: numberOrNull(form.durationDays),
         manHours: numberOrNull(form.manHours),
         weight: Number(form.weight || 1),
-      }),
-      progress: () => projectManagementApi.createProgressUpdate({
-        ...base,
-        statusDescription: emptyToNull(form.statusDescription),
-        registerDate: form.registerDate,
-        plannedProgress: Number(form.plannedProgress || 0),
-        actualProgress: Number(form.actualProgress || 0),
-        delayReasons: emptyToNull(form.delayReasons),
-      }),
-      document: () => projectManagementApi.uploadDocument({
-        ...base,
-        description: form.description,
-        documentType: Number(form.documentType),
-        file: form.file,
-      }),
-      deliverable: () => projectManagementApi.createDeliverable({
-        ...base,
-        title: form.title,
-        description: emptyToNull(form.description),
-        acceptanceCriteria: emptyToNull(form.acceptanceCriteria),
-        responsibleUserId: emptyToNull(form.responsibleUserId),
-        targetDate: emptyToNull(form.targetDate),
-      }),
-      kpi: () => projectManagementApi.createKpi({
-        ...base,
-        deliverableId: form.deliverableId,
-        type: Number(form.type),
-        description: form.description,
-        formula: emptyToNull(form.formula),
-        targetValue: numberOrNull(form.targetValue),
       }),
       risk: () => projectManagementApi.createRisk({
         ...base,
@@ -880,20 +797,10 @@ function CreateProjectItemModal({ kind, data, onClose }) {
       <div className="ue-backdrop">
       <form className="ue-modal pm-modal" onSubmit={submit}>
         <header className="ue-head">
-          <div className="ue-head-title"><strong>{creationTitles[kind]}</strong><small>{kind === 'project' ? 'ثبت در Projects API' : projectDisplayName(data.selectedProject)}</small></div>
+          <div className="ue-head-title"><strong>{creationTitles[kind]}</strong><small>{projectDisplayName(data.selectedProject)}</small></div>
           <button className="ue-close" type="button" onClick={onClose}><X size={17} /></button>
         </header>
         <div className="ue-body"><div className="ue-grid">
-          {kind === 'project' && <>
-            <FormField label="نام پروژه"><input value={form.name} onChange={(event) => set('name', event.target.value)} required /></FormField>
-            <FormField label="کد پروژه"><input value={form.code} onChange={(event) => set('code', event.target.value)} required /></FormField>
-            <FormField label="نوع پروژه"><select value={form.type} onChange={(event) => set('type', event.target.value)}><option value="1">چابک</option><option value="0">آبشاری</option></select></FormField>
-            <FormField label="هزینه اولیه"><input type="number" min="0" value={form.cost} onChange={(event) => set('cost', event.target.value)} /></FormField>
-            <FormField label="تاریخ شروع"><input type="date" value={form.startDate} onChange={(event) => set('startDate', event.target.value)} /></FormField>
-            <FormField label="تاریخ پایان"><input type="date" value={form.endDate} onChange={(event) => set('endDate', event.target.value)} /></FormField>
-            <FormField label="هدف پروژه" wide><textarea rows="2" value={form.goal} onChange={(event) => set('goal', event.target.value)} /></FormField>
-            <FormField label="توضیحات" wide><textarea rows="2" value={form.description} onChange={(event) => set('description', event.target.value)} /></FormField>
-          </>}
           {kind === 'task' && <>
             <FormField label="عنوان وظیفه"><input value={form.title} onChange={(event) => set('title', event.target.value)} required /></FormField>
             <FormField label="اولویت"><select value={form.priority} onChange={(event) => set('priority', event.target.value)}><option value="0">کم</option><option value="1">متوسط</option><option value="2">بالا</option><option value="3">بحرانی</option></select></FormField>
@@ -913,32 +820,6 @@ function CreateProjectItemModal({ kind, data, onClose }) {
             <FormField label="مدت روز"><input type="number" min="0" value={form.durationDays} onChange={(event) => set('durationDays', event.target.value)} /></FormField>
             <FormField label="نفرساعت"><input type="number" min="0" step="0.1" value={form.manHours} onChange={(event) => set('manHours', event.target.value)} /></FormField>
             <FormField label="توضیحات" wide><textarea rows="2" value={form.description} onChange={(event) => set('description', event.target.value)} /></FormField>
-          </>}
-          {kind === 'progress' && <>
-            <FormField label="تاریخ ثبت"><input type="date" value={form.registerDate} onChange={(event) => set('registerDate', event.target.value)} required /></FormField>
-            <FormField label="پیشرفت برنامه‌ای"><input type="number" min="0" max="100" step="0.1" value={form.plannedProgress} onChange={(event) => set('plannedProgress', event.target.value)} required /></FormField>
-            <FormField label="پیشرفت واقعی"><input type="number" min="0" max="100" step="0.1" value={form.actualProgress} onChange={(event) => set('actualProgress', event.target.value)} required /></FormField>
-            <FormField label="شرح وضعیت" wide><textarea rows="2" value={form.statusDescription} onChange={(event) => set('statusDescription', event.target.value)} /></FormField>
-            <FormField label="دلایل تأخیر" wide><textarea rows="2" value={form.delayReasons} onChange={(event) => set('delayReasons', event.target.value)} /></FormField>
-          </>}
-          {kind === 'document' && <>
-            <FormField label="نوع سند"><select value={form.documentType} onChange={(event) => set('documentType', event.target.value)}><option value="0">گزارش</option><option value="1">نامه</option><option value="2">صورت‌جلسه</option><option value="3">سایر</option></select></FormField>
-            <FormField label="فایل"><input type="file" onChange={(event) => set('file', event.target.files?.[0] || null)} required /></FormField>
-            <FormField label="توضیح سند" wide><textarea rows="2" value={form.description} onChange={(event) => set('description', event.target.value)} required /></FormField>
-          </>}
-          {kind === 'deliverable' && <>
-            <FormField label="عنوان خروجی"><input value={form.title} onChange={(event) => set('title', event.target.value)} required /></FormField>
-            <FormField label="مسئول"><UserSelect data={data} value={form.responsibleUserId} onChange={(value) => set('responsibleUserId', value)} /></FormField>
-            <FormField label="تاریخ هدف"><input type="date" value={form.targetDate} onChange={(event) => set('targetDate', event.target.value)} /></FormField>
-            <FormField label="توضیحات" wide><textarea rows="2" value={form.description} onChange={(event) => set('description', event.target.value)} /></FormField>
-            <FormField label="معیار پذیرش" wide><textarea rows="2" value={form.acceptanceCriteria} onChange={(event) => set('acceptanceCriteria', event.target.value)} /></FormField>
-          </>}
-          {kind === 'kpi' && <>
-            <FormField label="خروجی پروژه"><select value={form.deliverableId} onChange={(event) => set('deliverableId', event.target.value)} required>{data.deliverables.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}</select></FormField>
-            <FormField label="نوع KPI"><select value={form.type} onChange={(event) => set('type', event.target.value)}><option value="1">کمی</option><option value="0">کیفی</option></select></FormField>
-            <FormField label="هدف عددی"><input type="number" step="0.1" value={form.targetValue} onChange={(event) => set('targetValue', event.target.value)} /></FormField>
-            <FormField label="شرح شاخص" wide><textarea rows="2" value={form.description} onChange={(event) => set('description', event.target.value)} required /></FormField>
-            <FormField label="فرمول" wide><textarea rows="2" value={form.formula} onChange={(event) => set('formula', event.target.value)} /></FormField>
           </>}
           {kind === 'risk' && <>
             <FormField label="احتمال"><input type="number" min="1" max="5" value={form.probabilityScore} onChange={(event) => set('probabilityScore', event.target.value)} required /></FormField>
