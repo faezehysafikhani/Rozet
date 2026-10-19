@@ -75,7 +75,7 @@ import {
   RotateCcw,
 } from 'lucide-react'
 import { AuthProvider, Can, useAuth } from './services/AuthContext'
-import { PersianMessages, actionsApi, changeRequestsApi, contractsApi, costReportApi, groupsApi, identityApi, labelForModule, labelForPermission, orgChartApi, permissionsApi, platformApi, projectManagementApi, rolesApi, suppliersApi, unwrap, usersApi } from './services/api'
+import { PersianMessages, actionsApi, changeRequestsApi, contractsApi, costReportApi, groupsApi, identityApi, labelForModule, labelForPermission, orgChartApi, permissionsApi, platformApi, projectManagementApi, rolesApi, suppliersApi, unwrap, usersApi, workflowApi } from './services/api'
 import { DEFAULT_TENANT_ID } from './services/config'
 import { useChat } from './hooks/useChat'
 import { useNotifications } from './hooks/useNotifications'
@@ -3782,10 +3782,43 @@ function ChangesPage({ data }) {
   )
 }
 
+/** The Workflow approvals of some change requests, by subject id, newest first (as Workflow returns them); empty without Workflow or Workflow.View. */
+function useChangeApprovals(items) {
+  const [approvals, setApprovals] = useState({})
+  const key = (items || []).filter((item) => item.submittedAtUtc).map((item) => `${item.id}:${item.status}`).join(',')
+
+  useEffect(() => {
+    let cancelled = false
+    const ids = (items || []).filter((item) => item.submittedAtUtc).map((item) => item.id)
+    if (!ids.length) { setApprovals({}); return undefined }
+    workflowApi.forSubjects('ChangeRequest', ids).then((result) => {
+      if (cancelled) return
+      const map = {}
+      for (const instance of (result.isSuccess ? arrayPayload(result) : [])) {
+        (map[instance.subjectId] ||= []).push(instance)
+      }
+      setApprovals(map)
+    })
+    return () => { cancelled = true }
+  }, [key])
+
+  return approvals
+}
+
+/** Where a pending approval stands: the step it waits on and who is to decide. */
+const pendingStepText = (instance, userName) => {
+  if (!instance || instance.status !== 0) return null
+  const step = (instance.steps || []).find((item) => item.order === instance.currentStepOrder)
+  const who = instance.currentApproverUserId || step?.approverUserId
+  return `مرحله‌ی ${toPersianDigits(instance.currentStepOrder)} از ${toPersianDigits(instance.totalSteps)}${step?.name ? `: ${step.name}` : ''}${who ? ` · ${userName(who)}` : ''}`
+}
+
 function ChangeRequestsPanel({ data, changes, contracts, canManage, setNotice, onEdit }) {
   const [detail, setDetail] = useState(null)
   const [outcome, setOutcome] = useState(null)
   const items = changes.items || []
+  const approvals = useChangeApprovals(changes.items)
+  const latestApproval = (id) => (approvals[id] || [])[0]
   const decided = items.filter((item) => item.status === 2 || item.status === 4)
   const cost = decided.reduce((sum, item) => sum + moneyRials(item.costImpact), 0)
   const days = decided.reduce((sum, item) => sum + Number(item.scheduleImpactDays || 0), 0)
@@ -3820,7 +3853,7 @@ function ChangeRequestsPanel({ data, changes, contracts, canManage, setNotice, o
                 <td>{enumLabel(item.type, changeTypeLabels)}</td>
                 <td>{signedDays(item.scheduleImpactDays)}</td>
                 <td className={moneyRials(item.costImpact) > 0 ? 'neg' : ''}>{signedRials(moneyRials(item.costImpact))}</td>
-                <td><ChangeStatusBadge status={item.status} />{!item.hasImpactAssessment && item.status === 0 && <small className="ctl-sp neg"> بدون تحلیل اثر</small>}</td>
+                <td><ChangeStatusBadge status={item.status} />{!item.hasImpactAssessment && item.status === 0 && <small className="ctl-sp neg"> بدون تحلیل اثر</small>}{item.status === 1 && pendingStepText(latestApproval(item.id), data.userName) && <small className="ctl-sp"> {pendingStepText(latestApproval(item.id), data.userName)}</small>}</td>
                 <td><span className="row-actions">
                   <button type="button" title="جزئیات" aria-label="جزئیات" onClick={() => setDetail(item)}><Eye size={15} /></button>
                   {canManage && (item.status === 0 || item.status === 3) && <button type="button" title="ویرایش" aria-label="ویرایش" onClick={() => onEdit(item)}><Pencil size={15} /></button>}
@@ -3834,7 +3867,7 @@ function ChangeRequestsPanel({ data, changes, contracts, canManage, setNotice, o
           </table></div>
         </DataState>
       </section>
-      {detail && <ChangeRequestDetailDialog item={detail} contractTitle={contractTitle(detail.contractId)} onClose={() => setDetail(null)} />}
+      {detail && <ChangeRequestDetailDialog item={detail} approvals={[...(approvals[detail.id] || [])].reverse()} userName={data.userName} contractTitle={contractTitle(detail.contractId)} onClose={() => setDetail(null)} />}
       {outcome && (
         <ChangeOutcomeDialog
           kind={outcome.kind} item={outcome.item} onClose={() => setOutcome(null)}
@@ -3845,7 +3878,7 @@ function ChangeRequestsPanel({ data, changes, contracts, canManage, setNotice, o
   )
 }
 
-function ChangeRequestDetailDialog({ item, contractTitle, onClose }) {
+function ChangeRequestDetailDialog({ item, approvals, userName, contractTitle, onClose }) {
   const at = (value) => (value ? new Date(value).toLocaleDateString('fa-IR') : null)
   const rows = [
     ['نوع و اولویت', `${enumLabel(item.type, changeTypeLabels)} · ${enumLabel(item.priority, changePriorityLabels)}`],
@@ -3863,6 +3896,35 @@ function ChangeRequestDetailDialog({ item, contractTitle, onClose }) {
       <div className="ue-card">
         {rows.map(([label, value]) => <p key={label} className="ue-note"><strong>{label}:</strong> {value}</p>)}
       </div>
+      <section className="ue-section">
+        <div className="ue-section-head"><h4><CheckCheck size={16} />سابقه‌ی تصمیم</h4></div>
+        {!item.submittedAtUtc ? <p className="ue-note">هنوز برای تصمیم ارسال نشده است.</p>
+          : !approvals.length ? <p className="ue-note">سابقه‌ای از مسیر تأیید نیست: یا برای درخواست‌های تغییر مسیری تعریف نشده بود و با ارسال مستقیم تصمیم گرفته شد، یا دسترسی دیدن کارتابل تأیید (Workflow.View) را ندارید.</p> : (
+            <div className="table-scroll"><table className="cost-sub">
+              <thead><tr><th>مرحله</th><th>تصمیم‌گیرنده</th><th>تصمیم</th><th>تاریخ</th><th>نظر</th></tr></thead>
+              <tbody>{approvals.flatMap((instance, index) => {
+                const stepName = (order) => (instance.steps || []).find((step) => step.order === order)?.name || `مرحله‌ی ${toPersianDigits(order)}`
+                const decided = (instance.decisions || []).map((decision) => (
+                  <tr key={decision.id}>
+                    <td>{approvals.length > 1 ? `دور ${toPersianDigits(index + 1)} · ` : ''}{stepName(decision.stepOrder)}</td>
+                    <td>{userName(decision.decidedByUserId)}{decision.onBehalfOfUserId && <small className="ctl-sp"> از طرف {userName(decision.onBehalfOfUserId)}</small>}</td>
+                    <td><span className={`status-pill ${decision.approved ? 'done' : 'rejected'}`}>{decision.approved ? 'تأیید' : 'رد'}</span></td>
+                    <td>{new Date(decision.decidedAtUtc).toLocaleDateString('fa-IR')}</td>
+                    <td>{decision.comment || '—'}</td>
+                  </tr>
+                ))
+                const waiting = instance.status === 0 && (
+                  <tr key={`${instance.id}-waiting`}>
+                    <td>{approvals.length > 1 ? `دور ${toPersianDigits(index + 1)} · ` : ''}{stepName(instance.currentStepOrder)}</td>
+                    <td>{userName(instance.currentApproverUserId || (instance.steps || []).find((step) => step.order === instance.currentStepOrder)?.approverUserId)}</td>
+                    <td><span className="status-pill review">در انتظار</span></td><td>—</td><td>—</td>
+                  </tr>
+                )
+                return waiting ? [...decided, waiting] : decided
+              })}</tbody>
+            </table></div>
+          )}
+      </section>
     </ControlDialog>
   )
 }

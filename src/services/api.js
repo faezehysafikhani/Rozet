@@ -479,6 +479,14 @@ export const changeRequestsApi = {
   cancel: (id, note) => api.post(`${changeRequestsBase}/${id}/cancel`, { note }),
 }
 
+/**
+ * The approvals Workflow started for some subjects of one kind, with their steps and decisions (needs Workflow.View). An item with no
+ * approval chain configured has none: it was approved as soon as it was submitted. Instance status: InProgress = 0, Approved = 1, Rejected = 2.
+ */
+export const workflowApi = {
+  forSubjects: (subjectType, subjectIds) => api.post('/api/workflow/approval-center/for-subjects', { subjectType, subjectIds }),
+}
+
 /** Actions of a project (the Actions module), to link them to a contract as evidence. */
 export const actionsApi = {
   list: (projectId) => api.get(`/api/actions?${projectQuery({ projectId })}`),
