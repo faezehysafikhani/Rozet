@@ -1,0 +1,32 @@
+.prj-toolbar select { max-width: 190px; }
+.prj-icon { width: 40px; height: 40px; display: grid; place-items: center; border: 1px solid #dfe3ea; border-radius: 9px; color: #607087; background: #fff; cursor: pointer; }
+.prj-check { display: inline-flex; align-items: center; gap: 6px; height: 40px; color: #4c5568; font-size: .9375rem; }
+.prj-clear { border: 0; background: none; color: #a37425; font: inherit; text-decoration: underline; cursor: pointer; }
+
+.prj-row-main { cursor: pointer; }
+.prj-row-main:hover td { background: #fafbfd; }
+.prj-selected td { background: #f3f8fd !important; }
+.prj-selected td:first-child { box-shadow: inset -3px 0 0 #bd8a34; }
+.prj-dates { color: #626c7e; white-space: nowrap; line-height: 1.7; }
+.prj-progress { display: flex; flex-direction: column; gap: 3px; min-width: 110px; }
+.prj-progress > span { display: block; height: 5px; border-radius: 3px; background: #eceef2; overflow: hidden; }
+.prj-progress i { display: block; height: 100%; border-radius: 3px; }
+.prj-progress i.planned { background: #9db8dc; }
+.prj-progress i.actual { background: #3d8b65; }
+.prj-progress small { color: #8b92a2; font-size: .75rem; }
+
+.prj-modal { width: min(760px, 100%); }
+.prj-modal form { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+.prj-details { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 24px; margin: 0 0 16px; }
+.prj-row { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid #f0f1f4; }
+.prj-row dt { color: #8b92a2; }
+.prj-row dd { margin: 0; color: #26304a; text-align: left; }
+.prj-texts { display: flex; flex-direction: column; gap: 12px; margin: 0 0 16px; }
+.prj-text dt { margin-bottom: 4px; color: #4c5568; font-weight: 600; font-size: .875rem; }
+.prj-text dd { margin: 0; color: #333d51; line-height: 1.9; white-space: pre-wrap; }
+.prj-status { max-width: 260px; }
+.prj-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.prj-actions button { display: inline-flex; align-items: center; gap: 6px; height: 40px; padding: 0 16px; border: 1px solid #dfe3ea; border-radius: 9px; color: #333d51; background: #fff; font: inherit; cursor: pointer; }
+.prj-actions button:hover { background: #f4f6fb; }
+.prj-actions button.danger { color: #b3363b; border-color: #efc7c8; }
+@media (max-width: 640px) { .prj-details { grid-template-columns: 1fr; } }

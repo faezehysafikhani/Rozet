@@ -71,6 +71,7 @@ import { useChat } from './hooks/useChat'
 import { useNotifications } from './hooks/useNotifications'
 import DocumentsPage from './features/project-management/documents/DocumentsPage'
 import CalendarPage from './features/project-management/calendar/CalendarPage'
+import ProjectsSection from './features/project-management/projects/ProjectsSection'
 import { useDashboard } from './hooks/useDashboard'
 
 // A sidebar entry is a container for several sections, so it is shown when ANY of the
@@ -1101,25 +1102,17 @@ function ProjectPlanning({ data }) {
   const project = data.selectedProject
   return (
     <>
-      <TaskPageHeader title="برنامه‌ریزی پروژه" description="فهرست پروژه‌ها و فعالیت‌های WBS متصل به Core" actionNode={<CreateButton kind="project" data={data} label="ایجاد پروژه" />}>
-        <ProjectSelector data={data} />
-      </TaskPageHeader>
-      <DataState loading={data.loading} error={data.error} empty={!data.projects.length}>
-        <section className="stats-grid project-summary-grid">
-          <article className="stat-card"><span>پروژه‌های ثبت‌شده</span><div className="stat-value"><strong>{data.projectTotal.toLocaleString('fa-IR')}</strong><small>پروژه</small></div><p>از Projects API</p></article>
-          <article className="stat-card"><span>وضعیت پروژه منتخب</span><div className="stat-value"><strong>{enumLabel(project?.status, projectStatusLabels)}</strong></div><p>{enumLabel(project?.type, projectTypeLabels)}</p></article>
-          <article className="stat-card"><span>بازه زمانی</span><div className="stat-value"><strong>{formatDateOnly(project?.startDate)}</strong></div><p>تا {formatDateOnly(project?.endDate)}</p></article>
-          <article className="stat-card"><span>بودجه/هزینه</span><div className="stat-value"><strong>{project?.cost ? Number(project.cost).toLocaleString('fa-IR') : '—'}</strong></div><p>فیلد کلی Cost در Core</p></article>
-        </section>
+      <ProjectsSection data={data} />
+      {project && (
         <section className="task-panel task-table-panel">
-          <div className="task-panel-title"><div><h3>فعالیت‌های برنامه</h3><p>داده‌های Waterfall Activities برای پروژه منتخب</p></div><CreateButton kind="activity" data={data} label="افزودن فعالیت" /></div>
+          <div className="task-panel-title"><div><h3>فعالیت‌های برنامه — {projectDisplayName(project)}</h3><p>داده‌های Waterfall Activities برای پروژه منتخب (روی ردیف پروژه کلیک کنید)</p></div><CreateButton kind="activity" data={data} label="افزودن فعالیت" /></div>
           <DataState loading={data.loadingDetails} empty={!data.activities.length}>
             <div className="table-scroll"><table><thead><tr><th>فعالیت</th><th>مسئول</th><th>شروع</th><th>پایان</th><th>مدت</th><th>پیشرفت برنامه‌ای</th><th>پیشرفت واقعی</th></tr></thead><tbody>
               {data.activities.map((item) => <tr key={item.id}><td><strong>{item.name}</strong></td><td>{data.userName(item.responsibleUserId)}</td><td>{formatDateOnly(item.startDate)}</td><td>{formatDateOnly(item.endDate)}</td><td>{item.durationDays || '—'}</td><td>{Number(item.plannedProgress || 0).toLocaleString('fa-IR')}٪</td><td>{Number(item.actualProgress || 0).toLocaleString('fa-IR')}٪</td></tr>)}
             </tbody></table></div>
           </DataState>
         </section>
-      </DataState>
+      )}
     </>
   )
 }

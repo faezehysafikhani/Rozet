@@ -28,9 +28,16 @@ const PM_ERRORS = {
  * The Persian message for a failed API result. When the Core's own text says more than the code
  * (a 409 that lists what still depends on a project, a validation detail) it is kept after the message.
  */
-export function explainPmError(result) {
+export function explainPmError(result, overrides = {}) {
   if (!result) return PersianMessages.error('')
   if (result.status === 403) return PM_ERRORS.forbidden
+  // "The weights of the activities add up to 80, not 100": keep the total, say the rest in Persian.
+  if (result.code === 'project.schedule_weights_not_100') {
+    const total = /add up to ([\d.]+)/.exec(String(result.error))?.[1]
+    return `مجموع وزن فعالیت‌های برنامه‌ی زمان‌بندی${total ? ` ${Number(total).toLocaleString('fa-IR')}` : ''} است، نه ۱۰۰؛ پیش از ارسال پروژه وزن‌ها را در برنامه‌ی زمان‌بندی اصلاح کنید.`
+  }
+  // A caller that knows what a generic code means in its own screen can say so (e.g. conflict = duplicate code).
+  if (overrides[result.code]) return overrides[result.code]
   const known = PM_ERRORS[result.code]
   if (!known) return PersianMessages.error(result.error)
   const detail = typeof result.error === 'string' ? result.error.trim() : ''

@@ -36,6 +36,11 @@ export const pmApi = {
     progress: (payload) => api.post(`${BASE}/projects/progress`, payload),
   },
 
+  /** Projects the caller may see (visibility rules of the organisation applied). Needs Portfolio.View. */
+  portfolio: {
+    projects: (params) => api.get(`/api/portfolio/projects${query(params)}`),
+  },
+
   waterfall: {
     activities: {
       list: (projectId) => api.get(`${BASE}/waterfall/activities${query({ projectId })}`),
@@ -158,6 +163,11 @@ export const pmApi = {
   },
   actions: {
     list: (projectId) => api.get(`/api/actions${query({ projectId })}`),
+  },
+  units: {
+    /** Active organisation units (organization_units.view); creating one needs organization_units.create. */
+    list: () => api.get('/api/organization/units?activeOnly=true'),
+    create: (tenantId, name) => api.post('/api/organization/units', { tenantId, name }),
   },
   calendars: {
     list: () => api.get('/api/calendar/work-calendars'),
