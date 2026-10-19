@@ -72,6 +72,7 @@ import { useNotifications } from './hooks/useNotifications'
 import DocumentsPage from './features/project-management/documents/DocumentsPage'
 import CalendarPage from './features/project-management/calendar/CalendarPage'
 import ProjectsSection from './features/project-management/projects/ProjectsSection'
+import StrategyPage from './features/project-management/strategy/StrategyPage'
 import ProgressPage from './features/project-management/progress/ProgressPage'
 import PlanToolsPanel from './features/project-management/baselines/PlanToolsPanel'
 import SchedulePanel from './features/project-management/schedule/SchedulePanel'
@@ -1112,32 +1113,6 @@ function ProjectPlanning({ data }) {
   )
 }
 
-function ProjectStrategic({ data }) {
-  return (
-    <>
-      <TaskPageHeader title="مدیریت استراتژیک پروژه‌ها" description="نمای خلاصه پروژه، خروجی‌ها و KPIهای موجود در Core" actionNode={<CreateButton kind="deliverable" data={data} label="تعریف خروجی" />}>
-        <ProjectSelector data={data} />
-      </TaskPageHeader>
-      <DataState loading={data.loading || data.loadingDetails} error={data.error} empty={!data.selectedProject}>
-        <section className="task-dashboard-grid">
-          <div className="task-panel task-table-panel">
-            <div className="task-panel-title"><div><h3>خروجی‌های پروژه</h3><p>Deliverables API</p></div><CreateButton kind="deliverable" data={data} label="تعریف خروجی" /></div>
-            <DataState loading={data.loadingDetails} empty={!data.deliverables.length}>
-              <div className="table-scroll"><table><thead><tr><th>خروجی</th><th>وضعیت</th><th>مسئول</th></tr></thead><tbody>{data.deliverables.map((item) => <tr key={item.id}><td><strong>{item.title || item.name || item.description || item.id}</strong></td><td>{compactEnumLabel(item.status, deliverableStatusLabels)}</td><td>{data.userName(item.responsibleUserId)}</td></tr>)}</tbody></table></div>
-            </DataState>
-          </div>
-          <div className="task-panel task-table-panel">
-            <div className="task-panel-title"><div><h3>KPIها</h3><p>KPI API</p></div><CreateButton kind="kpi" data={data} label="تعریف KPI" /></div>
-            <DataState loading={data.loadingDetails} empty={!data.kpis.length}>
-              <div className="table-scroll"><table><thead><tr><th>شاخص</th><th>نوع</th><th>هدف</th><th>فرمول</th></tr></thead><tbody>{data.kpis.map((item) => <tr key={item.id}><td><strong>{item.description || item.name || item.title || item.id}</strong></td><td>{compactEnumLabel(item.type, kpiTypeLabels)}</td><td>{item.targetValue ?? item.target ?? '—'}</td><td>{item.formula || '—'}</td></tr>)}</tbody></table></div>
-            </DataState>
-          </div>
-        </section>
-      </DataState>
-    </>
-  )
-}
-
 function Meetings() {
   const meetings = [
     ['جلسه هفتگی کنترل پروژه', 'پروژه توسعه مرکز تجاری', 'امروز، ساعت ۱۴:۰۰', 'اتاق جلسات شماره ۲', 'در پیش رو'],
@@ -1192,7 +1167,7 @@ function ProjectManagement({ active, data }) {
   if (active === 'تقویم پروژه') return <CalendarPage data={data} />
   if (active === 'مدیریت مستندات') return <DocumentsPage data={data} />
   if (active === 'کنترل پیشرفت پروژه') return <ProgressPage data={data} />
-  if (active === 'مدیریت استراتژیک پروژه‌ها') return <ProjectStrategic data={data} />
+  if (active === 'مدیریت استراتژیک پروژه‌ها') return <StrategyPage data={data} />
   return <ProjectPlanning data={data} />
 }
 
