@@ -262,6 +262,28 @@ export const pmApi = {
     create: (payload) => api.post('/api/integrations/project-strategy-alignment', payload),
     update: (id, payload) => api.put(`/api/integrations/project-strategy-alignment/${id}`, payload),
   },
+  /** Approvals: the approval center (what waits for me), delegation of approvals, and the approval chain each kind of item follows. */
+  workflow: {
+    /** Pending approvals whose current step is mine (or that I stand in for). Needs Workflow.View. */
+    pending: () => api.get('/api/workflow/approval-center'),
+    get: (id) => api.get(`/api/workflow/approval-center/${id}`),
+    approve: (id, comment) => api.post(`/api/workflow/approval-center/${id}/approve`, { comment }),
+    reject: (id, comment) => api.post(`/api/workflow/approval-center/${id}/reject`, { comment }),
+    delegations: {
+      list: () => api.get('/api/workflow/delegations'),
+      create: (payload) => api.post('/api/workflow/delegations', payload),
+      revoke: (id) => api.post(`/api/workflow/delegations/${id}/revoke`),
+    },
+    settings: {
+      /** One entry per group of items; with a project, that project's own chain where it has one. */
+      get: (projectId) => api.get(`/api/integrations/project-workflow/settings${query({ projectId })}`),
+      /** steps null = the standard chain; [] = no approval needed. */
+      saveGeneral: (groupKey, steps) => api.put(`/api/integrations/project-workflow/settings/${groupKey}`, { steps }),
+      saveProject: (projectId, groupKey, steps) => api.put(`/api/integrations/project-workflow/projects/${projectId}/settings/${groupKey}`, { steps }),
+      resetProject: (projectId, groupKey) => api.delete(`/api/integrations/project-workflow/projects/${projectId}/settings/${groupKey}`),
+      applyDefaults: () => api.post('/api/integrations/project-workflow/settings/apply-defaults'),
+    },
+  },
   platform: {
     /** { maxFileSizeKb, allowedExtensions }: the system-wide upload rules, readable by any signed-in user. */
     uploadPolicy: () => api.get('/api/platform/upload-policy'),
