@@ -2225,12 +2225,12 @@ const healthClass = { 0: 'neutral', 1: 'green', 2: 'yellow', 3: 'red' }
 
 const rialsText = (value) => (value === undefined || value === null || Number.isNaN(Number(value)) ? '—' : Math.round(Number(value)).toLocaleString('fa-IR'))
 const moneyRials = (money) => Number(money?.rials ?? 0)
-// Axis labels: 1.5 میلیارد instead of a ten-digit number.
+// Axis labels in a left-to-right chart: 1.5B / 250M instead of a ten-digit number.
 const compactRials = (value) => {
   const n = Number(value) || 0
-  if (n >= 1e9) return `${toPersianDigits(Math.round(n / 1e8) / 10)} م‌د`
-  if (n >= 1e6) return `${toPersianDigits(Math.round(n / 1e5) / 10)} م`
-  return toPersianDigits(Math.round(n))
+  if (n >= 1e9) return `${Math.round(n / 1e8) / 10}B`
+  if (n >= 1e6) return `${Math.round(n / 1e5) / 10}M`
+  return String(Math.round(n))
 }
 const percentText = (value) => (value === undefined || value === null ? '—' : `${Number(value).toLocaleString('fa-IR', { maximumFractionDigits: 1 })}٪`)
 const indexText = (value) => (value === undefined || value === null ? '—' : Number(value).toLocaleString('fa-IR', { maximumFractionDigits: 2 }))
