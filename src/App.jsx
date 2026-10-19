@@ -2225,6 +2225,13 @@ const healthClass = { 0: 'neutral', 1: 'green', 2: 'yellow', 3: 'red' }
 
 const rialsText = (value) => (value === undefined || value === null || Number.isNaN(Number(value)) ? '—' : Math.round(Number(value)).toLocaleString('fa-IR'))
 const moneyRials = (money) => Number(money?.rials ?? 0)
+// Axis labels: 1.5 میلیارد instead of a ten-digit number.
+const compactRials = (value) => {
+  const n = Number(value) || 0
+  if (n >= 1e9) return `${toPersianDigits(Math.round(n / 1e8) / 10)} م‌د`
+  if (n >= 1e6) return `${toPersianDigits(Math.round(n / 1e5) / 10)} م`
+  return toPersianDigits(Math.round(n))
+}
 const percentText = (value) => (value === undefined || value === null ? '—' : `${Number(value).toLocaleString('fa-IR', { maximumFractionDigits: 1 })}٪`)
 const indexText = (value) => (value === undefined || value === null ? '—' : Number(value).toLocaleString('fa-IR', { maximumFractionDigits: 2 }))
 const jalaliText = (iso) => (iso ? new Date(`${String(iso).slice(0, 10)}T00:00:00`).toLocaleDateString('fa-IR') : '—')
@@ -2338,24 +2345,24 @@ function CostPage({ data }) {
 /* ---- Overview: money, health indexes, physical against financial progress, S-curve ---- */
 
 function CostOverview({ data, contracts }) {
-  const { can } = useAuth()
   const projectId = data.selectedProjectId
   const [summary, setSummary] = useState(null)
   const [perf, setPerf] = useState(undefined)
   const [curve, setCurve] = useState(undefined)
-  const canAnalyse = can('Reporting.ViewAll')
+  const [costCurve, setCostCurve] = useState(undefined)
 
   useEffect(() => {
     let cancelled = false
-    setSummary(null); setPerf(undefined); setCurve(undefined)
+    setSummary(null); setPerf(undefined); setCurve(undefined); setCostCurve(undefined)
     if (!projectId) return undefined
     contractsApi.summary(projectId).then((result) => { if (!cancelled) setSummary(unwrap(result)) })
-    if (canAnalyse) costReportApi.performance(projectId).then((result) => { if (!cancelled) setPerf(result.isSuccess ? unwrap(result) : null) })
-    else setPerf(null)
+    // The server decides who may see a project's indexes (everyone for ViewAll; a team member with Contracts.View), so just ask.
+    costReportApi.performance(projectId).then((result) => { if (!cancelled) setPerf(result.isSuccess ? unwrap(result) : null) })
+    costReportApi.costCurve(projectId).then((result) => { if (!cancelled) setCostCurve(result.isSuccess ? unwrap(result) : null) })
     costReportApi.sCurve(projectId).then((result) => { if (!cancelled) setCurve(result.isSuccess ? unwrap(result) : null) })
     // Contract data changing (an approval, a payment) changes the figures, so reload with the list.
     return () => { cancelled = true }
-  }, [projectId, canAnalyse, contracts.items])
+  }, [projectId, contracts.items])
 
   const budget = Number(data.selectedProject?.cost ?? 0)
   const items = contracts.items || []
@@ -2409,7 +2416,7 @@ function CostOverview({ data, contracts }) {
         { icon: Clock3, tone: 'navy', label: 'در انتظار تأیید', value: toPersianDigits(pendingContracts + pendingAddenda.length + pendingInvoices.length), note: `${toPersianDigits(pendingInvoices.length)} صورت‌وضعیت · ${toPersianDigits(pendingAddenda.length)} الحاقیه · ${toPersianDigits(pendingContracts)} قرارداد` },
         { icon: Pencil, tone: 'green', label: 'ثبت‌شده و ارسال‌نشده', value: toPersianDigits(draftContracts), note: 'پیش‌نویس یا ردشده' },
       ]} />
-      <p className="ue-note cost-unit">مبلغ‌های قراردادی به ریال است. بودجه‌ی پروژه هر واحدی که هنگام ثبت پروژه وارد شده (ریال یا تومان) نمایش داده می‌شود؛ اگر با ریال نمی‌خواند، شاخص‌های هزینه را با احتیاط بخوانید.</p>
+      <p className="ue-note cost-unit">همه‌ی مبلغ‌ها به ریال است. هزینه‌ی (بودجه‌ی) پروژه را هم هنگام ثبت پروژه به ریال وارد کنید، وگرنه شاخص‌های هزینه (CPI و ...) درست نمی‌شوند.</p>
       {(summary?.overInvoicedContracts ?? 0) > 0 && (
         <div className="users-notice error ctl-notice" role="status"><CircleAlert size={16} /><span>{toPersianDigits(summary.overInvoicedContracts)} قرارداد بیش از مبلغ خود صورت‌حساب شده است.</span></div>
       )}
@@ -2419,7 +2426,7 @@ function CostOverview({ data, contracts }) {
           <div className="task-panel-title"><div><h3>زمان و هزینه نسبت به پیشرفت</h3><p>ارزش کسب‌شده: پول را با کار انجام‌شده مقایسه می‌کند.</p></div><button type="button" className="ctl-link" onClick={exportOverview}><Download size={14} /> خروجی Excel</button></div>
           {perf === undefined ? <p className="data-state">در حال محاسبه...</p> : perf === null ? (
             <p className="ue-note">
-              {canAnalyse ? 'شاخص‌های زمان و هزینه برای این پروژه در دسترس نیست (پروژه باید تأییدشده باشد).' : 'برای دیدن شاخص‌های زمان و هزینه (SPI و CPI) دسترسی «مشاهده‌ی گزارش‌های کل سازمان» (Reporting.ViewAll) لازم است. اعداد قراردادی بالا همچنان درست‌اند.'}
+              شاخص‌های زمان و هزینه برای این پروژه در دسترس نیست: پروژه باید تأییدشده باشد و شما باید عضو تیم آن باشید (یا دسترسی «مشاهده‌ی گزارش‌های کل سازمان» داشته باشید). اعداد قراردادی بالا همچنان درست‌اند.
             </p>
           ) : (
             <>
@@ -2463,9 +2470,49 @@ function CostOverview({ data, contracts }) {
           {budget <= 0 && <p className="ue-note">بودجه‌ی پروژه ثبت نشده است، پس پیشرفت مالی محاسبه نمی‌شود.</p>}
           <h4 className="cost-subtitle">منحنی S پیشرفت</h4>
           {curve === undefined ? <p className="data-state">در حال دریافت...</p> : <SCurveChart curve={curve} />}
+          <h4 className="cost-subtitle">منحنی S هزینه (PV، EV و AC)</h4>
+          {costCurve === undefined ? <p className="data-state">در حال دریافت...</p> : <CostCurveChart curve={costCurve} />}
         </div>
       </section>
     </>
+  )
+}
+
+/** The money S-curve: planned value, earned value and actual cost (approved invoices) over time. */
+function CostCurveChart({ curve }) {
+  const planned = curve?.plannedValue || []
+  const earned = curve?.earnedValue || []
+  const actual = curve?.actualCost || []
+  if (!curve || (planned.length < 2 && actual.length < 1)) return <p className="ue-note">برای رسم منحنی هزینه، پروژه باید بودجه و برنامه‌ی زمان‌بندی داشته باشد (یا صورت‌حساب تأییدشده‌ای ثبت شده باشد).</p>
+  const width = 560; const height = 230
+  const pad = { left: 62, right: 12, top: 12, bottom: 30 }
+  const start = new Date(curve.projectStart).getTime()
+  const end = Math.max(new Date(curve.projectFinish).getTime(), new Date(curve.today).getTime())
+  const top = Math.max(Number(curve.budgetAtCompletion) || 0, ...planned.map((p) => p.amount), ...earned.map((p) => p.amount), ...actual.map((p) => p.amount), 1)
+  const x = (date) => pad.left + ((new Date(date).getTime() - start) / (end - start || 1)) * (width - pad.left - pad.right)
+  const y = (value) => height - pad.bottom - (Number(value) / top) * (height - pad.top - pad.bottom)
+  const line = (points) => points.map((point) => `${x(point.date).toFixed(1)},${y(point.amount).toFixed(1)}`).join(' ')
+  const todayMs = new Date(curve.today).getTime()
+  const todayX = todayMs >= start && todayMs <= end ? x(curve.today) : null
+  return (
+    <div className="cost-chart" dir="ltr">
+      <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="منحنی S هزینه">
+        {[0, 0.25, 0.5, 0.75, 1].map((tick) => (
+          <g key={tick}><line x1={pad.left} x2={width - pad.right} y1={y(top * tick)} y2={y(top * tick)} className="grid" /><text x={pad.left - 6} y={y(top * tick) + 4} textAnchor="end">{compactRials(top * tick)}</text></g>
+        ))}
+        {planned.length > 1 && <polyline points={line(planned)} className="planned" fill="none" />}
+        {earned.length > 1 && <polyline points={line(earned)} className="actual" fill="none" />}
+        {earned.map((point) => <circle key={point.date} cx={x(point.date)} cy={y(point.amount)} r="3" className="actual-dot" />)}
+        {actual.length > 1 && <polyline points={line(actual)} className="cost-ac" fill="none" />}
+        {todayX !== null && <g><line x1={todayX} x2={todayX} y1={pad.top} y2={height - pad.bottom} className="today" /><text x={todayX} y={pad.top + 9} textAnchor="middle">امروز</text></g>}
+        <text x={pad.left} y={height - 8} textAnchor="start">{jalaliText(curve.projectStart)}</text>
+        <text x={width - pad.right} y={height - 8} textAnchor="end">{jalaliText(curve.projectFinish)}</text>
+      </svg>
+      <div className="cost-legend" dir="rtl">
+        <span><i className="planned" />ارزش برنامه‌ای (PV)</span><span><i className="actual" />ارزش کسب‌شده (EV)</span><span><i className="ac" />هزینه‌ی واقعی (AC)</span>
+        {!curve.contractsAvailable && <em>ماژول قراردادها فعال نیست؛ هزینه‌ی واقعی ندارد</em>}
+      </div>
+    </div>
   )
 }
 

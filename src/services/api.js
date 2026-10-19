@@ -429,9 +429,13 @@ export const contractsApi = {
 
 /** Cost against progress of one project (earned value) and the physical S-curve. */
 export const costReportApi = {
-  // Needs Reporting.ViewAll. Budget = Project.Cost, actual cost = approved invoices; indexes are null when they cannot be worked out.
+  // Reporting.ViewAll sees any project; others see the projects they are a team member of, and need Contracts.View.
+  // Budget = Project.Cost, actual cost = approved invoices; indexes are null when they cannot be worked out.
   performance: (projectId, asOf) =>
     api.get(`/api/reporting/projects/${projectId}/performance${asOf ? `?asOf=${asOf}` : ''}`),
+  // PV / EV / AC over time (money), same access as performance.
+  costCurve: (projectId, stepDays) =>
+    api.get(`/api/reporting/projects/${projectId}/cost-curve${stepDays ? `?stepDays=${stepDays}` : ''}`),
   sCurve: (projectId, stepDays) =>
     api.get(`/api/project-management/waterfall/s-curve?${projectQuery({ projectId, stepDays })}`),
 }

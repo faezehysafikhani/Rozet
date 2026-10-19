@@ -1549,12 +1549,14 @@ margin-top: 18px;
 .cost-chart .planned { stroke: #9db4d8; stroke-width: 2.2; stroke-dasharray: 5 4; }
 .cost-chart .actual { stroke: var(--accent-mid); stroke-width: 2.4; }
 .cost-chart .actual-dot { fill: var(--accent-mid); }
+.cost-chart .cost-ac { stroke: #c0453a; stroke-width: 2.4; }
 .cost-chart .today { stroke: #c9953a; stroke-width: 1.2; stroke-dasharray: 3 3; }
 .cost-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; margin-top: 6px; font-size: .85rem; color: #5b6579; }
 .cost-legend span { display: inline-flex; align-items: center; gap: 6px; }
 .cost-legend i { display: inline-block; width: 16px; height: 0; border-top: 3px solid; }
 .cost-legend i.planned { border-color: #9db4d8; border-top-style: dashed; }
 .cost-legend i.actual { border-color: var(--accent-mid); }
+.cost-legend i.ac { border-color: #c0453a; }
 .cost-legend em { font-style: normal; color: #98a0ae; }
 .cost-mini { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; margin-bottom: 12px; }
 .cost-mini > div { padding: 10px 12px; border: 1px solid #e6e9f0; border-radius: 10px; background: #fafbfd; }
