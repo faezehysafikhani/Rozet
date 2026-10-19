@@ -99,6 +99,55 @@ export async function apiRequest(endpoint, options = {}, { anonymous = false, re
   }
 }
 
+export async function apiBlobRequest(endpoint, options = {}, { anonymous = false, retry = true } = {}) {
+  try {
+    let token = anonymous ? null : AuthTokenStore.getAccessToken()
+
+    if (!anonymous && token && AuthTokenStore.isExpired() && retry) {
+      if (await refreshAccessToken()) token = AuthTokenStore.getAccessToken()
+    }
+
+    let response = await rawRequest(endpoint, options, token)
+
+    if (!anonymous && response.status === 401 && retry) {
+      if (await refreshAccessToken()) {
+        response = await rawRequest(endpoint, options, AuthTokenStore.getAccessToken())
+      }
+    }
+
+    if (response.status === 401 && !anonymous) {
+      AuthTokenStore.clear()
+      if (onUnauthorized) onUnauthorized()
+      return { isSuccess: false, error: 'unauthorized', status: 401 }
+    }
+
+    if (!response.ok) {
+      let error = `خطای سرور (${response.status})`
+      let code = null
+      const text = await response.text().catch(() => '')
+
+      try {
+        const body = JSON.parse(text)
+        const raw = body.detail || body.error || body.message || body.title
+        error = (raw && typeof raw === 'object' ? raw.message || raw.code : raw) || error
+        code = (body.error && typeof body.error === 'object' ? body.error.code : body.title) || null
+      } catch {
+        if (text) error = text
+      }
+
+      return { isSuccess: false, error, code, status: response.status }
+    }
+
+    return { isSuccess: true, value: await response.blob(), status: response.status }
+  } catch (err) {
+    return {
+      isSuccess: false,
+      error: err?.message || 'خطا در برقراری ارتباط با سرور',
+      status: 0,
+    }
+  }
+}
+
 const body = (value) => (value !== undefined ? JSON.stringify(value) : undefined)
 
 export const api = {
@@ -124,6 +173,18 @@ export const knowledgeApi = {
     const suffix = query.toString()
     return api.get(`/api/knowledge/documents/${suffix ? `?${suffix}` : ''}`)
   },
+
+  get: (documentId) =>
+    api.get(`/api/knowledge/documents/${documentId}`),
+
+  update: (documentId, payload) =>
+    api.put(`/api/knowledge/documents/${documentId}`, payload),
+
+  remove: (documentId) =>
+    api.delete(`/api/knowledge/documents/${documentId}`),
+
+  download: (documentId) =>
+    apiBlobRequest(`/api/knowledge/documents/${documentId}/download`),
 
   upload: ({ file, title, description, documentType }) => {
     const query = new URLSearchParams({
@@ -248,6 +309,62 @@ export const reportingApi = {
   // Organisation-wide summary (Reporting.ViewAll).
   summary: (organizationUnitId) =>
     api.get(`/api/reporting/summary${organizationUnitId ? `?organizationUnitId=${organizationUnitId}` : ''}`),
+
+  // JSON endpoints used by the interactive reporting dashboard.
+  unitPerformance: ({ level = 2, asOf } = {}) => {
+    const query = new URLSearchParams({ level: String(level) })
+    if (asOf) query.set('asOf', asOf)
+    return api.get(`/api/reporting/units/performance?${query.toString()}`)
+  },
+
+  unitStatusMatrix: (level = 2) =>
+    api.get(`/api/reporting/units/status-matrix?level=${encodeURIComponent(level)}`),
+
+  projectManagers: ({ asOf } = {}) => {
+    const query = new URLSearchParams()
+    if (asOf) query.set('asOf', asOf)
+    const suffix = query.toString() ? `?${query.toString()}` : ''
+    return api.get(`/api/reporting/project-managers/evaluation${suffix}`)
+  },
+
+  strategyAlignmentMatrix: () =>
+    api.get('/api/reporting/strategy-alignment-matrix'),
+
+  healthBoard: ({ asOf } = {}) => {
+    const query = new URLSearchParams()
+    if (asOf) query.set('asOf', asOf)
+    const suffix = query.toString() ? `?${query.toString()}` : ''
+    return api.get(`/api/reporting/health${suffix}`)
+  },
+
+  attentionBoard: ({ asOf } = {}) => {
+    const query = new URLSearchParams()
+    if (asOf) query.set('asOf', asOf)
+    const suffix = query.toString() ? `?${query.toString()}` : ''
+    return api.get(`/api/reporting/attention${suffix}`)
+  },
+
+  riskOverview: ({ asOf } = {}) => {
+    const query = new URLSearchParams()
+    if (asOf) query.set('asOf', asOf)
+    const suffix = query.toString() ? `?${query.toString()}` : ''
+    return api.get(`/api/reporting/risks/overview${suffix}`)
+  },
+
+  kpiOverview: ({ asOf } = {}) => {
+    const query = new URLSearchParams()
+    if (asOf) query.set('asOf', asOf)
+    const suffix = query.toString() ? `?${query.toString()}` : ''
+    return api.get(`/api/reporting/kpis/overview${suffix}`)
+  },
+  // Excel and print-ready HTML exports (the browser can print HTML to PDF).
+  exportFile: (report, { format = 'xlsx', level = 2, asOf } = {}) => {
+    const query = new URLSearchParams({ format, level: String(level) })
+    if (asOf) query.set('asOf', asOf)
+    return apiBlobRequest(
+      `/api/reporting/exports/${encodeURIComponent(report)}?${query.toString()}`
+    )
+  },
 }
 
 export const platformApi = {

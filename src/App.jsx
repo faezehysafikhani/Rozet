@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { knowledgeApi } from './services/api'
+import { apiBlobRequest, knowledgeApi, reportingApi } from './services/api'
 import {
   Bell,
   BookOpen,
@@ -176,7 +176,7 @@ const controlSubmenus = [
 ]
 
 const governanceSubmenus = [
-  { label: 'داشبورد مدیریتی و گزارش‌دهی', icon: ChartNoAxesCombined },
+  { label: '\u062F\u0627\u0634\u0628\u0648\u0631 \u06AF\u0632\u0627\u0631\u0634\u0627\u062A', icon: ChartNoAxesCombined },
   { label: 'مدیریت دانش', icon: BookOpen },
 ]
 
@@ -1198,6 +1198,25 @@ function knowledgeDocumentTypeLabel(value) {
   return labels[value] ?? value ?? '—'
 }
 
+function knowledgeDocumentTypeValue(value) {
+  if (typeof value === 'number' && Number.isInteger(value)) {
+    return String(value)
+  }
+
+  const values = {
+    Book: '0',
+    Software: '1',
+    Notes: '2',
+    Other: '3',
+    Pamphlet: '4',
+    LessonLearned: '5',
+    Template: '6',
+    Decision: '7',
+  }
+
+  return values[value] ?? '2'
+}
+
 function KnowledgeManagement() {
   const [documents, setDocuments] = useState([])
   const [linkedIds, setLinkedIds] = useState(new Set())
@@ -1217,6 +1236,11 @@ function KnowledgeManagement() {
   const [file, setFile] = useState(null)
   const [fileInputKey, setFileInputKey] = useState(0)
 
+  const [editingDocument, setEditingDocument] = useState(null)
+  const [editTitle, setEditTitle] = useState('')
+  const [editDescription, setEditDescription] = useState('')
+  const [editDocumentType, setEditDocumentType] = useState('2')
+
   const [loading, setLoading] = useState(true)
   const [loadingLinks, setLoadingLinks] = useState(false)
   const [busyAction, setBusyAction] = useState('')
@@ -1225,6 +1249,18 @@ function KnowledgeManagement() {
   const [actionError, setActionError] = useState('')
   const [notice, setNotice] = useState('')
   const [reloadKey, setReloadKey] = useState(0)
+  const [columnFilterOpen, setColumnFilterOpen] = useState('')
+  const [columnFilters, setColumnFilters] = useState({
+
+    documentType: '',
+    fileName: '',
+    minSize: '',
+    maxSize: '',
+    dateFrom: '',
+    dateTo: '',
+    linkedStatus: '',
+  })
+  const [columnSort, setColumnSort] = useState({ key: '', direction: 'asc' })
 
   useEffect(() => {
     let cancelled = false
@@ -1289,6 +1325,232 @@ function KnowledgeManagement() {
     }
   }, [appliedSearch, appliedTypeFilter, activeSubject, reloadKey])
 
+  const visibleDocuments = useMemo(() => {
+
+    const fileNeedle = columnFilters.fileName.trim().toLocaleLowerCase()
+
+    const filtered = documents.filter((document) => {
+
+      const fileValue = String(document.fileName || '')
+      const typeValue = knowledgeDocumentTypeValue(document.documentType)
+      const sizeValue = Number(document.sizeBytes ?? 0)
+      const dateValue = String(document.createdAtUtc || '').slice(0, 10)
+      const isLinked = linkedIds.has(document.id)
+
+      let statusMatches = true
+
+      if (columnFilters.linkedStatus === 'none') {
+        statusMatches = !activeSubject
+      } else if (columnFilters.linkedStatus === 'linked') {
+        statusMatches = Boolean(activeSubject) && isLinked
+      } else if (columnFilters.linkedStatus === 'unlinked') {
+        statusMatches = Boolean(activeSubject) && !isLinked
+      }
+
+      return (
+
+        (columnFilters.documentType === '' ||
+          typeValue === columnFilters.documentType) &&
+        fileValue.toLocaleLowerCase().includes(fileNeedle) &&
+        (columnFilters.minSize === '' ||
+          sizeValue >= Number(columnFilters.minSize) * 1024) &&
+        (columnFilters.maxSize === '' ||
+          sizeValue <= Number(columnFilters.maxSize) * 1024) &&
+        (columnFilters.dateFrom === '' ||
+          (dateValue !== '' && dateValue >= columnFilters.dateFrom)) &&
+        (columnFilters.dateTo === '' ||
+          (dateValue !== '' && dateValue <= columnFilters.dateTo)) &&
+        statusMatches
+      )
+    })
+
+    if (!columnSort.key) return filtered
+
+    return filtered.sort((left, right) => {
+      let leftValue
+      let rightValue
+
+      switch (columnSort.key) {
+        case 'title':
+          leftValue = left.title || ''
+          rightValue = right.title || ''
+          break
+        case 'documentType':
+          leftValue = knowledgeDocumentTypeLabel(left.documentType)
+          rightValue = knowledgeDocumentTypeLabel(right.documentType)
+          break
+        case 'fileName':
+          leftValue = left.fileName || ''
+          rightValue = right.fileName || ''
+          break
+        case 'sizeBytes':
+          leftValue = Number(left.sizeBytes ?? 0)
+          rightValue = Number(right.sizeBytes ?? 0)
+          break
+        case 'createdAtUtc':
+          leftValue = Date.parse(left.createdAtUtc || '') || 0
+          rightValue = Date.parse(right.createdAtUtc || '') || 0
+          break
+        case 'linkedStatus':
+          leftValue = activeSubject ? (linkedIds.has(left.id) ? 1 : 0) : -1
+          rightValue = activeSubject ? (linkedIds.has(right.id) ? 1 : 0) : -1
+          break
+        default:
+          return 0
+      }
+
+      let comparison
+
+      if (
+        typeof leftValue === 'number' &&
+        typeof rightValue === 'number'
+      ) {
+        comparison = leftValue - rightValue
+      } else {
+        comparison = String(leftValue ?? '').localeCompare(
+          String(rightValue ?? ''),
+          'fa',
+          { numeric: true, sensitivity: 'base' },
+        )
+      }
+
+      return columnSort.direction === 'desc'
+        ? -comparison
+        : comparison
+    })
+  }, [
+    documents,
+    linkedIds,
+    activeSubject,
+    columnFilters,
+    columnSort,
+  ])
+
+  const hasKnowledgeColumnFilter = (key) => {
+    if (key === 'size') {
+      return columnFilters.minSize !== '' || columnFilters.maxSize !== ''
+    }
+
+    if (key === 'date') {
+      return columnFilters.dateFrom !== '' || columnFilters.dateTo !== ''
+    }
+
+    return Boolean(columnFilters[key])
+  }
+
+  const clearKnowledgeColumnFilter = (key) => {
+    setColumnFilters((current) => {
+      const next = { ...current }
+
+      if (key === 'size') {
+        next.minSize = ''
+        next.maxSize = ''
+      } else if (key === 'date') {
+        next.dateFrom = ''
+        next.dateTo = ''
+      } else {
+        next[key] = ''
+      }
+
+      return next
+    })
+
+    setColumnFilterOpen('')
+  }
+
+  const clearAllKnowledgeColumnFilters = () => {
+    setColumnFilters({
+      documentType: '',
+      fileName: '',
+      minSize: '',
+      maxSize: '',
+      dateFrom: '',
+      dateTo: '',
+      linkedStatus: '',
+    })
+    setColumnSort({ key: '', direction: 'asc' })
+    setColumnFilterOpen('')
+    setSearch('')
+    setTypeFilter('')
+    setAppliedSearch('')
+    setAppliedTypeFilter('')
+  }
+  const renderKnowledgeColumnHeader = (
+    key,
+    label,
+    filterControl,
+    clearKey = key,
+  ) => (
+    <th className="knowledge-filterable-th" key={key}>
+      <div className="knowledge-column-heading">
+        <span>{label}</span>
+
+        <button
+          className={
+            'knowledge-column-filter-button' +
+            (
+              columnFilterOpen === key ||
+              columnSort.key === key ||
+              hasKnowledgeColumnFilter(clearKey)
+                ? ' is-active'
+                : ''
+            )
+          }
+          type="button"
+          aria-label={`${label} - \u0641\u06cc\u0644\u062a\u0631 \u0648 \u0645\u0631\u062a\u0628\u200c\u0633\u0627\u0632\u06cc`}
+          aria-expanded={columnFilterOpen === key}
+          title={`${label} - \u0641\u06cc\u0644\u062a\u0631 \u0648 \u0645\u0631\u062a\u0628\u200c\u0633\u0627\u0632\u06cc`}
+          onClick={() =>
+            setColumnFilterOpen((current) => current === key ? '' : key)
+          }
+        >
+          <Filter size={15} />
+        </button>
+
+        {columnFilterOpen === key && (
+          <div
+            className="knowledge-column-menu"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="knowledge-column-menu-filter">
+              {filterControl}
+            </div>
+
+            <div className="knowledge-column-menu-sort">
+              <button
+                type="button"
+                onClick={() => {
+                  setColumnSort({ key, direction: 'asc' })
+                  setColumnFilterOpen('')
+                }}
+              >
+                {'\u0635\u0639\u0648\u062f\u06cc'} {'\u2191'}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setColumnSort({ key, direction: 'desc' })
+                  setColumnFilterOpen('')
+                }}
+              >
+                {'\u0646\u0632\u0648\u0644\u06cc'} {'\u2193'}
+              </button>
+            </div>
+
+            <button
+              className="knowledge-column-menu-clear"
+              type="button"
+              onClick={() => clearKnowledgeColumnFilter(clearKey)}
+            >
+              {'\u067e\u0627\u06a9 \u06a9\u0631\u062f\u0646 \u0641\u06cc\u0644\u062a\u0631'}
+            </button>
+          </div>
+        )}
+      </div>
+    </th>
+  )
+
   async function handleUpload(event) {
     event.preventDefault()
     setActionError('')
@@ -1322,6 +1584,115 @@ function KnowledgeManagement() {
       setReloadKey((key) => key + 1)
     } catch {
       setActionError('هنگام ثبت سند خطای غیرمنتظره‌ای رخ داد.')
+    } finally {
+      setBusyAction('')
+    }
+  }
+
+  function beginEditDocument(document) {
+    setEditingDocument(document)
+    setEditTitle(document.title || '')
+    setEditDescription(document.description || '')
+    setEditDocumentType(knowledgeDocumentTypeValue(document.documentType))
+    setActionError('')
+    setNotice('')
+  }
+
+  async function handleUpdateDocument(event) {
+    event.preventDefault()
+
+    if (!editingDocument) return
+
+    const cleanTitle = editTitle.trim()
+    if (!cleanTitle) {
+      setActionError('عنوان سند الزامی است.')
+      return
+    }
+
+    setActionError('')
+    setNotice('')
+    setBusyAction(`update:${editingDocument.id}`)
+
+    try {
+      const result = await knowledgeApi.update(editingDocument.id, {
+        title: cleanTitle,
+        description: editDescription.trim() || null,
+        documentType: Number(editDocumentType),
+      })
+
+      if (!result.isSuccess) {
+        setActionError(knowledgeErrorMessage(result))
+        return
+      }
+
+      setNotice('مشخصات سند با موفقیت به‌روزرسانی شد.')
+      setEditingDocument(null)
+      setReloadKey((key) => key + 1)
+    } catch {
+      setActionError('هنگام ویرایش سند خطای غیرمنتظره‌ای رخ داد.')
+    } finally {
+      setBusyAction('')
+    }
+  }
+
+  async function handleDownloadDocument(document) {
+    setActionError('')
+    setNotice('')
+    setBusyAction(`download:${document.id}`)
+
+    try {
+      const result = await knowledgeApi.download(document.id)
+
+      if (!result.isSuccess) {
+        setActionError(knowledgeErrorMessage(result))
+        return
+      }
+
+      const url = window.URL.createObjectURL(result.value)
+      const anchor = window.document.createElement('a')
+      anchor.href = url
+      anchor.download = document.fileName || document.title || 'knowledge-document'
+      anchor.style.display = 'none'
+
+      window.document.body.appendChild(anchor)
+      anchor.click()
+      anchor.remove()
+      window.setTimeout(() => window.URL.revokeObjectURL(url), 1000)
+
+      setNotice('دانلود سند آغاز شد.')
+    } catch {
+      setActionError('هنگام دانلود سند خطای غیرمنتظره‌ای رخ داد.')
+    } finally {
+      setBusyAction('')
+    }
+  }
+
+  async function handleDeleteDocument(document) {
+    const name = document.title || document.fileName || 'این سند'
+    if (!window.confirm(`آیا از حذف «${name}» مطمئن هستید؟ این عملیات قابل بازگشت نیست.`)) {
+      return
+    }
+
+    setActionError('')
+    setNotice('')
+    setBusyAction(`delete:${document.id}`)
+
+    try {
+      const result = await knowledgeApi.remove(document.id)
+
+      if (!result.isSuccess) {
+        setActionError(knowledgeErrorMessage(result))
+        return
+      }
+
+      if (editingDocument?.id === document.id) {
+        setEditingDocument(null)
+      }
+
+      setNotice('سند با موفقیت حذف شد.')
+      setReloadKey((key) => key + 1)
+    } catch {
+      setActionError('هنگام حذف سند خطای غیرمنتظره‌ای رخ داد.')
     } finally {
       setBusyAction('')
     }
@@ -1363,7 +1734,7 @@ function KnowledgeManagement() {
     setNotice('')
 
     const isLinked = linkedIds.has(document.id)
-    setBusyAction(document.id)
+    setBusyAction(`link:${document.id}`)
 
     try {
       const result = isLinked
@@ -1453,6 +1824,9 @@ function KnowledgeManagement() {
                 <option value="2">یادداشت</option>
                 <option value="3">سایر</option>
                 <option value="4">جزوه</option>
+                <option value="5">درس‌آموخته</option>
+                <option value="6">قالب</option>
+                <option value="7">تصمیم</option>
               </select>
             </FormField>
 
@@ -1532,12 +1906,77 @@ function KnowledgeManagement() {
         </section>
       </div>
 
+      {editingDocument && (
+        <section className="task-panel knowledge-edit-panel">
+          <div className="task-panel-title">
+            <div>
+              <h3>ویرایش سند</h3>
+              <p>{editingDocument.fileName}</p>
+            </div>
+          </div>
+
+          <form className="knowledge-form" onSubmit={handleUpdateDocument}>
+            <FormField label="عنوان سند">
+              <input
+                required
+                maxLength={200}
+                value={editTitle}
+                onChange={(event) => setEditTitle(event.target.value)}
+              />
+            </FormField>
+
+            <FormField label="نوع سند">
+              <select
+                value={editDocumentType}
+                onChange={(event) => setEditDocumentType(event.target.value)}
+              >
+                <option value="0">کتاب</option>
+                <option value="1">نرم‌افزار</option>
+                <option value="2">یادداشت</option>
+                <option value="3">سایر</option>
+                <option value="4">جزوه</option>
+                <option value="5">درس‌آموخته</option>
+                <option value="6">قالب</option>
+                <option value="7">تصمیم</option>
+              </select>
+            </FormField>
+
+            <FormField label="توضیحات" wide>
+              <textarea
+                rows={3}
+                maxLength={2000}
+                value={editDescription}
+                onChange={(event) => setEditDescription(event.target.value)}
+              />
+            </FormField>
+
+            <div className="knowledge-form-actions">
+              <button
+                className="knowledge-button"
+                type="submit"
+                disabled={busyAction === `update:${editingDocument.id}`}
+              >
+                {busyAction === `update:${editingDocument.id}` ? 'در حال ذخیره...' : 'ذخیره تغییرات'}
+              </button>
+              <button
+                className="knowledge-button knowledge-button--secondary"
+                type="button"
+                disabled={busyAction === `update:${editingDocument.id}`}
+                onClick={() => setEditingDocument(null)}
+              >
+                انصراف
+              </button>
+            </div>
+          </form>
+        </section>
+      )}
+
       <section className="task-panel task-table-panel">
         <div className="task-panel-title knowledge-list-heading">
           <div>
             <h3>فهرست اسناد</h3>
             <p>
-              {documents.length.toLocaleString('fa-IR')} سند
+              {visibleDocuments.length.toLocaleString('fa-IR')} سند
               {activeSubject ? ' — وضعیت ارتباط با آیتم فعال نمایش داده می‌شود.' : ''}
             </p>
           </div>
@@ -1561,6 +2000,9 @@ function KnowledgeManagement() {
               <option value="2">یادداشت</option>
               <option value="3">سایر</option>
               <option value="4">جزوه</option>
+                <option value="5">درس‌آموخته</option>
+                <option value="6">قالب</option>
+                <option value="7">تصمیم</option>
             </select>
 
             <button className="knowledge-button" type="submit">
@@ -1569,6 +2011,18 @@ function KnowledgeManagement() {
           </form>
         </div>
 
+        {(Object.values(columnFilters).some((value) => value !== '') || Boolean(columnSort.key)) && (
+          <div className="knowledge-filter-reset-bar">
+            <span>{'\u0641\u06cc\u0644\u062a\u0631 \u06cc\u0627 \u0645\u0631\u062a\u0628\u200c\u0633\u0627\u0632\u06cc \u0641\u0639\u0627\u0644 \u0627\u0633\u062a.'}</span>
+            <button
+              className="knowledge-button knowledge-button--secondary"
+              type="button"
+              onClick={clearAllKnowledgeColumnFilters}
+            >
+              {'\u067e\u0627\u06a9 \u06a9\u0631\u062f\u0646 \u0647\u0645\u0647 \u0641\u06cc\u0644\u062a\u0631\u0647\u0627'}
+            </button>
+          </div>
+        )}
         <DataState
           loading={loading}
           error={error}
@@ -1578,19 +2032,138 @@ function KnowledgeManagement() {
             <table>
               <thead>
                 <tr>
-                  <th>عنوان سند</th>
-                  <th>نوع</th>
-                  <th>نام فایل</th>
-                  <th>حجم</th>
-                  <th>تاریخ ثبت</th>
-                  <th>وضعیت ارتباط</th>
-                  <th>عملیات</th>
+                  <th>{'\u0639\u0646\u0648\u0627\u0646 \u0633\u0646\u062f'}</th>
+                  {renderKnowledgeColumnHeader(
+                    'documentType',
+                    '\u0646\u0648\u0639',
+                    <select
+                      value={columnFilters.documentType}
+                      onChange={(event) => setColumnFilters((current) => ({ ...current, documentType: event.target.value }))}
+                      aria-label={'\u0641\u06cc\u0644\u062a\u0631 \u0646\u0648\u0639 \u0633\u0646\u062f'}
+                    >
+                      <option value="">{'\u0647\u0645\u0647 \u0627\u0646\u0648\u0627\u0639'}</option>
+                      <option value="0">{'\u06a9\u062a\u0627\u0628'}</option>
+                      <option value="1">{'\u0646\u0631\u0645\u200c\u0627\u0641\u0632\u0627\u0631'}</option>
+                      <option value="2">{'\u06cc\u0627\u062f\u062f\u0627\u0634\u062a'}</option>
+                      <option value="3">{'\u0633\u0627\u06cc\u0631'}</option>
+                      <option value="4">{'\u062c\u0632\u0648\u0647'}</option>
+                      <option value="5">{'\u062f\u0631\u0633\u200c\u0622\u0645\u0648\u062e\u062a\u0647'}</option>
+                      <option value="6">{'\u0642\u0627\u0644\u0628'}</option>
+                      <option value="7">{'\u062a\u0635\u0645\u06cc\u0645'}</option>
+                    </select>,
+                  )}
+
+                  {renderKnowledgeColumnHeader(
+                    'fileName',
+                    '\u0646\u0627\u0645 \u0641\u0627\u06cc\u0644',
+                    <input
+                      type="search"
+                      value={columnFilters.fileName}
+                      onChange={(event) => setColumnFilters((current) => ({ ...current, fileName: event.target.value }))}
+                      placeholder={'\u0641\u06cc\u0644\u062a\u0631 \u0646\u0627\u0645 \u0641\u0627\u06cc\u0644'}
+                      aria-label={'\u0641\u06cc\u0644\u062a\u0631 \u0646\u0627\u0645 \u0641\u0627\u06cc\u0644'}
+                    />,
+                  )}
+
+                  {renderKnowledgeColumnHeader(
+                    'sizeBytes',
+                    '\u062d\u062c\u0645',
+                    <div className="knowledge-size-filter-grid">
+                      <label>
+                        <span>{'\u062d\u062f\u0627\u0642\u0644 \u062d\u062c\u0645 (KB)'}</span>
+                        <input
+                          type="number"
+                          min="0"
+                          step="any"
+                          value={columnFilters.minSize}
+                          onChange={(event) => setColumnFilters((current) => ({ ...current, minSize: event.target.value }))}
+                          aria-label={'\u062d\u062f\u0627\u0642\u0644 \u062d\u062c\u0645 \u0628\u0647 \u06a9\u06cc\u0644\u0648\u0628\u0627\u06cc\u062a'}
+                        />
+                      </label>
+
+                      <label>
+                        <span>{'\u062d\u062f\u0627\u06a9\u062b\u0631 \u062d\u062c\u0645 (KB)'}</span>
+                        <input
+                          type="number"
+                          min="0"
+                          step="any"
+                          value={columnFilters.maxSize}
+                          onChange={(event) => setColumnFilters((current) => ({ ...current, maxSize: event.target.value }))}
+                          aria-label={'\u062d\u062f\u0627\u06a9\u062b\u0631 \u062d\u062c\u0645 \u0628\u0647 \u06a9\u06cc\u0644\u0648\u0628\u0627\u06cc\u062a'}
+                        />
+                      </label>
+                    </div>,
+                    'size',
+                  )}
+
+                  {renderKnowledgeColumnHeader(
+                    'createdAtUtc',
+                    '\u062a\u0627\u0631\u06cc\u062e \u062b\u0628\u062a',
+                    <div className="knowledge-date-filter-grid">
+                      <label>
+                        <span>{'\u0627\u0632 \u062a\u0627\u0631\u06cc\u062e'}</span>
+                        <input
+                          type="date"
+                          value={columnFilters.dateFrom}
+                          onChange={(event) => setColumnFilters((current) => ({ ...current, dateFrom: event.target.value }))}
+                          aria-label={'\u0627\u0632 \u062a\u0627\u0631\u06cc\u062e'}
+                        />
+                      </label>
+
+                      <label>
+                        <span>{'\u062a\u0627 \u062a\u0627\u0631\u06cc\u062e'}</span>
+                        <input
+                          type="date"
+                          value={columnFilters.dateTo}
+                          onChange={(event) => setColumnFilters((current) => ({ ...current, dateTo: event.target.value }))}
+                          aria-label={'\u062a\u0627 \u062a\u0627\u0631\u06cc\u062e'}
+                        />
+                      </label>
+                    </div>,
+                    'date',
+                  )}
+
+                  {renderKnowledgeColumnHeader(
+                    'linkedStatus',
+                    '\u0648\u0636\u0639\u06cc\u062a \u0627\u0631\u062a\u0628\u0627\u0637',
+                    <select
+                      value={columnFilters.linkedStatus}
+                      onChange={(event) => setColumnFilters((current) => ({ ...current, linkedStatus: event.target.value }))}
+                      aria-label={'\u0641\u06cc\u0644\u062a\u0631 \u0648\u0636\u0639\u06cc\u062a \u0627\u0631\u062a\u0628\u0627\u0637'}
+                    >
+                      <option value="">{'\u0647\u0645\u0647 \u0648\u0636\u0639\u06cc\u062a\u200c\u0647\u0627'}</option>
+
+                      {activeSubject ? (
+                        <>
+                          <option value="linked">{'\u0645\u0631\u062a\u0628\u0637'}</option>
+                          <option value="unlinked">{'\u0646\u0627\u0645\u0631\u062a\u0628\u0637'}</option>
+                        </>
+                      ) : (
+                        <option value="none">{'\u0622\u06cc\u062a\u0645\u06cc \u0627\u0646\u062a\u062e\u0627\u0628 \u0646\u0634\u062f\u0647'}</option>
+                      )}
+                    </select>,
+                  )}
+
+                  <th>{'\u0639\u0645\u0644\u06cc\u0627\u062a'}</th>
                 </tr>
               </thead>
               <tbody>
-                {documents.map((document) => {
+                {visibleDocuments.length === 0 ? (
+                  <tr>
+                    <td colSpan={7} className="knowledge-filter-empty">
+                      <span>{'\u0647\u06cc\u0686 \u0633\u0646\u062f\u06cc \u0628\u0627 \u0641\u06cc\u0644\u062a\u0631\u0647\u0627\u06cc \u0641\u0639\u0644\u06cc \u067e\u06cc\u062f\u0627 \u0646\u0634\u062f.'}</span>
+                      <button
+                        className="knowledge-button knowledge-button--secondary"
+                        type="button"
+                        onClick={clearAllKnowledgeColumnFilters}
+                      >
+                        {'\u067e\u0627\u06a9 \u06a9\u0631\u062f\u0646 \u0647\u0645\u0647 \u0641\u06cc\u0644\u062a\u0631\u0647\u0627'}
+                      </button>
+                    </td>
+                  </tr>
+                ) : visibleDocuments.map((document) => {
                   const isLinked = linkedIds.has(document.id)
-                  const actionBusy = busyAction === document.id
+                  const actionBusy = busyAction.endsWith(`:${document.id}`)
 
                   return (
                     <tr key={document.id}>
@@ -1618,24 +2191,51 @@ function KnowledgeManagement() {
                               : 'نامرتبط'}
                       </td>
                       <td>
-                        <button
-                          className={
-                            isLinked
-                              ? 'knowledge-button knowledge-button--danger'
-                              : 'knowledge-button knowledge-button--secondary'
-                          }
-                          type="button"
-                          disabled={
-                            !activeSubject || loadingLinks || actionBusy
-                          }
-                          onClick={() => toggleDocumentLink(document)}
-                        >
-                          {actionBusy
-                            ? 'در حال انجام...'
-                            : isLinked
-                              ? 'قطع ارتباط'
-                              : 'اتصال به آیتم'}
-                        </button>
+                        <div className="knowledge-row-actions">
+                          <button
+                            className="knowledge-button knowledge-button--secondary"
+                            type="button"
+                            disabled={actionBusy}
+                            onClick={() => handleDownloadDocument(document)}
+                          >
+                            {busyAction === `download:${document.id}` ? 'در حال دانلود...' : 'دانلود'}
+                          </button>
+
+                          <button
+                            className="knowledge-button knowledge-button--secondary"
+                            type="button"
+                            disabled={actionBusy}
+                            onClick={() => beginEditDocument(document)}
+                          >
+                            ویرایش
+                          </button>
+
+                          <button
+                            className="knowledge-button knowledge-button--danger"
+                            type="button"
+                            disabled={actionBusy}
+                            onClick={() => handleDeleteDocument(document)}
+                          >
+                            {busyAction === `delete:${document.id}` ? 'در حال حذف...' : 'حذف'}
+                          </button>
+
+                          <button
+                            className={
+                              isLinked
+                                ? 'knowledge-button knowledge-button--danger'
+                                : 'knowledge-button knowledge-button--secondary'
+                            }
+                            type="button"
+                            disabled={!activeSubject || loadingLinks || actionBusy}
+                            onClick={() => toggleDocumentLink(document)}
+                          >
+                            {busyAction === `link:${document.id}`
+                              ? 'در حال انجام...'
+                              : isLinked
+                                ? 'قطع ارتباط'
+                                : 'اتصال به آیتم'}
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   )
@@ -3499,6 +4099,2373 @@ function NotificationBell() {
   )
 }
 
+const JALALI_MONTH_NAMES = [
+  '\u0641\u0631\u0648\u0631\u062F\u06CC\u0646', '\u0627\u0631\u062F\u06CC\u0628\u0647\u0634\u062A',
+  '\u062E\u0631\u062F\u0627\u062F', '\u062A\u06CC\u0631', '\u0645\u0631\u062F\u0627\u062F', '\u0634\u0647\u0631\u06CC\u0648\u0631',
+  '\u0645\u0647\u0631', '\u0622\u0628\u0627\u0646', '\u0622\u0630\u0631', '\u062F\u06CC', '\u0628\u0647\u0645\u0646', '\u0627\u0633\u0641\u0646\u062F',
+]
+const JALALI_WEEKDAYS = [
+  { label: '\u0634', full: '\u0634\u0646\u0628\u0647' },
+  { label: '\u06CC', full: '\u06CC\u06A9\u0634\u0646\u0628\u0647' },
+  { label: '\u062F', full: '\u062F\u0648\u0634\u0646\u0628\u0647' },
+  { label: '\u0633', full: '\u0633\u0647\u200C\u0634\u0646\u0628\u0647' },
+  { label: '\u0686', full: '\u0686\u0647\u0627\u0631\u0634\u0646\u0628\u0647' },
+  { label: '\u067E', full: '\u067E\u0646\u062C\u0634\u0646\u0628\u0647' },
+  { label: '\u062C', full: '\u062C\u0645\u0639\u0647' },
+]
+const JALALI_DIGITS = '\u06F0\u06F1\u06F2\u06F3\u06F4\u06F5\u06F6\u06F7\u06F8\u06F9'
+const JALALI_DAY_MS = 86400000
+const JALALI_FORMATTER = new Intl.DateTimeFormat('en-US-u-ca-persian-nu-latn', {
+  year: 'numeric', month: 'numeric', day: 'numeric', timeZone: 'UTC',
+})
+
+function jalaliPartsFromDate(date) {
+  const parts = JALALI_FORMATTER.formatToParts(date)
+  const part = type => parts.find(item => item.type === type)?.value
+  return {
+    jy: Number.parseInt(part('year') || part('relatedYear'), 10),
+    jm: Number.parseInt(part('month'), 10),
+    jd: Number.parseInt(part('day'), 10),
+  }
+}
+
+function jalaliPartsFromISO(value) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value || '')) return null
+  return jalaliPartsFromDate(new Date(`${value}T12:00:00Z`))
+}
+
+function jalaliTodayISO() {
+  const date = new Date()
+  return [
+    String(date.getFullYear()).padStart(4, '0'),
+    String(date.getMonth() + 1).padStart(2, '0'),
+    String(date.getDate()).padStart(2, '0'),
+  ].join('-')
+}
+
+function jalaliToGregorianISO(jy, jm, jd) {
+  const start = Date.UTC(jy + 621, 2, 15, 12)
+
+  for (let offset = 0; offset < 390; offset += 1) {
+    const candidate = new Date(start + offset * JALALI_DAY_MS)
+    const parts = jalaliPartsFromDate(candidate)
+
+    if (parts.jy === jy && parts.jm === jm && parts.jd === jd) {
+      return [
+        String(candidate.getUTCFullYear()).padStart(4, '0'),
+        String(candidate.getUTCMonth() + 1).padStart(2, '0'),
+        String(candidate.getUTCDate()).padStart(2, '0'),
+      ].join('-')
+    }
+  }
+
+  return ''
+}
+
+function jalaliDigits(value, minLength = 1) {
+  return String(value).padStart(minLength, '0')
+    .replace(/[0-9]/g, digit => JALALI_DIGITS[Number(digit)])
+}
+
+function JalaliDatePicker({ value, onChange }) {
+  const rootRef = useRef(null)
+  const [open, setOpen] = useState(false)
+  const todayISO = useMemo(() => jalaliTodayISO(), [])
+  const todayParts = useMemo(() => jalaliPartsFromISO(todayISO), [todayISO])
+  const selectedParts = useMemo(() => jalaliPartsFromISO(value), [value])
+  const [view, setView] = useState(() => {
+    const initial = jalaliPartsFromISO(value) || jalaliPartsFromISO(jalaliTodayISO())
+    return { jy: initial.jy, jm: initial.jm }
+  })
+
+  useEffect(() => {
+    if (selectedParts) setView({ jy: selectedParts.jy, jm: selectedParts.jm })
+  }, [value])
+
+  useEffect(() => {
+    if (!open) return undefined
+    const outside = event => {
+      if (!rootRef.current?.contains(event.target)) setOpen(false)
+    }
+    const escape = event => {
+      if (event.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('mousedown', outside)
+    document.addEventListener('touchstart', outside)
+    document.addEventListener('keydown', escape)
+    return () => {
+      document.removeEventListener('mousedown', outside)
+      document.removeEventListener('touchstart', outside)
+      document.removeEventListener('keydown', escape)
+    }
+  }, [open])
+
+  const shiftMonth = amount => setView(current => {
+    let jy = current.jy
+    let jm = current.jm + amount
+    if (jm < 1) { jy -= 1; jm = 12 }
+    if (jm > 12) { jy += 1; jm = 1 }
+    return { jy, jm }
+  })
+
+  const nextMonth = view.jm === 12
+    ? { jy: view.jy + 1, jm: 1 }
+    : { jy: view.jy, jm: view.jm + 1 }
+
+  const firstISO = jalaliToGregorianISO(view.jy, view.jm, 1)
+  const nextISO = jalaliToGregorianISO(nextMonth.jy, nextMonth.jm, 1)
+  const firstDate = new Date(`${firstISO}T12:00:00Z`)
+  const daysInMonth = Math.round(
+    (Date.parse(`${nextISO}T12:00:00Z`) - Date.parse(`${firstISO}T12:00:00Z`)) / JALALI_DAY_MS
+  )
+  const firstOffset = (firstDate.getUTCDay() + 1) % 7
+  const cellCount = Math.ceil((firstOffset + daysInMonth) / 7) * 7
+  const cells = Array.from({ length: cellCount }, (_, i) => {
+    const day = i - firstOffset + 1
+    return day >= 1 && day <= daysInMonth ? day : null
+  })
+
+  const displayDate = selectedParts
+    ? `${jalaliDigits(selectedParts.jy, 4)}/${jalaliDigits(selectedParts.jm, 2)}/${jalaliDigits(selectedParts.jd, 2)}`
+    : '\u0627\u0646\u062A\u062E\u0627\u0628 \u062A\u0627\u0631\u06CC\u062E \u0634\u0645\u0633\u06CC'
+
+  return (
+    <div className="jalali-date-picker" ref={rootRef}>
+      <div className="jalali-date-picker__controls">
+        <button type="button" className="jalali-date-picker__trigger"
+          onClick={() => setOpen(current => !current)}
+          aria-haspopup="dialog" aria-expanded={open}>
+          <CalendarDays size={18} />
+          <span>{displayDate}</span>
+        </button>
+        {value && (
+          <button type="button" className="jalali-date-picker__clear"
+            onClick={() => onChange('')}
+            aria-label={'\u067E\u0627\u06A9 \u06A9\u0631\u062F\u0646 \u062A\u0627\u0631\u06CC\u062E'}
+            title={'\u067E\u0627\u06A9 \u06A9\u0631\u062F\u0646 \u062A\u0627\u0631\u06CC\u062E'}>
+            {'\u00D7'}
+          </button>
+        )}
+      </div>
+
+      {open && (
+        <div className="jalali-calendar" role="dialog"
+          aria-label={'\u062A\u0642\u0648\u06CC\u0645 \u0634\u0645\u0633\u06CC'}>
+          <div className="jalali-calendar__header">
+            <button type="button" onClick={() => shiftMonth(-1)}
+              aria-label={'\u0645\u0627\u0647 \u0642\u0628\u0644'}>{'\u2039'}</button>
+            <strong>{JALALI_MONTH_NAMES[view.jm - 1]} {jalaliDigits(view.jy)}</strong>
+            <button type="button" onClick={() => shiftMonth(1)}
+              aria-label={'\u0645\u0627\u0647 \u0628\u0639\u062F'}>{'\u203A'}</button>
+          </div>
+
+          <div className="jalali-calendar__grid jalali-calendar__weekdays">
+            {JALALI_WEEKDAYS.map(day => <span key={day.full} title={day.full}>{day.label}</span>)}
+          </div>
+
+          <div className="jalali-calendar__grid">
+            {cells.map((day, index) => {
+              if (day === null) {
+                return <span key={`empty-${index}`} className="jalali-calendar__empty" aria-hidden="true" />
+              }
+
+              const selected = selectedParts?.jy === view.jy &&
+                selectedParts?.jm === view.jm && selectedParts?.jd === day
+              const today = todayParts.jy === view.jy &&
+                todayParts.jm === view.jm && todayParts.jd === day
+
+              return (
+                <button key={day} type="button"
+                  className={[
+                    'jalali-calendar__day',
+                    selected ? 'is-selected' : '',
+                    today ? 'is-today' : '',
+                  ].filter(Boolean).join(' ')}
+                  onClick={() => {
+                    const iso = jalaliToGregorianISO(view.jy, view.jm, day)
+                    if (iso) onChange(iso)
+                    setOpen(false)
+                  }}
+                  aria-pressed={Boolean(selected)}
+                  aria-label={`${day} ${JALALI_MONTH_NAMES[view.jm - 1]} ${view.jy}`}>
+                  {jalaliDigits(day)}
+                </button>
+              )
+            })}
+          </div>
+
+          <div className="jalali-calendar__footer">
+            <button type="button" onClick={() => {
+              onChange(todayISO)
+              setView({ jy: todayParts.jy, jm: todayParts.jm })
+              setOpen(false)
+            }}>{'\u0627\u0645\u0631\u0648\u0632'}</button>
+            <button type="button" onClick={() => setOpen(false)}>{'\u0628\u0633\u062A\u0646'}</button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+const REPORTING_EXPORT_OPTIONS = [
+  { key: 'unit-performance', label: 'عملکرد واحدهای سازمانی', description: 'گزارش عملکرد در سطح واحدهای سازمانی' },
+  { key: 'unit-status-matrix', label: 'ماتریس وضعیت واحدها', description: 'نمای وضعیت پروژه‌ها به تفکیک واحد' },
+  { key: 'project-managers', label: 'ارزیابی مدیران پروژه', description: 'گزارش ارزیابی عملکرد مدیران پروژه' },
+  { key: 'strategy-alignment', label: 'هم‌راستایی راهبردی', description: 'ماتریس هم‌راستایی پروژه‌ها با راهبردها' },
+  { key: 'health', label: 'سلامت پروژه‌ها', description: 'نمای مدیریتی سلامت پروژه‌ها' },
+  { key: 'attention', label: 'موارد نیازمند توجه', description: 'مواردی که نیازمند پیگیری مدیریتی هستند' },
+  { key: 'risks', label: 'نمای کلی ریسک‌ها', description: 'خلاصه ریسک‌های ثبت‌شده و ریسک‌های مهم' },
+  { key: 'kpis', label: 'نمای کلی شاخص‌های کلیدی', description: 'گزارش خلاصه KPIها و شاخص‌های عملکرد' },
+]
+
+const REPORTING_VALUE_LABELS = Object.freeze({
+  Green: 'مناسب',
+  Amber: 'نیازمند توجه',
+  Red: 'بحرانی',
+  Unknown: 'نامشخص',
+  Excellent: 'عالی',
+  Good: 'خوب',
+  NeedsImprovement: 'نیازمند بهبود',
+  NoPerformanceData: 'بدون داده عملکردی',
+  Active: 'در جریان',
+  OnHold: 'متوقف',
+  Completed: 'تکمیل‌شده',
+  Draft: 'پیش‌نویس',
+  Archived: 'بایگانی‌شده',
+  OnTrack: 'طبق برنامه',
+  AtRisk: 'در معرض ریسک',
+  Behind: 'عقب‌افتاده',
+  High: 'زیاد',
+  Medium: 'متوسط',
+  Low: 'کم',
+  None: 'بدون هم‌راستایی',
+  Quality: 'کیفی',
+  Quantity: 'کمی',
+  ProjectOverdue: 'پروژه عقب‌افتاده',
+  ProjectRed: 'پروژه با وضعیت بحرانی',
+  ProjectAtRisk: 'پروژه در معرض ریسک',
+  RiskWithoutResponsePlan: 'ریسک بدون برنامه پاسخ',
+  ActionOverdue: 'اقدام عقب‌افتاده',
+  HighRisk: 'دارای ریسک بازِ بالا',
+  NoOpenHighRisk: 'بدون ریسک بازِ بالا',
+  Aligned: 'دارای هم‌راستایی',
+  Unaligned: 'بدون هم‌راستایی',
+  NoProjects: 'بدون پروژه',
+})
+
+const reportingValueLabel = (value) => {
+  if (value === null || value === undefined || value === '') return '—'
+  return REPORTING_VALUE_LABELS[String(value)] || String(value)
+}
+
+const reportingFormatValue = (value) => {
+  if (value === null || value === undefined || value === '') return '—'
+
+  if (typeof value === 'boolean') return value ? 'بله' : 'خیر'
+
+  if (typeof value === 'number') {
+    return new Intl.NumberFormat('fa-IR', { maximumFractionDigits: 2 }).format(value)
+  }
+
+  if (Array.isArray(value)) {
+    return value.length ? value.map(reportingFormatValue).join('، ') : '—'
+  }
+
+  if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    const [year, month, day] = value.split('-').map(Number)
+    return new Date(year, month - 1, day).toLocaleDateString('fa-IR')
+  }
+
+  return reportingValueLabel(value)
+}
+
+const reportingList = (value) => Array.isArray(value) ? value : []
+
+const makeReportingItem = (id, title, subtitle, category, entries, source) => {
+  const details = entries.map(([label, value]) => ({ label, value }))
+  const searchText = [
+    title,
+    subtitle,
+    category,
+    ...details.flatMap((detail) => [
+      detail.label,
+      reportingFormatValue(detail.value),
+    ]),
+  ].filter((value) => value !== null && value !== undefined)
+    .join(' ')
+    .toLocaleLowerCase()
+
+  return {
+    id: String(id ?? title ?? Math.random()),
+    title: String(title ?? 'بدون عنوان'),
+    subtitle: subtitle ? String(subtitle) : '',
+    category: category || 'Unknown',
+    details,
+    source,
+    searchText,
+  }
+}
+
+const reportingRating = (rating, average) =>
+  rating || (
+    average === null || average === undefined
+      ? 'NoPerformanceData'
+      : average >= 90
+        ? 'Excellent'
+        : average >= 70
+          ? 'Good'
+          : 'NeedsImprovement'
+  )
+
+function buildReportingView(report, data) {
+  const items = []
+  const metrics = []
+  const addMetrics = (entries) => {
+    entries.forEach(([label, value]) => metrics.push({ label, value }))
+  }
+
+  if (!data || typeof data !== 'object') {
+    return { items, metrics, chartTitle: 'توزیع رکوردهای گزارش' }
+  }
+
+  switch (report) {
+    case 'unit-performance': {
+      const summary = data.summary || {}
+
+      addMetrics([
+        ['تعداد پروژه‌ها', summary.projectCount],
+        ['پروژه‌های در جریان', summary.runningProjects],
+        ['پروژه‌های تأخیردار', summary.delayedProjects],
+        ['میانگین عملکرد (%)', summary.averagePerformance],
+      ])
+
+      reportingList(data.units).forEach((row) => {
+        const category = reportingRating(row.rating, row.averagePerformance)
+        items.push(makeReportingItem(
+          row.unitId ?? row.unitName,
+          row.unitName,
+          row.unitCode || `سطح ${row.level ?? '—'}`,
+          category,
+          [
+            ['شناسه واحد', row.unitId],
+            ['کد واحد', row.unitCode],
+            ['سطح سازمانی', row.level],
+            ['تعداد پروژه‌ها', row.projectCount],
+            ['پروژه‌های در جریان', row.runningProjects],
+            ['پروژه‌های تکمیل‌شده', row.completedProjects],
+            ['پروژه‌های عقب‌افتاده', row.overdueProjects],
+            ['بودجه کل', row.totalBudget],
+            ['پروژه‌های دارای داده پیشرفت', row.projectsWithProgress],
+            ['میانگین پیشرفت برنامه‌ای (%)', row.averagePlannedProgress],
+            ['میانگین پیشرفت واقعی (%)', row.averageActualProgress],
+            ['میانگین انحراف', row.averageDeviation],
+            ['طبق برنامه', row.onTrack],
+            ['در معرض ریسک', row.atRisk],
+            ['عقب‌افتاده بر اساس عملکرد', row.behind],
+            ['تعداد پروژه‌های تأخیردار', row.delayedProjects],
+            ['میانگین عملکرد (%)', row.averagePerformance],
+            ['ارزیابی', row.rating],
+            ['شناسه پروژه‌های واحد', row.projectIds],
+          ],
+          row,
+        ))
+      })
+      break
+    }
+
+    case 'unit-status-matrix': {
+      const statuses = reportingList(data.statuses)
+
+      addMetrics([
+        ['تعداد واحدها', reportingList(data.rows).length],
+        ['مجموع پروژه‌ها', data.total],
+      ])
+
+      reportingList(data.rows).forEach((row) => {
+        const counts = reportingList(row.counts)
+        let dominantIndex = -1
+        let dominantCount = 0
+
+        counts.forEach((count, index) => {
+          if (Number(count || 0) > dominantCount) {
+            dominantCount = Number(count || 0)
+            dominantIndex = index
+          }
+        })
+
+        const category = dominantIndex >= 0
+          ? statuses[dominantIndex]
+          : 'NoProjects'
+
+        const statusDetails = statuses.map((status, index) => [
+          `تعداد ${reportingValueLabel(status)}`,
+          counts[index] ?? 0,
+        ])
+
+        items.push(makeReportingItem(
+          row.unitId ?? row.unitName,
+          row.unitName,
+          row.unitCode || '',
+          category,
+          [
+            ['شناسه واحد', row.unitId],
+            ['کد واحد', row.unitCode],
+            ['مجموع پروژه‌ها', row.total],
+            ...statusDetails,
+          ],
+          row,
+        ))
+      })
+      break
+    }
+
+    case 'project-managers': {
+      const managers = reportingList(data.managers)
+
+      addMetrics([
+        ['تعداد مدیران', managers.length],
+        ['کل پروژه‌ها', managers.reduce((sum, row) => sum + Number(row.projectCount || 0), 0)],
+        ['پروژه‌های تأخیردار', managers.reduce((sum, row) => sum + Number(row.delayedProjects || 0), 0)],
+      ])
+
+      managers.forEach((row) => {
+        const category = reportingRating(row.rating, row.averagePerformance)
+        const id = row.managerUserId
+        items.push(makeReportingItem(
+          id || `manager-${items.length}`,
+          id ? `مدیر پروژه · ${String(id).slice(0, 8)}` : 'مدیر بدون شناسه',
+          '',
+          category,
+          [
+            ['شناسه مدیر', id],
+            ['تعداد پروژه‌ها', row.projectCount],
+            ['پروژه‌های در جریان', row.runningProjects],
+            ['پروژه‌های تکمیل‌شده', row.completedProjects],
+            ['پروژه‌های عقب‌افتاده', row.overdueProjects],
+            ['بودجه کل', row.totalBudget],
+            ['پروژه‌های دارای داده پیشرفت', row.projectsWithProgress],
+            ['میانگین پیشرفت برنامه‌ای (%)', row.averagePlannedProgress],
+            ['میانگین پیشرفت واقعی (%)', row.averageActualProgress],
+            ['میانگین انحراف', row.averageDeviation],
+            ['طبق برنامه', row.onTrack],
+            ['در معرض ریسک', row.atRisk],
+            ['عقب‌افتاده بر اساس عملکرد', row.behind],
+            ['سهم طبق برنامه (%)', row.onTrackShare],
+            ['اقدام‌های باز', row.openActions],
+            ['پروژه‌های تأخیردار', row.delayedProjects],
+            ['میانگین عملکرد (%)', row.averagePerformance],
+            ['ارزیابی', row.rating],
+            ['شناسه پروژه‌ها', row.projectIds],
+          ],
+          row,
+        ))
+      })
+      break
+    }
+
+    case 'strategy-alignment': {
+      const strategies = reportingList(data.strategies)
+      const projects = reportingList(data.projects)
+
+      addMetrics([
+        ['تعداد راهبردها', strategies.length],
+        ['تعداد پروژه‌ها', projects.length],
+        ['پروژه‌های بدون هم‌راستایی', reportingList(data.unalignedProjectIds).length],
+        ['راهبردهای بدون پروژه مرتبط', reportingList(data.uncoveredStrategyIds).length],
+      ])
+
+      projects.forEach((row) => {
+        const cells = reportingList(row.cells)
+        const cellDetails = cells.map((cell, index) => {
+          const strategyName = strategies[index]?.name || `راهبرد ${index + 1}`
+          const suffix = cell.percentage === null || cell.percentage === undefined
+            ? ''
+            : ` · ${cell.percentage}%`
+          return [`هم‌راستایی با ${strategyName}`, `${reportingValueLabel(cell.level)}${suffix}`]
+        })
+
+        const category = Number(row.alignedStrategies || 0) > 0 ? 'Aligned' : 'Unaligned'
+
+        items.push(makeReportingItem(
+          row.projectId,
+          row.name,
+          row.code || '',
+          category,
+          [
+            ['شناسه پروژه', row.projectId],
+            ['کد پروژه', row.code],
+            ['تعداد راهبردهای هم‌راستا', row.alignedStrategies],
+            ['میانگین هم‌راستایی (%)', row.averagePercentage],
+            ['هم‌راستایی وزنی (%)', row.weightedPercentage],
+            ...cellDetails,
+          ],
+          row,
+        ))
+      })
+      break
+    }
+
+    case 'health': {
+      const projects = reportingList(data.projects)
+
+      addMetrics([
+        ['تعداد پروژه‌ها', data.projectCount ?? projects.length],
+        ...reportingList(data.counts).map((entry) => [
+          `سلامت: ${reportingValueLabel(entry.name)}`,
+          entry.count,
+        ]),
+      ])
+
+      projects.forEach((row) => {
+        items.push(makeReportingItem(
+          row.projectId,
+          row.name,
+          row.code || '',
+          row.health || 'Unknown',
+          [
+            ['شناسه پروژه', row.projectId],
+            ['کد پروژه', row.code],
+            ['وضعیت پروژه', row.status],
+            ['شناسه واحد سازمانی', row.organizationUnitId],
+            ['شناسه مدیر پروژه', row.managerUserId],
+            ['وضعیت سلامت', row.health],
+            ['پیشرفت برنامه‌ای (%)', row.plannedProgress],
+            ['پیشرفت واقعی (%)', row.actualProgress],
+            ['شاخص عملکرد زمان (SPI)', row.spi],
+            ['شاخص عملکرد هزینه (CPI)', row.cpi],
+            ['تأخیر پیش‌بینی‌شده (روز)', row.forecastDelayDays],
+            ['عقب‌افتاده', row.isOverdue],
+          ],
+          row,
+        ))
+      })
+      break
+    }
+
+    case 'attention': {
+      const rows = reportingList(data.items)
+
+      addMetrics([
+        ['کل موارد شناسایی‌شده', data.total],
+        ['موارد قابل نمایش', rows.length],
+        ['گزارش ناقص به علت سقف نمایش', data.truncated ? 'بله' : 'خیر'],
+        ['بررسی ریسک‌ها فعال است', data.risksIncluded ? 'بله' : 'خیر'],
+      ])
+
+      rows.forEach((row, index) => {
+        items.push(makeReportingItem(
+          row.subjectId || `attention-${index}`,
+          row.title,
+          row.projectName || row.subjectType || '',
+          row.kind || 'Unknown',
+          [
+            ['نوع مورد', row.kind],
+            ['شدت', row.severity],
+            ['نوع موضوع', row.subjectType],
+            ['شناسه موضوع', row.subjectId],
+            ['شناسه پروژه', row.projectId],
+            ['نام پروژه', row.projectName],
+            ['عنوان', row.title],
+            ['تاریخ سررسید', row.dueDate],
+            ['تعداد روزهای تأخیر', row.daysLate],
+            ['شناسه مسئول', row.ownerUserId],
+          ],
+          row,
+        ))
+      })
+      break
+    }
+
+    case 'risks': {
+      const projects = reportingList(data.projects)
+      const topRisks = reportingList(data.topRisks)
+
+      addMetrics([
+        ['کل ریسک‌های تأییدشده', data.total],
+        ['ریسک‌های زیاد', data.high],
+        ['ریسک‌های متوسط', data.medium],
+        ['ریسک‌های کم', data.low],
+        ['ریسک‌های زیادِ باز', data.openHigh],
+        ['ریسک‌های زیاد بدون برنامه پاسخ', data.openHighWithoutResponsePlan],
+      ])
+
+      if (projects.length) {
+        projects.forEach((row) => {
+          const relatedRisks = topRisks
+            .filter((risk) => risk.projectId === row.projectId)
+            .map((risk) => `${risk.description} · RPN: ${risk.rpn}`)
+
+          items.push(makeReportingItem(
+            row.projectId,
+            row.name,
+            row.code || '',
+            Number(row.openHigh || 0) > 0 ? 'HighRisk' : 'NoOpenHighRisk',
+            [
+              ['شناسه پروژه', row.projectId],
+              ['کد پروژه', row.code],
+              ['مجموع ریسک‌های این پروژه', row.total],
+              ['ریسک‌های زیاد', row.high],
+              ['ریسک‌های متوسط', row.medium],
+              ['ریسک‌های کم', row.low],
+              ['ریسک‌های زیادِ باز', row.openHigh],
+              ['ریسک‌های مهم موجود در فهرست ۱۰ مورد برتر', relatedRisks],
+            ],
+            row,
+          ))
+        })
+      } else {
+        topRisks.forEach((row) => {
+          items.push(makeReportingItem(
+            row.riskId,
+            row.description,
+            row.projectName || '',
+            row.level || 'Unknown',
+            [
+              ['شناسه ریسک', row.riskId],
+              ['شناسه پروژه', row.projectId],
+              ['نام پروژه', row.projectName],
+              ['شرح ریسک', row.description],
+              ['امتیاز احتمال', row.probabilityScore],
+              ['امتیاز اثر', row.impactScore],
+              ['امتیاز RPN', row.rpn],
+              ['سطح ریسک', row.level],
+              ['وضعیت پاسخ', row.responseStatus],
+              ['شناسه مالک ریسک', row.riskOwnerUserId],
+              ['برنامه پاسخ ثبت شده', row.hasResponsePlan],
+            ],
+            row,
+          ))
+        })
+      }
+      break
+    }
+
+    case 'kpis': {
+      const kpis = reportingList(data.kpis)
+
+      addMetrics([
+        ['کل شاخص‌ها', data.kpiCount],
+        ['شاخص‌های دارای مقدار', data.withValues],
+        ['شاخص‌های بدون مقدار', data.withoutValues],
+        ['عالی', data.excellent],
+        ['خوب', data.good],
+        ['نیازمند بهبود', data.needsImprovement],
+        ['میانگین تحقق هدف (%)', data.averageAchievement],
+      ])
+
+      kpis.forEach((row) => {
+        const trend = reportingList(row.trend).map(
+          (point) => `${reportingFormatValue(point.measuredOn)}: ${reportingFormatValue(point.value)}`
+        )
+
+        items.push(makeReportingItem(
+          row.kpiId,
+          row.description || `شاخص ${row.projectCode || ''}`,
+          row.projectName || row.projectCode || '',
+          row.type || 'Unknown',
+          [
+            ['شناسه شاخص', row.kpiId],
+            ['شناسه پروژه', row.projectId],
+            ['نام پروژه', row.projectName],
+            ['کد پروژه', row.projectCode],
+            ['شناسه تحویل‌دادنی', row.deliverableId],
+            ['نوع شاخص', row.type],
+            ['شرح شاخص', row.description],
+            ['فرمول', row.formula],
+            ['مقدار هدف', row.targetValue],
+            ['آخرین مقدار ثبت‌شده', row.latestValue],
+            ['تاریخ آخرین اندازه‌گیری', row.latestMeasuredOn],
+            ['تعداد اندازه‌گیری‌ها', row.measurementCount],
+            ['درصد تحقق هدف', row.achievementPercent],
+            ['ارزیابی عملکرد', row.rating],
+            ['روند اندازه‌گیری‌ها', trend],
+          ],
+          row,
+        ))
+      })
+      break
+    }
+
+    default:
+      break
+  }
+
+  const chartTitles = {
+    'unit-performance': 'توزیع واحدها بر اساس ارزیابی عملکرد',
+    'unit-status-matrix': 'توزیع وضعیت پروژه‌ها در واحدهای انتخاب‌شده',
+    'project-managers': 'توزیع مدیران بر اساس ارزیابی عملکرد',
+    'strategy-alignment': 'توزیع سطح هم‌راستایی راهبردی',
+    health: 'توزیع پروژه‌ها بر اساس سلامت',
+    attention: 'توزیع موارد بر اساس نوع',
+    risks: 'توزیع پروژه‌ها بر اساس ریسک بازِ بالا',
+    kpis: 'توزیع شاخص‌ها بر اساس نوع',
+  }
+
+  return {
+    items,
+    metrics,
+    chartTitle: chartTitles[report] || 'توزیع رکوردهای گزارش',
+  }
+}
+
+const REPORTING_CHART_COLORS = [
+  '#2563eb',
+  '#0891b2',
+  '#16a34a',
+  '#d97706',
+  '#9333ea',
+  '#dc2626',
+  '#64748b',
+  '#db2777',
+  '#0d9488',
+]
+
+function reportingDonutPath(start, end) {
+  const cx = 160
+  const cy = 160
+  const outer = 112
+  const inner = 66
+
+  const point = (radius, angle) => ({
+    x: cx + radius * Math.cos(angle - Math.PI / 2),
+    y: cy + radius * Math.sin(angle - Math.PI / 2),
+  })
+
+  const p1 = point(outer, start)
+  const p2 = point(outer, end)
+  const p3 = point(inner, end)
+  const p4 = point(inner, start)
+  const large = end - start > Math.PI ? 1 : 0
+
+  return [
+    `M ${p1.x} ${p1.y}`,
+    `A ${outer} ${outer} 0 ${large} 1 ${p2.x} ${p2.y}`,
+    `L ${p3.x} ${p3.y}`,
+    `A ${inner} ${inner} 0 ${large} 0 ${p4.x} ${p4.y}`,
+    'Z',
+  ].join(' ')
+}
+
+function ReportingPieChart({ title, slices, zoom, setZoom, onExpand }) {
+  const total = slices.reduce((sum, slice) => sum + Number(slice.count || 0), 0)
+  let accumulated = 0
+
+  const segments = slices
+    .filter((slice) => Number(slice.count || 0) > 0)
+    .map((slice, index) => {
+      const start = accumulated / (total || 1) * Math.PI * 2
+      accumulated += Number(slice.count || 0)
+      const end = accumulated / (total || 1) * Math.PI * 2
+
+      return {
+        ...slice,
+        color: REPORTING_CHART_COLORS[index % REPORTING_CHART_COLORS.length],
+        path: reportingDonutPath(start, end),
+        percentage: total ? Number(slice.count) / total * 100 : 0,
+      }
+    })
+
+  return (
+    <div className="reporting-pie-content">
+      <div className="reporting-pie-toolbar">
+        <div className="reporting-pie-zoom-controls">
+          <button
+            type="button"
+            onClick={() => setZoom((value) => Math.max(0.7, Number((value - 0.2).toFixed(1))))}
+            disabled={zoom <= 0.7}
+            aria-label="کوچک‌نمایی نمودار"
+          >
+            −
+          </button>
+          <span>{Math.round(zoom * 100)}٪</span>
+          <button
+            type="button"
+            onClick={() => setZoom((value) => Math.min(2, Number((value + 0.2).toFixed(1))))}
+            disabled={zoom >= 2}
+            aria-label="بزرگ‌نمایی نمودار"
+          >
+            +
+          </button>
+          <button type="button" onClick={() => setZoom(1)}>اندازه عادی</button>
+        </div>
+
+        {onExpand && (
+          <button type="button" onClick={onExpand}>
+            نمایش بزرگ
+          </button>
+        )}
+      </div>
+
+      <div className="reporting-pie-stage">
+        <svg
+          className="reporting-pie-svg"
+          viewBox="0 0 320 320"
+          role="img"
+          aria-label={title}
+          style={{ transform: `scale(${zoom})` }}
+        >
+          <title>{title}</title>
+
+          {segments.length === 1 ? (
+            <circle
+              cx="160"
+              cy="160"
+              r="112"
+              fill={segments[0].color}
+            />
+          ) : (
+            segments.map((segment) => (
+              <path
+                key={segment.label}
+                d={segment.path}
+                fill={segment.color}
+                stroke="#ffffff"
+                strokeWidth="2"
+              />
+            ))
+          )}
+
+          <circle cx="160" cy="160" r="64" fill="#ffffff" />
+          <text
+            x="160"
+            y="153"
+            textAnchor="middle"
+            className="reporting-pie-total"
+          >
+            {reportingFormatValue(total)}
+          </text>
+          <text
+            x="160"
+            y="180"
+            textAnchor="middle"
+            className="reporting-pie-center-label"
+          >
+            تعداد
+          </text>
+        </svg>
+      </div>
+
+      {segments.length ? (
+        <div className="reporting-pie-legend">
+          {segments.map((segment) => (
+            <div className="reporting-pie-legend-item" key={segment.label}>
+              <span
+                className="reporting-pie-swatch"
+                style={{ backgroundColor: segment.color }}
+              />
+              <span className="reporting-pie-legend-label">
+                {reportingValueLabel(segment.label)}
+              </span>
+              <strong>{reportingFormatValue(segment.count)}</strong>
+              <small>{reportingFormatValue(Number(segment.percentage.toFixed(1)))}٪</small>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="reporting-empty-state">برای نمایش نمودار، داده‌ای وجود ندارد.</p>
+      )}
+    </div>
+  )
+}
+
+function reportingChartSlices(report, items, payload) {
+  if (report === 'unit-status-matrix') {
+    const statuses = reportingList(payload?.statuses)
+    return statuses.map((status, index) => ({
+      label: status,
+      count: items.reduce(
+        (sum, item) => sum + Number(item.source?.counts?.[index] || 0),
+        0,
+      ),
+    })).filter((slice) => slice.count > 0)
+  }
+
+  if (report === 'strategy-alignment') {
+    const counts = new Map()
+
+    items.forEach((item) => {
+      reportingList(item.source?.cells).forEach((cell) => {
+        const level = cell?.level || 'Unknown'
+        counts.set(level, (counts.get(level) || 0) + 1)
+      })
+    })
+
+    const preferredOrder = ['High', 'Medium', 'Low', 'None', 'Unknown']
+    const remaining = [...counts.keys()].filter((key) => !preferredOrder.includes(key))
+
+    return [...preferredOrder, ...remaining]
+      .filter((key) => counts.has(key))
+      .map((key) => ({ label: key, count: counts.get(key) }))
+      .filter((slice) => slice.count > 0)
+  }
+
+  const counts = new Map()
+  items.forEach((item) => {
+    const category = item.category || 'Unknown'
+    counts.set(category, (counts.get(category) || 0) + 1)
+  })
+
+  return [...counts.entries()].map(([label, count]) => ({ label, count }))
+}
+
+const reportingRequestError = (result) => {
+  if (result?.status === 401) {
+    return 'نشست شما معتبر نیست. دوباره وارد سامانه شوید.'
+  }
+
+  if (result?.status === 403) {
+    return 'برای مشاهده این گزارش، دسترسی سازمانی Reporting.ViewAll لازم است.'
+  }
+
+  if (result?.status === 409) {
+    return 'این گزارش در حال حاضر قابل تولید نیست؛ فعال بودن ماژول‌های وابسته و داده‌های لازم را بررسی کنید.'
+  }
+
+  const raw = result?.error
+  if (typeof raw === 'string' && raw) return raw
+  if (raw?.detail) return raw.detail
+  if (raw?.message) return raw.message
+  if (raw?.title) return raw.title
+
+  return 'دریافت گزارش ناموفق بود. وضعیت API و دسترسی خود را بررسی کنید.'
+}
+
+function createFakeReportingPayload(report, asOf) {
+  const date = asOf || '2026-10-19'
+  const id = (n) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`
+  const projectIds = (first, count) => Array.from({ length: count }, (_, i) => id(first + i))
+
+  switch (report) {
+    case 'unit-performance':
+      return {
+        level: 2, maxLevel: 5, asOf: date,
+        summary: {
+          projectCount: 42, runningProjects: 28, delayedProjects: 9,
+          averagePerformance: 76.4, rating: 'Good',
+        },
+        units: [
+          {
+            unitId: id(101), unitName: 'فناوری اطلاعات', unitCode: 'IT', level: 2,
+            projectCount: 12, runningProjects: 8, completedProjects: 4, overdueProjects: 1,
+            totalBudget: 8400000000, projectsWithProgress: 10,
+            averagePlannedProgress: 68, averageActualProgress: 72, averageDeviation: 4,
+            onTrack: 7, atRisk: 2, behind: 1, delayedProjects: 1,
+            averagePerformance: 91, rating: 'Excellent', projectIds: projectIds(1001, 12),
+          },
+          {
+            unitId: id(102), unitName: 'امور مالی', unitCode: 'FIN', level: 2,
+            projectCount: 9, runningProjects: 6, completedProjects: 3, overdueProjects: 3,
+            totalBudget: 6300000000, projectsWithProgress: 8,
+            averagePlannedProgress: 74, averageActualProgress: 58, averageDeviation: -16,
+            onTrack: 3, atRisk: 2, behind: 3, delayedProjects: 3,
+            averagePerformance: 61, rating: 'NeedsImprovement', projectIds: projectIds(1101, 9),
+          },
+          {
+            unitId: id(103), unitName: 'عملیات و پشتیبانی', unitCode: 'OPS', level: 2,
+            projectCount: 15, runningProjects: 10, completedProjects: 5, overdueProjects: 4,
+            totalBudget: 12500000000, projectsWithProgress: 13,
+            averagePlannedProgress: 62, averageActualProgress: 60, averageDeviation: -2,
+            onTrack: 8, atRisk: 3, behind: 2, delayedProjects: 4,
+            averagePerformance: 78, rating: 'Good', projectIds: projectIds(1201, 15),
+          },
+          {
+            unitId: id(104), unitName: 'برنامه‌ریزی راهبردی', unitCode: 'STR', level: 2,
+            projectCount: 6, runningProjects: 4, completedProjects: 2, overdueProjects: 1,
+            totalBudget: 4100000000, projectsWithProgress: 2,
+            averagePlannedProgress: null, averageActualProgress: null, averageDeviation: null,
+            onTrack: 0, atRisk: 0, behind: 0, delayedProjects: 1,
+            averagePerformance: null, rating: null, projectIds: projectIds(1301, 6),
+          },
+        ],
+      }
+
+    case 'unit-status-matrix':
+      return {
+        level: 2,
+        statuses: ['Draft', 'Active', 'OnHold', 'Completed', 'Archived'],
+        rows: [
+          { unitId: id(101), unitName: 'فناوری اطلاعات', unitCode: 'IT', counts: [2, 7, 1, 4, 0], total: 14 },
+          { unitId: id(102), unitName: 'امور مالی', unitCode: 'FIN', counts: [1, 6, 2, 3, 0], total: 12 },
+          { unitId: id(103), unitName: 'عملیات و پشتیبانی', unitCode: 'OPS', counts: [0, 4, 1, 2, 0], total: 7 },
+          { unitId: id(104), unitName: 'برنامه‌ریزی راهبردی', unitCode: 'STR', counts: [0, 2, 1, 1, 1], total: 5 },
+        ],
+        columnTotals: [3, 19, 5, 10, 1],
+        total: 38,
+      }
+
+    case 'project-managers':
+      return {
+        asOf: date,
+        managers: [
+          {
+            managerUserId: id(201), projectCount: 6, runningProjects: 4, completedProjects: 2,
+            overdueProjects: 0, totalBudget: 4200000000, projectsWithProgress: 5,
+            averagePlannedProgress: 62, averageActualProgress: 67, averageDeviation: 5,
+            onTrack: 4, atRisk: 1, behind: 0, onTrackShare: 80, openActions: 3,
+            delayedProjects: 0, averagePerformance: 93, rating: 'Excellent', projectIds: projectIds(2001, 6),
+          },
+          {
+            managerUserId: id(202), projectCount: 5, runningProjects: 3, completedProjects: 2,
+            overdueProjects: 2, totalBudget: 7800000000, projectsWithProgress: 4,
+            averagePlannedProgress: 77, averageActualProgress: 59, averageDeviation: -18,
+            onTrack: 1, atRisk: 1, behind: 2, onTrackShare: 25, openActions: 8,
+            delayedProjects: 2, averagePerformance: 57, rating: 'NeedsImprovement', projectIds: projectIds(2101, 5),
+          },
+          {
+            managerUserId: id(203), projectCount: 8, runningProjects: 6, completedProjects: 2,
+            overdueProjects: 1, totalBudget: 9100000000, projectsWithProgress: 7,
+            averagePlannedProgress: 58, averageActualProgress: 61, averageDeviation: 3,
+            onTrack: 5, atRisk: 1, behind: 1, onTrackShare: 71, openActions: 4,
+            delayedProjects: 1, averagePerformance: 79, rating: 'Good', projectIds: projectIds(2201, 8),
+          },
+          {
+            managerUserId: id(204), projectCount: 3, runningProjects: 2, completedProjects: 1,
+            overdueProjects: 0, totalBudget: 1700000000, projectsWithProgress: 0,
+            averagePlannedProgress: null, averageActualProgress: null, averageDeviation: null,
+            onTrack: 0, atRisk: 0, behind: 0, onTrackShare: null, openActions: 1,
+            delayedProjects: 0, averagePerformance: null, rating: null, projectIds: projectIds(2301, 3),
+          },
+        ],
+      }
+
+    case 'strategy-alignment':
+      return {
+        strategies: [
+          {
+            strategyId: id(301), name: 'تحول دیجیتال', parentStrategyId: null,
+            depth: 1, weight: 3, directProjects: 4, projectsIncludingChildren: 6,
+            highAlignedProjects: 3, averagePercentage: 78,
+          },
+          {
+            strategyId: id(302), name: 'بهبود کیفیت خدمات', parentStrategyId: null,
+            depth: 1, weight: 2, directProjects: 3, projectsIncludingChildren: 3,
+            highAlignedProjects: 2, averagePercentage: 71,
+          },
+          {
+            strategyId: id(303), name: 'توسعه سرمایه انسانی', parentStrategyId: null,
+            depth: 1, weight: 1, directProjects: 1, projectsIncludingChildren: 1,
+            highAlignedProjects: 0, averagePercentage: 42,
+          },
+        ],
+        projects: [
+          {
+            projectId: id(310), name: 'سامانه خدمات غیرحضوری', code: 'PR-101',
+            cells: [{ level: 'High', percentage: 92 }, { level: 'High', percentage: 85 }, { level: 'None', percentage: null }],
+            alignedStrategies: 2, averagePercentage: 88.5, weightedPercentage: 89,
+          },
+          {
+            projectId: id(311), name: 'نوسازی زیرساخت', code: 'PR-102',
+            cells: [{ level: 'High', percentage: 88 }, { level: 'Medium', percentage: 65 }, { level: 'Low', percentage: 38 }],
+            alignedStrategies: 3, averagePercentage: 63.7, weightedPercentage: 75,
+          },
+          {
+            projectId: id(312), name: 'ارتقای امنیت اطلاعات', code: 'PR-103',
+            cells: [{ level: 'High', percentage: 95 }, { level: 'None', percentage: null }, { level: 'None', percentage: null }],
+            alignedStrategies: 1, averagePercentage: 95, weightedPercentage: 95,
+          },
+          {
+            projectId: id(313), name: 'آموزش مدیران', code: 'PR-104',
+            cells: [{ level: 'None', percentage: null }, { level: 'Medium', percentage: 58 }, { level: 'High', percentage: 87 }],
+            alignedStrategies: 2, averagePercentage: 72.5, weightedPercentage: 69,
+          },
+          {
+            projectId: id(314), name: 'بهینه‌سازی فرایندها', code: 'PR-105',
+            cells: [{ level: 'Low', percentage: 33 }, { level: 'High', percentage: 91 }, { level: 'None', percentage: null }],
+            alignedStrategies: 2, averagePercentage: 62, weightedPercentage: 56,
+          },
+        ],
+        uncoveredStrategyIds: [],
+        unalignedProjectIds: [id(315)],
+      }
+
+    case 'health':
+      return {
+        asOf: date,
+        projectCount: 8,
+        counts: [
+          { name: 'Green', count: 3 },
+          { name: 'Amber', count: 2 },
+          { name: 'Red', count: 2 },
+          { name: 'Unknown', count: 1 },
+        ],
+        projects: [
+          { projectId: id(401), name: 'سامانه اتوماسیون', code: 'HE-01', status: 'Active', organizationUnitId: id(101), managerUserId: id(201), health: 'Green', plannedProgress: 72, actualProgress: 75, spi: 1.04, cpi: 1.02, forecastDelayDays: 0, isOverdue: false },
+          { projectId: id(402), name: 'پرتال مشتریان', code: 'HE-02', status: 'Active', organizationUnitId: id(101), managerUserId: id(202), health: 'Amber', plannedProgress: 68, actualProgress: 55, spi: 0.81, cpi: 0.96, forecastDelayDays: 12, isOverdue: true },
+          { projectId: id(403), name: 'یکپارچه‌سازی داده', code: 'HE-03', status: 'OnHold', organizationUnitId: id(103), managerUserId: id(203), health: 'Red', plannedProgress: 80, actualProgress: 43, spi: 0.54, cpi: 0.72, forecastDelayDays: 37, isOverdue: true },
+          { projectId: id(404), name: 'ارتقای شبکه', code: 'HE-04', status: 'Active', organizationUnitId: id(101), managerUserId: id(201), health: 'Green', plannedProgress: 51, actualProgress: 54, spi: 1.06, cpi: 1.08, forecastDelayDays: 0, isOverdue: false },
+          { projectId: id(405), name: 'سامانه مدیریت قرارداد', code: 'HE-05', status: 'Active', organizationUnitId: id(102), managerUserId: id(202), health: 'Red', plannedProgress: 75, actualProgress: 49, spi: 0.65, cpi: 0.83, forecastDelayDays: 24, isOverdue: true },
+          { projectId: id(406), name: 'بهبود پشتیبانی', code: 'HE-06', status: 'Active', organizationUnitId: id(103), managerUserId: id(203), health: 'Amber', plannedProgress: 66, actualProgress: 62, spi: 0.94, cpi: 1.01, forecastDelayDays: 5, isOverdue: false },
+          { projectId: id(407), name: 'داشبورد مدیران', code: 'HE-07', status: 'Completed', organizationUnitId: id(104), managerUserId: id(201), health: 'Green', plannedProgress: 100, actualProgress: 100, spi: 1, cpi: 1, forecastDelayDays: 0, isOverdue: false },
+          { projectId: id(408), name: 'مطالعات اولیه', code: 'HE-08', status: 'Active', organizationUnitId: id(104), managerUserId: id(204), health: 'Unknown', plannedProgress: null, actualProgress: null, spi: null, cpi: null, forecastDelayDays: null, isOverdue: false },
+        ],
+      }
+
+    case 'attention':
+      return {
+        asOf: date, total: 7, truncated: false, risksIncluded: true,
+        countsByKind: [
+          { name: 'ProjectOverdue', count: 2 },
+          { name: 'ProjectRed', count: 1 },
+          { name: 'ProjectAtRisk', count: 1 },
+          { name: 'RiskWithoutResponsePlan', count: 1 },
+          { name: 'ActionOverdue', count: 2 },
+        ],
+        items: [
+          { kind: 'ProjectOverdue', severity: 'High', subjectType: 'Project', subjectId: id(501), projectId: id(401), projectName: 'پرتال مشتریان', title: 'تأخیر در تکمیل فاز دوم', dueDate: '2026-10-05', daysLate: 14, ownerUserId: id(202) },
+          { kind: 'ProjectOverdue', severity: 'High', subjectType: 'Project', subjectId: id(502), projectId: id(402), projectName: 'سامانه قراردادها', title: 'عبور از تاریخ پایان برنامه', dueDate: '2026-10-10', daysLate: 9, ownerUserId: id(203) },
+          { kind: 'ProjectRed', severity: 'High', subjectType: 'Project', subjectId: id(503), projectId: id(403), projectName: 'یکپارچه‌سازی داده', title: 'وضعیت سلامت بحرانی', dueDate: date, daysLate: null, ownerUserId: id(203) },
+          { kind: 'ProjectAtRisk', severity: 'Medium', subjectType: 'Project', subjectId: id(504), projectId: id(404), projectName: 'بهبود پشتیبانی', title: 'احتمال انحراف از برنامه', dueDate: date, daysLate: null, ownerUserId: id(201) },
+          { kind: 'RiskWithoutResponsePlan', severity: 'High', subjectType: 'Risk', subjectId: id(505), projectId: id(405), projectName: 'سامانه قراردادها', title: 'ریسک امنیت اطلاعات بدون برنامه پاسخ', dueDate: '2026-10-15', daysLate: 4, ownerUserId: id(202) },
+          { kind: 'ActionOverdue', severity: 'Medium', subjectType: 'Action', subjectId: id(506), projectId: id(406), projectName: 'بهبود پشتیبانی', title: 'بازبینی مستندات فنی', dueDate: '2026-10-12', daysLate: 7, ownerUserId: id(204) },
+          { kind: 'ActionOverdue', severity: 'Medium', subjectType: 'Action', subjectId: id(507), projectId: id(407), projectName: 'داشبورد مدیران', title: 'تکمیل گزارش جلسه', dueDate: '2026-10-14', daysLate: 5, ownerUserId: id(201) },
+        ],
+      }
+
+    case 'risks':
+      return {
+        asOf: date, total: 18, high: 5, medium: 8, low: 5,
+        openHigh: 3, openHighWithoutResponsePlan: 1,
+        byResponseStatus: [
+          { name: 'Planning', count: 4 },
+          { name: 'InProgress', count: 5 },
+          { name: 'OnHold', count: 2 },
+          { name: 'Completed', count: 7 },
+        ],
+        projects: [
+          { projectId: id(601), name: 'سامانه قراردادها', code: 'RK-01', total: 5, high: 2, medium: 2, low: 1, openHigh: 2 },
+          { projectId: id(602), name: 'پرتال مشتریان', code: 'RK-02', total: 4, high: 1, medium: 2, low: 1, openHigh: 1 },
+          { projectId: id(603), name: 'شبکه سازمانی', code: 'RK-03', total: 3, high: 1, medium: 1, low: 1, openHigh: 0 },
+          { projectId: id(604), name: 'مدیریت منابع', code: 'RK-04', total: 3, high: 1, medium: 1, low: 1, openHigh: 0 },
+          { projectId: id(605), name: 'آموزش سازمانی', code: 'RK-05', total: 3, high: 0, medium: 2, low: 1, openHigh: 0 },
+        ],
+        topRisks: [
+          { riskId: id(611), projectId: id(601), projectName: 'سامانه قراردادها', description: 'افشای اطلاعات حساس', probabilityScore: 4, impactScore: 5, rpn: 20, level: 'High', responseStatus: 'Planning', riskOwnerUserId: id(202), hasResponsePlan: false },
+          { riskId: id(612), projectId: id(602), projectName: 'پرتال مشتریان', description: 'تأخیر سرویس بر اثر بار زیاد', probabilityScore: 4, impactScore: 4, rpn: 16, level: 'High', responseStatus: 'InProgress', riskOwnerUserId: id(203), hasResponsePlan: true },
+          { riskId: id(613), projectId: id(601), projectName: 'سامانه قراردادها', description: 'وابستگی به سامانه بیرونی', probabilityScore: 3, impactScore: 5, rpn: 15, level: 'High', responseStatus: 'Planning', riskOwnerUserId: id(202), hasResponsePlan: true },
+          { riskId: id(614), projectId: id(603), projectName: 'شبکه سازمانی', description: 'کمبود نیروی متخصص', probabilityScore: 3, impactScore: 3, rpn: 9, level: 'Medium', responseStatus: 'Completed', riskOwnerUserId: id(201), hasResponsePlan: true },
+        ],
+      }
+
+    case 'kpis':
+      return {
+        asOf: date, kpiCount: 6, withValues: 5, withoutValues: 1,
+        excellent: 2, good: 2, needsImprovement: 1, averageAchievement: 83.6,
+        kpis: [
+          { kpiId: id(701), projectId: id(401), projectName: 'سامانه اتوماسیون', projectCode: 'KP-01', deliverableId: id(801), type: 'Quantity', description: 'درصد تکمیل فرایندها', formula: 'تکمیل‌شده / کل × ۱۰۰', targetValue: 90, latestValue: 96, latestMeasuredOn: date, measurementCount: 5, achievementPercent: 100, rating: 'Excellent', trend: [{ measuredOn: '2026-08-01', value: 72 }, { measuredOn: '2026-09-01', value: 84 }, { measuredOn: date, value: 96 }] },
+          { kpiId: id(702), projectId: id(402), projectName: 'پرتال مشتریان', projectCode: 'KP-02', deliverableId: id(802), type: 'Quality', description: 'رضایت کاربران', formula: 'میانگین امتیاز نظرسنجی', targetValue: 85, latestValue: 88, latestMeasuredOn: date, measurementCount: 4, achievementPercent: 100, rating: 'Excellent', trend: [{ measuredOn: '2026-08-01', value: 75 }, { measuredOn: '2026-09-01', value: 82 }, { measuredOn: date, value: 88 }] },
+          { kpiId: id(703), projectId: id(403), projectName: 'یکپارچه‌سازی داده', projectCode: 'KP-03', deliverableId: id(803), type: 'Quantity', description: 'پوشش سامانه‌های متصل', formula: 'اتصال موفق / برنامه', targetValue: 80, latestValue: 65, latestMeasuredOn: date, measurementCount: 3, achievementPercent: 81.3, rating: 'Good', trend: [{ measuredOn: '2026-08-01', value: 52 }, { measuredOn: '2026-09-01', value: 60 }, { measuredOn: date, value: 65 }] },
+          { kpiId: id(704), projectId: id(404), projectName: 'بهبود پشتیبانی', projectCode: 'KP-04', deliverableId: id(804), type: 'Quality', description: 'پاسخ‌گویی در SLA', formula: 'پاسخ در زمان / کل × ۱۰۰', targetValue: 95, latestValue: 86, latestMeasuredOn: date, measurementCount: 4, achievementPercent: 90.5, rating: 'Good', trend: [{ measuredOn: '2026-08-01', value: 79 }, { measuredOn: '2026-09-01', value: 82 }, { measuredOn: date, value: 86 }] },
+          { kpiId: id(705), projectId: id(405), projectName: 'سامانه قراردادها', projectCode: 'KP-05', deliverableId: id(805), type: 'Quantity', description: 'کاهش خطاهای ثبت', formula: 'کاهش نسبت به دوره قبل', targetValue: 50, latestValue: 24, latestMeasuredOn: date, measurementCount: 2, achievementPercent: 48, rating: 'NeedsImprovement', trend: [{ measuredOn: '2026-09-01', value: 18 }, { measuredOn: date, value: 24 }] },
+          { kpiId: id(706), projectId: id(406), projectName: 'پایش عملیات', projectCode: 'KP-06', deliverableId: id(806), type: 'Quality', description: 'پایداری سرویس', formula: null, targetValue: null, latestValue: null, latestMeasuredOn: null, measurementCount: 0, achievementPercent: null, rating: null, trend: [] },
+        ],
+      }
+
+    default:
+      return {}
+  }
+}
+
+function reportingXYFields(report, items, payload) {
+  const direct = (key, label) => ({
+    key,
+    label,
+    getValue: (item) => item.source?.[key],
+  })
+
+  let fields = []
+
+  switch (report) {
+    case 'unit-performance':
+      fields = [
+        direct('projectCount', 'تعداد پروژه‌ها'),
+        direct('runningProjects', 'پروژه‌های در جریان'),
+        direct('completedProjects', 'پروژه‌های تکمیل‌شده'),
+        direct('overdueProjects', 'پروژه‌های عقب‌افتاده'),
+        direct('totalBudget', 'بودجه کل'),
+        direct('averagePlannedProgress', 'میانگین پیشرفت برنامه‌ای (%)'),
+        direct('averageActualProgress', 'میانگین پیشرفت واقعی (%)'),
+        direct('averageDeviation', 'میانگین انحراف'),
+        direct('onTrack', 'طبق برنامه'),
+        direct('atRisk', 'در معرض ریسک'),
+        direct('behind', 'عقب‌افتاده'),
+        direct('averagePerformance', 'میانگین عملکرد (%)'),
+        direct('delayedProjects', 'پروژه‌های تأخیردار'),
+      ]
+      break
+
+    case 'unit-status-matrix':
+      fields = [
+        direct('total', 'مجموع پروژه‌ها'),
+        ...reportingList(payload?.statuses).map((status, index) => ({
+          key: `status-${index}`,
+          label: `تعداد ${reportingValueLabel(status)}`,
+          getValue: (item) => item.source?.counts?.[index],
+        })),
+      ]
+      break
+
+    case 'project-managers':
+      fields = [
+        direct('projectCount', 'تعداد پروژه‌ها'),
+        direct('runningProjects', 'پروژه‌های در جریان'),
+        direct('completedProjects', 'پروژه‌های تکمیل‌شده'),
+        direct('overdueProjects', 'پروژه‌های عقب‌افتاده'),
+        direct('totalBudget', 'بودجه کل'),
+        direct('averagePlannedProgress', 'میانگین پیشرفت برنامه‌ای (%)'),
+        direct('averageActualProgress', 'میانگین پیشرفت واقعی (%)'),
+        direct('averageDeviation', 'میانگین انحراف'),
+        direct('onTrack', 'طبق برنامه'),
+        direct('atRisk', 'در معرض ریسک'),
+        direct('behind', 'عقب‌افتاده'),
+        direct('onTrackShare', 'سهم طبق برنامه (%)'),
+        direct('openActions', 'اقدام‌های باز'),
+        direct('averagePerformance', 'میانگین عملکرد (%)'),
+      ]
+      break
+
+    case 'strategy-alignment':
+      fields = [
+        direct('alignedStrategies', 'تعداد راهبردهای هم‌راستا'),
+        direct('averagePercentage', 'میانگین هم‌راستایی (%)'),
+        direct('weightedPercentage', 'هم‌راستایی وزنی (%)'),
+        ...reportingList(payload?.strategies).map((strategy, index) => ({
+          key: `strategy-${index}`,
+          label: `درصد هم‌راستایی · ${strategy.name}`,
+          getValue: (item) => item.source?.cells?.[index]?.percentage,
+        })),
+      ]
+      break
+
+    case 'health':
+      fields = [
+        direct('plannedProgress', 'پیشرفت برنامه‌ای (%)'),
+        direct('actualProgress', 'پیشرفت واقعی (%)'),
+        direct('spi', 'شاخص عملکرد زمان (SPI)'),
+        direct('cpi', 'شاخص عملکرد هزینه (CPI)'),
+        direct('forecastDelayDays', 'تأخیر پیش‌بینی‌شده (روز)'),
+      ]
+      break
+
+    case 'attention':
+      fields = [
+        direct('daysLate', 'تعداد روزهای تأخیر'),
+        {
+          key: 'severityScore',
+          label: 'شدت عددی (زیاد=3، متوسط=2)',
+          getValue: (item) => {
+            if (item.source?.severity === 'High') return 3
+            if (item.source?.severity === 'Medium') return 2
+            return null
+          },
+        },
+      ]
+      break
+
+    case 'risks':
+      fields = [
+        direct('total', 'مجموع ریسک‌ها'),
+        direct('high', 'ریسک‌های زیاد'),
+        direct('medium', 'ریسک‌های متوسط'),
+        direct('low', 'ریسک‌های کم'),
+        direct('openHigh', 'ریسک‌های زیادِ باز'),
+      ]
+      break
+
+    case 'kpis':
+      fields = [
+        direct('targetValue', 'مقدار هدف'),
+        direct('latestValue', 'آخرین مقدار ثبت‌شده'),
+        direct('measurementCount', 'تعداد اندازه‌گیری‌ها'),
+        direct('achievementPercent', 'درصد تحقق هدف'),
+      ]
+      break
+
+    default:
+      fields = []
+  }
+
+  return fields.filter((field) =>
+    reportingList(items).some((item) => {
+      const value = field.getValue(item)
+      return typeof value === 'number' && Number.isFinite(value)
+    })
+  )
+}
+
+function ReportingXYChart({ title, points, xLabel, yLabel, zoom, setZoom }) {
+  const width = 820
+  const height = 460
+  const left = 85
+  const top = 30
+  const plotWidth = 680
+  const plotHeight = 325
+
+  const validPoints = reportingList(points).filter(
+    (point) =>
+      typeof point.x === 'number' &&
+      Number.isFinite(point.x) &&
+      typeof point.y === 'number' &&
+      Number.isFinite(point.y)
+  )
+
+  const valuesX = validPoints.map((point) => point.x)
+  const valuesY = validPoints.map((point) => point.y)
+
+  const rawMinX = valuesX.length ? Math.min(...valuesX) : 0
+  const rawMaxX = valuesX.length ? Math.max(...valuesX) : 1
+  const rawMinY = valuesY.length ? Math.min(...valuesY) : 0
+  const rawMaxY = valuesY.length ? Math.max(...valuesY) : 1
+
+  const rangeX = rawMaxX - rawMinX || Math.max(Math.abs(rawMinX) * 0.1, 1)
+  const rangeY = rawMaxY - rawMinY || Math.max(Math.abs(rawMinY) * 0.1, 1)
+
+  const minX = rawMinX - rangeX * 0.08
+  const maxX = rawMaxX + rangeX * 0.08
+  const minY = rawMinY - rangeY * 0.08
+  const maxY = rawMaxY + rangeY * 0.08
+
+  const pointX = (value) => left + ((value - minX) / (maxX - minX)) * plotWidth
+  const pointY = (value) => top + plotHeight - ((value - minY) / (maxY - minY)) * plotHeight
+
+  const tickValues = Array.from({ length: 5 }, (_, index) => ({
+    x: minX + ((maxX - minX) * index) / 4,
+    y: maxY - ((maxY - minY) * index) / 4,
+    index,
+  }))
+
+  return (
+    <div className="reporting-xy-content">
+      <div className="reporting-xy-toolbar">
+        <div>
+          <strong>{title}</strong>
+          <span>{validPoints.length.toLocaleString('fa-IR')} نقطه معتبر</span>
+        </div>
+
+        <div className="reporting-pie-zoom-controls">
+          <button
+            type="button"
+            onClick={() => setZoom((value) => Math.max(0.7, Number((value - 0.2).toFixed(1))))}
+            disabled={zoom <= 0.7}
+            aria-label="کوچک‌نمایی نمودار X/Y"
+          >
+            −
+          </button>
+          <span>{Math.round(zoom * 100)}٪</span>
+          <button
+            type="button"
+            onClick={() => setZoom((value) => Math.min(2, Number((value + 0.2).toFixed(1))))}
+            disabled={zoom >= 2}
+            aria-label="بزرگ‌نمایی نمودار X/Y"
+          >
+            +
+          </button>
+          <button type="button" onClick={() => setZoom(1)}>اندازه عادی</button>
+        </div>
+      </div>
+
+      {!validPoints.length ? (
+        <div className="reporting-empty-state">
+          برای محورهای انتخاب‌شده، دو مقدار عددی معتبر و هم‌زمان در دسترس نیست.
+        </div>
+      ) : (
+        <div className="reporting-xy-stage">
+          <svg
+            className="reporting-xy-svg"
+            viewBox={`0 0 ${width} ${height}`}
+            role="img"
+            aria-label={title}
+            style={{ transform: `scale(${zoom})` }}
+          >
+            <title>{title}</title>
+
+            {tickValues.map((tick) => {
+              const y = top + (plotHeight * tick.index) / 4
+              const x = left + (plotWidth * tick.index) / 4
+
+              return (
+                <g key={`tick-${tick.index}`}>
+                  <line
+                    x1={left}
+                    y1={y}
+                    x2={left + plotWidth}
+                    y2={y}
+                    stroke="#e5eaf1"
+                    strokeWidth="1"
+                  />
+                  <text
+                    x={left - 12}
+                    y={y + 4}
+                    textAnchor="end"
+                    className="reporting-xy-tick"
+                  >
+                    {reportingFormatValue(Number(tick.y.toFixed(2)))}
+                  </text>
+                  <line
+                    x1={x}
+                    y1={top}
+                    x2={x}
+                    y2={top + plotHeight}
+                    stroke="#eef1f5"
+                    strokeWidth="1"
+                  />
+                  <text
+                    x={x}
+                    y={top + plotHeight + 23}
+                    textAnchor="middle"
+                    className="reporting-xy-tick"
+                  >
+                    {reportingFormatValue(Number(tick.x.toFixed(2)))}
+                  </text>
+                </g>
+              )
+            })}
+
+            <line
+              x1={left}
+              y1={top + plotHeight}
+              x2={left + plotWidth}
+              y2={top + plotHeight}
+              stroke="#98a2b3"
+              strokeWidth="1.5"
+            />
+            <line
+              x1={left}
+              y1={top}
+              x2={left}
+              y2={top + plotHeight}
+              stroke="#98a2b3"
+              strokeWidth="1.5"
+            />
+
+            {validPoints.map((point, index) => (
+              <circle
+                key={`${point.id}-${index}`}
+                cx={pointX(point.x)}
+                cy={pointY(point.y)}
+                r="6"
+                fill={REPORTING_CHART_COLORS[index % REPORTING_CHART_COLORS.length]}
+                stroke="#ffffff"
+                strokeWidth="1.5"
+              >
+                <title>
+                  {`${point.label}: ${xLabel}=${reportingFormatValue(point.x)}؛ ${yLabel}=${reportingFormatValue(point.y)}`}
+                </title>
+              </circle>
+            ))}
+
+            <text
+              x={left + plotWidth / 2}
+              y={height - 20}
+              textAnchor="middle"
+              className="reporting-xy-axis-label"
+            >
+              {xLabel}
+            </text>
+
+            <text
+              x="20"
+              y={top + plotHeight / 2}
+              textAnchor="middle"
+              transform={`rotate(-90 20 ${top + plotHeight / 2})`}
+              className="reporting-xy-axis-label"
+            >
+              {yLabel}
+            </text>
+          </svg>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ReportingExportPage() {
+  const [report, setReport] = useState('health')
+  const [level, setLevel] = useState('2')
+  const [asOf, setAsOf] = useState('')
+  const [search, setSearch] = useState('')
+  const [categoryFilter, setCategoryFilter] = useState('all')
+  const [payload, setPayload] = useState(null)
+  const [loading, setLoading] = useState(false)
+  const [busy, setBusy] = useState('')
+  const [error, setError] = useState('')
+  const [message, setMessage] = useState('')
+  const [reloadKey, setReloadKey] = useState(0)
+  const [chartExpanded, setChartExpanded] = useState(false)
+  const [chartZoom, setChartZoom] = useState(1)
+  const [xField, setXField] = useState('')
+  const [yField, setYField] = useState('')
+  const [xyZoom, setXyZoom] = useState(1)
+
+  const selectedReport = REPORTING_EXPORT_OPTIONS.find((item) => item.key === report)
+  const isUnitReport = report === 'unit-performance' || report === 'unit-status-matrix'
+  const supportsAsOf = !['unit-status-matrix', 'strategy-alignment'].includes(report)
+  const isDemoMode = new URLSearchParams(window.location.search).get('demo') === '1'
+
+  useEffect(() => {
+    let active = true
+
+    if (isDemoMode) {
+      setLoading(false)
+      setError('')
+      setPayload(createFakeReportingPayload(report, asOf))
+      setMessage('حالت نمایشی فعال است؛ داده‌ها ساختگی‌اند و از API یا پایگاه‌داده دریافت نمی‌شوند.')
+      return () => {
+        active = false
+      }
+    }
+
+    const loadReport = async () => {
+      setLoading(true)
+      setError('')
+      setMessage('')
+      setPayload(null)
+
+      try {
+        let result
+
+        switch (report) {
+          case 'unit-performance':
+            result = await reportingApi.unitPerformance({
+              level: Number(level),
+              asOf: asOf || undefined,
+            })
+            break
+
+          case 'unit-status-matrix':
+            result = await reportingApi.unitStatusMatrix(Number(level))
+            break
+
+          case 'project-managers':
+            result = await reportingApi.projectManagers({ asOf: asOf || undefined })
+            break
+
+          case 'strategy-alignment':
+            result = await reportingApi.strategyAlignmentMatrix()
+            break
+
+          case 'health':
+            result = await reportingApi.healthBoard({ asOf: asOf || undefined })
+            break
+
+          case 'attention':
+            result = await reportingApi.attentionBoard({ asOf: asOf || undefined })
+            break
+
+          case 'risks':
+            result = await reportingApi.riskOverview({ asOf: asOf || undefined })
+            break
+
+          case 'kpis':
+            result = await reportingApi.kpiOverview({ asOf: asOf || undefined })
+            break
+
+          default:
+            throw new Error('نوع گزارش انتخاب‌شده پشتیبانی نمی‌شود.')
+        }
+
+        if (!result?.isSuccess) {
+          throw new Error(reportingRequestError(result))
+        }
+
+        let value = result.value
+
+        // Accommodate endpoints that may return a nested Result<T>.
+        if (
+          value &&
+          typeof value === 'object' &&
+          'isSuccess' in value &&
+          'value' in value
+        ) {
+          if (!value.isSuccess) {
+            throw new Error(reportingRequestError(value))
+          }
+          value = value.value
+        }
+
+        if (!value || typeof value !== 'object') {
+          throw new Error('پاسخ API ساختار مورد انتظار گزارش را ندارد.')
+        }
+
+        if (active) setPayload(value)
+      } catch (err) {
+        if (active) {
+          setPayload(null)
+          setError(err?.message || 'دریافت داده‌های گزارش با خطا مواجه شد.')
+        }
+      } finally {
+        if (active) setLoading(false)
+      }
+    }
+
+    loadReport()
+
+    return () => {
+      active = false
+    }
+  }, [report, level, asOf, reloadKey, isDemoMode])
+
+  const view = useMemo(
+    () => buildReportingView(report, payload),
+    [report, payload],
+  )
+
+  const categories = useMemo(
+    () => [...new Set(view.items.map((item) => item.category).filter(Boolean))],
+    [view.items],
+  )
+
+  const filteredItems = useMemo(() => {
+    const normalizedSearch = search.trim().toLocaleLowerCase()
+
+    return view.items.filter((item) => {
+      const matchesSearch = !normalizedSearch || item.searchText.includes(normalizedSearch)
+      const matchesCategory = categoryFilter === 'all' || item.category === categoryFilter
+      return matchesSearch && matchesCategory
+    })
+  }, [view.items, search, categoryFilter])
+
+  const chartSlices = useMemo(
+    () => reportingChartSlices(report, filteredItems, payload),
+    [report, filteredItems, payload],
+  )
+
+  const xyFields = useMemo(
+    () => reportingXYFields(report, view.items, payload),
+    [report, view.items, payload],
+  )
+
+  useEffect(() => {
+    if (!xyFields.length) {
+      if (xField) setXField('')
+      if (yField) setYField('')
+      return
+    }
+
+    const nextX = xyFields.some((field) => field.key === xField)
+      ? xField
+      : xyFields[0].key
+
+    const nextY = xyFields.some((field) => field.key === yField)
+      ? yField
+      : (xyFields.find((field) => field.key !== nextX)?.key || nextX)
+
+    if (nextX !== xField) setXField(nextX)
+    if (nextY !== yField) setYField(nextY)
+  }, [xyFields, xField, yField])
+
+  const xyPoints = useMemo(() => {
+    const xDefinition = xyFields.find((field) => field.key === xField)
+    const yDefinition = xyFields.find((field) => field.key === yField)
+
+    if (!xDefinition || !yDefinition) return []
+
+    return filteredItems
+      .map((item) => ({
+        id: item.id,
+        label: item.title,
+        category: item.category,
+        x: xDefinition.getValue(item),
+        y: yDefinition.getValue(item),
+      }))
+      .filter(
+        (point) =>
+          typeof point.x === 'number' &&
+          Number.isFinite(point.x) &&
+          typeof point.y === 'number' &&
+          Number.isFinite(point.y)
+      )
+  }, [filteredItems, xyFields, xField, yField])
+  const requestOptions = () => ({
+    level: Number(level),
+    asOf: asOf || undefined,
+  })
+
+  const downloadExcel = async () => {
+    setError('')
+    setMessage('')
+    setBusy('xlsx')
+
+    try {
+      const result = await reportingApi.exportFile(report, {
+        ...requestOptions(),
+        format: 'xlsx',
+      })
+
+      if (!result?.isSuccess) {
+        setError(reportingRequestError(result))
+        return
+      }
+
+      if (!(result.value instanceof Blob)) {
+        setError('پاسخ سرور فایل Excel معتبری نبود.')
+        return
+      }
+
+      const url = URL.createObjectURL(result.value)
+      const anchor = document.createElement('a')
+      anchor.href = url
+      anchor.download = `${report}${asOf ? `-${asOf}` : ''}.xlsx`
+      document.body.appendChild(anchor)
+      anchor.click()
+      anchor.remove()
+      window.setTimeout(() => URL.revokeObjectURL(url), 1500)
+
+      setMessage('دریافت فایل Excel آغاز شد.')
+    } catch (err) {
+      setError(err?.message || 'هنگام دریافت فایل Excel خطایی رخ داد.')
+    } finally {
+      setBusy('')
+    }
+  }
+
+  const openPrintableReport = () => {
+    setError('')
+    setMessage('')
+
+    // Must open synchronously from this click to avoid popup blocking.
+    const printWindow = window.open('', '_blank')
+    if (!printWindow) {
+      setError('مرورگر پنجره جدید را مسدود کرد. اجازه بازشدن پنجره جدید را فعال کنید.')
+      return
+    }
+
+    setBusy('html')
+
+    try {
+      const escapeHtml = (value) =>
+        String(value ?? '—')
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/'/g, '&#39;')
+
+      const safeText = (value) => escapeHtml(reportingFormatValue(value))
+      const pieTotal = chartSlices.reduce((sum, slice) => sum + Number(slice.count || 0), 0)
+
+      const metricsHtml = view.metrics.map((metric) => `
+        <article class="metric">
+          <span>${escapeHtml(metric.label)}</span>
+          <strong>${safeText(metric.value)}</strong>
+        </article>
+      `).join('')
+
+      let pieAngle = 0
+      const positiveSlices = chartSlices.filter((slice) => Number(slice.count || 0) > 0)
+
+      const piePaths = positiveSlices.map((slice, index) => {
+        const start = pieAngle
+        pieAngle += Number(slice.count || 0) / (pieTotal || 1) * Math.PI * 2
+        const end = pieAngle
+        return `<path d="${reportingDonutPath(start, end)}" fill="${REPORTING_CHART_COLORS[index % REPORTING_CHART_COLORS.length]}"><title>${escapeHtml(reportingValueLabel(slice.label))}: ${safeText(slice.count)}</title></path>`
+      }).join('')
+
+      const singlePie = positiveSlices.length === 1
+        ? `<circle cx="160" cy="160" r="112" fill="${REPORTING_CHART_COLORS[0]}"/>`
+        : piePaths
+
+      const pieHtml = pieTotal > 0
+        ? `
+          <svg class="pie-svg" viewBox="0 0 320 320" role="img" aria-label="${escapeHtml(view.chartTitle)}">
+            ${singlePie}
+            <circle cx="160" cy="160" r="64" fill="#fff"/>
+            <text x="160" y="153" text-anchor="middle" class="pie-total">${safeText(pieTotal)}</text>
+            <text x="160" y="180" text-anchor="middle" class="pie-center-label">تعداد</text>
+          </svg>
+        `
+        : '<p>داده‌ای برای رسم نمودار وجود ندارد.</p>'
+
+      const pieLegendHtml = positiveSlices.map((slice, index) => {
+        const percentage = pieTotal > 0 ? Number(slice.count) / pieTotal * 100 : 0
+        return `
+          <tr>
+            <td><span class="swatch" style="background:${REPORTING_CHART_COLORS[index % REPORTING_CHART_COLORS.length]}"></span>${escapeHtml(reportingValueLabel(slice.label))}</td>
+            <td>${safeText(slice.count)}</td>
+            <td>${safeText(Number(percentage.toFixed(1)))}٪</td>
+          </tr>
+        `
+      }).join('')
+
+      const xLabel = xyFields.find((field) => field.key === xField)?.label || 'X'
+      const yLabel = xyFields.find((field) => field.key === yField)?.label || 'Y'
+
+      const validPoints = xyPoints.filter(
+        (point) =>
+          typeof point.x === 'number' && Number.isFinite(point.x) &&
+          typeof point.y === 'number' && Number.isFinite(point.y)
+      )
+
+      const plot = { left: 85, top: 25, width: 680, height: 325 }
+      const xs = validPoints.map((point) => point.x)
+      const ys = validPoints.map((point) => point.y)
+      const rawMinX = xs.length ? Math.min(...xs) : 0
+      const rawMaxX = xs.length ? Math.max(...xs) : 1
+      const rawMinY = ys.length ? Math.min(...ys) : 0
+      const rawMaxY = ys.length ? Math.max(...ys) : 1
+      const rangeX = rawMaxX - rawMinX || Math.max(Math.abs(rawMinX) * 0.1, 1)
+      const rangeY = rawMaxY - rawMinY || Math.max(Math.abs(rawMinY) * 0.1, 1)
+      const minX = rawMinX - rangeX * 0.08
+      const maxX = rawMaxX + rangeX * 0.08
+      const minY = rawMinY - rangeY * 0.08
+      const maxY = rawMaxY + rangeY * 0.08
+
+      const px = (value) => plot.left + ((value - minX) / (maxX - minX)) * plot.width
+      const py = (value) => plot.top + plot.height - ((value - minY) / (maxY - minY)) * plot.height
+
+      const gridX = []
+      const gridY = []
+
+      for (let i = 0; i < 5; i += 1) {
+        const x = plot.left + plot.width * i / 4
+        const y = plot.top + plot.height * i / 4
+        const xValue = minX + (maxX - minX) * i / 4
+        const yValue = maxY - (maxY - minY) * i / 4
+
+        gridX.push(`
+          <line x1="${x}" y1="${plot.top}" x2="${x}" y2="${plot.top + plot.height}" stroke="#eef1f5"/>
+          <text x="${x}" y="${plot.top + plot.height + 22}" text-anchor="middle" class="tick">${safeText(Number(xValue.toFixed(2)))}</text>
+        `)
+
+        gridY.push(`
+          <line x1="${plot.left}" y1="${y}" x2="${plot.left + plot.width}" y2="${y}" stroke="#e5eaf1"/>
+          <text x="${plot.left - 10}" y="${y + 4}" text-anchor="end" class="tick">${safeText(Number(yValue.toFixed(2)))}</text>
+        `)
+      }
+
+      const xyDots = validPoints.map((point, index) => `
+        <circle
+          cx="${px(point.x)}"
+          cy="${py(point.y)}"
+          r="5"
+          fill="${REPORTING_CHART_COLORS[index % REPORTING_CHART_COLORS.length]}"
+          stroke="#fff"
+          stroke-width="1.5"
+        >
+          <title>${escapeHtml(point.label)}: ${escapeHtml(xLabel)}=${safeText(point.x)}؛ ${escapeHtml(yLabel)}=${safeText(point.y)}</title>
+        </circle>
+      `).join('')
+
+      const xyHtml = validPoints.length
+        ? `
+          <svg class="xy-svg" viewBox="0 0 820 430" role="img" aria-label="نمودار X/Y">
+            ${gridX.join('')}
+            ${gridY.join('')}
+            <line x1="${plot.left}" y1="${plot.top + plot.height}" x2="${plot.left + plot.width}" y2="${plot.top + plot.height}" stroke="#98a2b3" stroke-width="1.5"/>
+            <line x1="${plot.left}" y1="${plot.top}" x2="${plot.left}" y2="${plot.top + plot.height}" stroke="#98a2b3" stroke-width="1.5"/>
+            ${xyDots}
+            <text x="${plot.left + plot.width / 2}" y="415" text-anchor="middle" class="axis-label">${escapeHtml(xLabel)}</text>
+            <text x="18" y="${plot.top + plot.height / 2}" text-anchor="middle" transform="rotate(-90 18 ${plot.top + plot.height / 2})" class="axis-label">${escapeHtml(yLabel)}</text>
+          </svg>
+        `
+        : '<p>برای محورهای انتخاب‌شده، داده عددی کافی برای رسم نمودار وجود ندارد.</p>'
+
+      const xyTableHtml = validPoints.map((point) => `
+        <tr>
+          <td>${escapeHtml(point.label)}</td>
+          <td>${safeText(point.x)}</td>
+          <td>${safeText(point.y)}</td>
+        </tr>
+      `).join('')
+
+      const recordsHtml = filteredItems.map((item) => `
+        <article class="record">
+          <h3>${escapeHtml(item.title)}</h3>
+          <p class="subtitle">${escapeHtml(item.subtitle || '')} · ${escapeHtml(reportingValueLabel(item.category))}</p>
+          <table class="details-table">
+            <tbody>
+              ${item.details.map((detail) => `
+                <tr>
+                  <th>${escapeHtml(detail.label)}</th>
+                  <td>${safeText(detail.value)}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </article>
+      `).join('')
+
+      const filterSummary = [
+        `تاریخ مبنا: ${supportsAsOf && asOf ? reportingFormatValue(asOf) : '—'}`,
+        isUnitReport ? `سطح سازمانی: ${level}` : '',
+        `جست‌وجو: ${search || 'بدون جست‌وجو'}`,
+        `گروه: ${categoryFilter === 'all' ? 'همه گروه‌ها' : reportingValueLabel(categoryFilter)}`,
+        `تعداد رکورد: ${filteredItems.length}`,
+      ].filter(Boolean).map(escapeHtml).join(' · ')
+
+      const printableHtml = `
+        <!doctype html>
+        <html lang="fa" dir="rtl">
+          <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+            <title>${escapeHtml(selectedReport?.label || 'گزارش')}</title>
+            <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:; base-uri 'none'; form-action 'none'">
+            <style>
+              * { box-sizing: border-box; }
+              body { margin: 0; padding: 20px; color: #172033; font: 13px/1.8 Tahoma, Arial, sans-serif; background: #fff; }
+              h1 { font-size: 22px; margin: 0 0 6px; }
+              h2 { font-size: 17px; margin: 18px 0 10px; }
+              h3 { font-size: 15px; margin: 0 0 4px; }
+              p { margin: 4px 0 12px; }
+              .muted, .subtitle { color: #667085; }
+              .toolbar { display:flex; justify-content:space-between; align-items:center; gap:16px; border-bottom:2px solid #dce3ec; padding-bottom:12px; }
+              #print-action { border:1px solid #94a3b8; border-radius:8px; background:#f8fafc; padding:9px 14px; color:#172033; font:inherit; cursor:pointer; }
+              .filter-summary { margin:12px 0; padding:10px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; }
+              .metrics { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:8px; }
+              .metric { padding:10px; border:1px solid #e0e5ed; border-radius:8px; min-width:0; }
+              .metric span { display:block; color:#667085; font-size:11px; }
+              .metric strong { display:block; margin-top:4px; font-size:15px; overflow-wrap:anywhere; }
+              .charts { display:grid; grid-template-columns:minmax(0,0.8fr) minmax(0,1.2fr); gap:16px; align-items:start; }
+              .chart-box { border:1px solid #e0e5ed; border-radius:10px; padding:10px; min-width:0; page-break-inside:avoid; }
+              .pie-svg { display:block; width:min(100%,300px); margin:0 auto; }
+              .xy-svg { width:100%; height:auto; display:block; }
+              .pie-total { fill:#172033; font-size:29px; font-weight:700; }
+              .pie-center-label, .tick { fill:#667085; font-size:11px; }
+              .axis-label { fill:#344054; font-size:12px; }
+              .swatch { display:inline-block; width:9px; height:9px; border-radius:2px; margin-left:6px; }
+              table { width:100%; border-collapse:collapse; }
+              th, td { border:1px solid #e0e5ed; text-align:right; padding:6px 8px; vertical-align:top; overflow-wrap:anywhere; }
+              th { background:#f8fafc; font-weight:600; }
+              .record { border:1px solid #dce3ec; border-radius:9px; padding:10px; margin:10px 0; break-inside:avoid-page; page-break-inside:avoid; }
+              .details-table th { width:28%; }
+              .chart-data-table { margin-top:8px; font-size:11px; }
+              @page { size:A4 landscape; margin:10mm; }
+              @media print {
+                body { padding:0; }
+                .no-print { display:none !important; }
+                .metric, .chart-box { break-inside:avoid; }
+                .record { page-break-inside:avoid; }
+              }
+              @media screen and (max-width:760px) {
+                .toolbar { align-items:flex-start; flex-direction:column; }
+                .metrics { grid-template-columns:repeat(2,minmax(0,1fr)); }
+                .charts { grid-template-columns:minmax(0,1fr); }
+              }
+            </style>
+          </head>
+          <body>
+            <header class="toolbar">
+              <div>
+                <h1>${escapeHtml(selectedReport?.label || 'گزارش')}</h1>
+                <p class="muted">${escapeHtml(selectedReport?.description || '')}</p>
+              </div>
+              <button type="button" id="print-action" class="no-print">چاپ / ذخیره به صورت PDF</button>
+            </header>
+
+            <div class="filter-summary">${filterSummary}</div>
+
+            <section>
+              <h2>خلاصه گزارش</h2>
+              <div class="metrics">${metricsHtml || '<p>خلاصه‌ای در دسترس نیست.</p>'}</div>
+            </section>
+
+            <section>
+              <h2>نمودارها</h2>
+              <div class="charts">
+                <div class="chart-box">
+                  <h3>${escapeHtml(view.chartTitle)}</h3>
+                  ${pieHtml}
+                  <table class="chart-data-table">
+                    <thead><tr><th>گروه</th><th>تعداد</th><th>درصد</th></tr></thead>
+                    <tbody>${pieLegendHtml}</tbody>
+                  </table>
+                </div>
+                <div class="chart-box">
+                  <h3>نمودار X/Y</h3>
+                  <p class="muted">محور X: ${escapeHtml(xLabel)} · محور Y: ${escapeHtml(yLabel)}</p>
+                  ${xyHtml}
+                  <table class="chart-data-table">
+                    <thead><tr><th>رکورد</th><th>X</th><th>Y</th></tr></thead>
+                    <tbody>${xyTableHtml}</tbody>
+                  </table>
+                </div>
+              </div>
+            </section>
+
+            <section>
+              <h2>فهرست جزئیات (${filteredItems.length})</h2>
+              ${recordsHtml || '<p>رکوردی برای نمایش وجود ندارد.</p>'}
+            </section>
+          </body>
+        </html>
+      `
+
+      printWindow.document.open()
+      printWindow.document.write(printableHtml)
+      printWindow.document.close()
+
+      const printButton = printWindow.document.getElementById('print-action')
+      if (printButton) {
+        printButton.addEventListener('click', (event) => {
+          event.preventDefault()
+
+          try {
+            printWindow.focus()
+            printWindow.print()
+          } catch {
+            setError('\u0686\u0627\u067e \u0627\u062c\u0631\u0627 \u0646\u0634\u062f. \u062f\u0631 \u0647\u0645\u0627\u0646 \u062a\u0628 \u0627\u0632 Ctrl+P \u0627\u0633\u062a\u0641\u0627\u062f\u0647 \u06a9\u0646\u06cc\u062f.')
+          }
+        })
+      }
+      printWindow.opener = null
+      setMessage('نسخه چاپی شامل نمودارها و جزئیات تمام رکوردهای فیلترشده باز شد. برای چاپ از دکمه داخل تب یا Ctrl+P استفاده کنید.')
+    } catch (err) {
+      if (!printWindow.closed) printWindow.close()
+      setError(err?.message || 'هنگام آماده‌سازی گزارش چاپی خطایی رخ داد.')
+    } finally {
+      setBusy('')
+    }
+  }
+  const clearLocalFilters = () => {
+    setSearch('')
+    setCategoryFilter('all')
+  }
+
+  const renderChart = (expanded = false) => (
+    <ReportingPieChart
+      title={view.chartTitle}
+      slices={chartSlices}
+      zoom={chartZoom}
+      setZoom={setChartZoom}
+      onExpand={expanded ? null : () => setChartExpanded(true)}
+    />
+  )
+
+  return (
+    <section className="reporting-dashboard-page" dir="rtl">
+      <header className="reporting-dashboard-header">
+        <div>
+          <span className="reporting-dashboard-eyebrow">گزارش‌گیری سازمانی</span>
+          <h1>داشبورد گزارشات</h1>
+          <p>
+            گزارش را انتخاب کنید، داده‌ها را فیلتر کنید و جزئیات هر رکورد را ببینید.
+          </p>
+        </div>
+
+        <div className="reporting-dashboard-header-actions">
+          <button
+            type="button"
+            onClick={() => setReloadKey((value) => value + 1)}
+            disabled={loading || Boolean(busy)}
+          >
+            {loading ? 'در حال دریافت…' : 'به‌روزرسانی داده‌ها'}
+          </button>
+        </div>
+      </header>
+
+      {isDemoMode && (
+        <div className="reporting-demo-banner" role="status">
+          <div>
+            <strong>حالت نمایشی فعال است</strong>
+            <span>تمام رکوردها ساختگی هستند و در پایگاه داده ذخیره نمی‌شوند. Excel غیرفعال است؛ نسخه PDF همین داده‌های نمایشی و جزئیات فیلترشده را چاپ می‌کند.</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              const url = new URL(window.location.href)
+              url.searchParams.delete('demo')
+              window.location.assign(url.toString())
+            }}
+          >
+            بازگشت به داده‌های واقعی
+          </button>
+        </div>
+      )}
+      <section className="reporting-dashboard-filter-card">
+        <div className="reporting-dashboard-section-heading">
+          <div>
+            <h2>فیلتر و جست‌وجوی گزارش</h2>
+            <p>
+              فیلدها بر اساس نوع گزارش انتخاب‌شده تغییر می‌کنند.
+            </p>
+          </div>
+        </div>
+
+        <div className="reporting-dashboard-filter-grid">
+          <label className="reporting-dashboard-field">
+            <span>نوع گزارش</span>
+            <select
+              value={report}
+              onChange={(event) => {
+                setReport(event.target.value)
+                setCategoryFilter('all')
+                setSearch('')
+              }}
+            >
+              {REPORTING_EXPORT_OPTIONS.map((option) => (
+                <option value={option.key} key={option.key}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          {supportsAsOf && (
+            <div className="reporting-dashboard-field">
+              <span>تاریخ مبنا</span>
+              <JalaliDatePicker value={asOf} onChange={setAsOf} />
+            </div>
+          )}
+
+          {isUnitReport && (
+            <label className="reporting-dashboard-field">
+              <span>سطح سازمانی</span>
+              <select value={level} onChange={(event) => setLevel(event.target.value)}>
+                <option value="1">سطح ۱ · بالاترین سطح</option>
+                <option value="2">سطح ۲</option>
+                <option value="3">سطح ۳</option>
+                <option value="4">سطح ۴</option>
+                <option value="5">سطح ۵</option>
+              </select>
+            </label>
+          )}
+
+          <label className="reporting-dashboard-field">
+            <span>جست‌وجو در جزئیات</span>
+            <input
+              type="search"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="نام، کد، وضعیت یا مقدار…"
+            />
+          </label>
+
+          {categories.length > 0 && (
+            <label className="reporting-dashboard-field">
+              <span>فیلتر بر اساس گروه</span>
+              <select
+                value={categoryFilter}
+                onChange={(event) => setCategoryFilter(event.target.value)}
+              >
+                <option value="all">همه گروه‌ها</option>
+                {categories.map((category) => (
+                  <option value={category} key={category}>
+                    {reportingValueLabel(category)}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+        </div>
+
+        <div className="reporting-dashboard-filter-footer">
+          <p>{selectedReport?.description || ''}</p>
+          <button type="button" className="reporting-dashboard-secondary" onClick={clearLocalFilters}>
+            پاک‌کردن جست‌وجو و فیلتر گروه
+          </button>
+        </div>
+      </section>
+
+      {error && (
+        <p className="reporting-export-message reporting-export-message--error" role="alert">
+          {error}
+        </p>
+      )}
+
+      {message && (
+        <p className="reporting-export-message" role="status">
+          {message}
+        </p>
+      )}
+
+      {view.metrics.length > 0 && (
+        <section className="reporting-dashboard-metrics" aria-label="خلاصه گزارش">
+          {view.metrics.map((metric) => (
+            <article className="reporting-dashboard-metric" key={metric.label}>
+              <span>{metric.label}</span>
+              <strong>{reportingFormatValue(metric.value)}</strong>
+            </article>
+          ))}
+        </section>
+      )}
+
+      <div className={'reporting-dashboard-charts-row' + (xyFields.length > 0 ? '' : ' reporting-dashboard-charts-row--single')}>
+      <section className="reporting-dashboard-chart-card">
+        <div className="reporting-dashboard-section-heading">
+          <div>
+            <h2>نمودار تحلیلی</h2>
+            <p>{view.chartTitle}</p>
+          </div>
+          <span className="reporting-dashboard-count">
+            {reportingFormatValue(filteredItems.length)} رکورد فیلترشده
+          </span>
+        </div>
+
+        {loading ? (
+          <div className="reporting-dashboard-loading">در حال دریافت داده‌های گزارش…</div>
+        ) : (
+          renderChart()
+        )}
+      </section>
+
+      {xyFields.length > 0 && (
+        <section className="reporting-dashboard-chart-card reporting-xy-chart-card">
+          <div className="reporting-dashboard-section-heading">
+            <div>
+              <h2>نمودار X/Y</h2>
+              <p>دو متغیر عددی را انتخاب کنید تا رابطه آن‌ها بین رکوردهای فعلی مقایسه شود.</p>
+            </div>
+            <span className="reporting-dashboard-count">
+              {reportingFormatValue(xyPoints.length)} نقطه قابل رسم
+            </span>
+          </div>
+
+          <div className="reporting-xy-filter-row">
+            <label className="reporting-dashboard-field">
+              <span>محور X</span>
+              <select
+                value={xField}
+                onChange={(event) => {
+                  const next = event.target.value
+                  setXField(next)
+                  if (next === yField) {
+                    setYField(xyFields.find((field) => field.key !== next)?.key || next)
+                  }
+                }}
+              >
+                {xyFields.map((field) => (
+                  <option key={field.key} value={field.key}>{field.label}</option>
+                ))}
+              </select>
+            </label>
+
+            <label className="reporting-dashboard-field">
+              <span>محور Y</span>
+              <select
+                value={yField}
+                onChange={(event) => {
+                  const next = event.target.value
+                  setYField(next)
+                  if (next === xField) {
+                    setXField(xyFields.find((field) => field.key !== next)?.key || next)
+                  }
+                }}
+              >
+                {xyFields.map((field) => (
+                  <option key={field.key} value={field.key}>{field.label}</option>
+                ))}
+              </select>
+            </label>
+          </div>
+
+          {loading ? (
+            <div className="reporting-dashboard-loading">در حال دریافت داده‌ها…</div>
+          ) : (
+            <ReportingXYChart
+              title={`${xyFields.find((field) => field.key === xField)?.label || 'X'} / ${xyFields.find((field) => field.key === yField)?.label || 'Y'}`}
+              points={xyPoints}
+              xLabel={xyFields.find((field) => field.key === xField)?.label || 'X'}
+              yLabel={xyFields.find((field) => field.key === yField)?.label || 'Y'}
+              zoom={xyZoom}
+              setZoom={setXyZoom}
+            />
+          )}
+        </section>
+      )}
+      </div>
+      <section className="reporting-dashboard-list-card">
+        <div className="reporting-dashboard-section-heading">
+          <div>
+            <h2>فهرست جزئیات گزارش</h2>
+            <p>تمام جزئیات هر رکورد مستقیماً در فهرست نمایش داده می‌شود.</p>
+          </div>
+          <span className="reporting-dashboard-count">
+            {reportingFormatValue(filteredItems.length)} از {reportingFormatValue(view.items.length)}
+          </span>
+        </div>
+
+        {loading ? (
+          <div className="reporting-dashboard-loading">در حال بارگذاری فهرست…</div>
+        ) : filteredItems.length === 0 ? (
+          <div className="reporting-empty-state">
+            {error
+              ? 'به علت خطا، داده‌ای برای نمایش در دسترس نیست.'
+              : 'رکوردی مطابق فیلترهای فعلی پیدا نشد.'}
+          </div>
+        ) : (
+          <div className="reporting-dashboard-record-list">
+            {filteredItems.map((item, index) => (
+              <article
+                className="reporting-dashboard-record"
+                key={`${item.id}-${index}`}
+              >
+                <div className="reporting-dashboard-record-heading">
+                  <div className="reporting-dashboard-record-title">
+                    <strong>{item.title}</strong>
+                    {item.subtitle && <span>{item.subtitle}</span>}
+                  </div>
+                  <span className="reporting-dashboard-record-category">
+                    {reportingValueLabel(item.category)}
+                  </span>
+                </div>
+
+                <dl className="reporting-dashboard-detail-grid">
+                  {item.details.map((detail, detailIndex) => (
+                    <div key={`${detail.label}-${detailIndex}`}>
+                      <dt>{detail.label}</dt>
+                      <dd>{reportingFormatValue(detail.value)}</dd>
+                    </div>
+                  ))}
+                </dl>
+              </article>
+            ))}
+          </div>
+        )}
+      </section>
+      <section className="reporting-dashboard-export-card">
+        <div>
+          <h2>دریافت خروجی</h2>
+          <p>
+            خروجی Excel و نسخه چاپی از سرویس گزارش‌گیری فعلی ساخته می‌شوند.
+          </p>
+        </div>
+
+        <div className="reporting-export-actions">
+          <button type="button" onClick={downloadExcel} disabled={Boolean(busy) || loading || isDemoMode}>
+            <FileChartColumn size={19} />
+            {busy === 'xlsx' ? 'در حال ساخت Excel…' : 'دریافت فایل Excel'}
+          </button>
+          <button
+            type="button"
+            className="reporting-export-print"
+            onClick={openPrintableReport}
+            disabled={Boolean(busy) || loading}
+          >
+            <FileText size={19} />
+            {busy === 'html' ? 'در حال آماده‌سازی…' : 'نسخه چاپی / PDF'}
+          </button>
+        </div>
+      </section>
+
+      {chartExpanded && (
+        <div
+          className="reporting-chart-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-label="نمودار بزرگ‌شده"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setChartExpanded(false)
+          }}
+        >
+          <div className="reporting-chart-modal">
+            <div className="reporting-chart-modal-header">
+              <div>
+                <h2>{view.chartTitle}</h2>
+                <p>برای بزرگ‌نمایی بیشتر از کنترل‌های + و − استفاده کنید.</p>
+              </div>
+              <button type="button" onClick={() => setChartExpanded(false)}>
+                بستن ✕
+              </button>
+            </div>
+            {renderChart(true)}
+          </div>
+        </div>
+      )}
+    </section>
+  )
+}
+
 const CHART_STATUS_ORDER = ['Draft', 'Active', 'OnHold', 'Completed', 'Archived']
 
 function statusKey(value) {
@@ -3638,6 +6605,8 @@ function Dashboard() {
             <ProjectManagement active={active} data={projectData} />
           ) : controlSubmenus.some((item) => item.label === active) ? (
             <ControlManagement active={active} data={projectData} />
+          ) : active === governanceSubmenus[0].label ? (
+            <ReportingExportPage />
           ) : active === governanceSubmenus[1].label ? (
             <KnowledgeManagement />
           ) : active === 'چت و گفت‌وگوی آنلاین' ? (
