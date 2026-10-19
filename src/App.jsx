@@ -75,7 +75,7 @@ import {
   RotateCcw,
 } from 'lucide-react'
 import { AuthProvider, Can, useAuth } from './services/AuthContext'
-import { PersianMessages, actionsApi, contractsApi, costReportApi, groupsApi, identityApi, labelForModule, labelForPermission, orgChartApi, permissionsApi, platformApi, projectManagementApi, rolesApi, suppliersApi, unwrap, usersApi } from './services/api'
+import { PersianMessages, actionsApi, changeRequestsApi, contractsApi, costReportApi, groupsApi, identityApi, labelForModule, labelForPermission, orgChartApi, permissionsApi, platformApi, projectManagementApi, rolesApi, suppliersApi, unwrap, usersApi } from './services/api'
 import { DEFAULT_TENANT_ID } from './services/config'
 import { useChat } from './hooks/useChat'
 import { useNotifications } from './hooks/useNotifications'
@@ -3698,33 +3698,58 @@ function SuppliersPage({ data }) {
   )
 }
 
-/* ---- Changes: the addenda of the project's contracts (the Core has no separate project change requests) ---- */
+/* ---- Changes: the project's change requests, and the addenda of its contracts ---- */
+
+const changeTypeLabels = { 0: 'دامنه', 1: 'زمان‌بندی', 2: 'هزینه', 3: 'کیفیت', 4: 'سایر' }
+const changePriorityLabels = { 0: 'کم', 1: 'عادی', 2: 'زیاد', 3: 'فوری' }
+const changeStatusLabels = { 0: 'پیش‌نویس', 1: 'در انتظار تأیید', 2: 'تأییدشده', 3: 'ردشده', 4: 'اجراشده', 5: 'لغوشده' }
+const changeStatusClass = { 0: 'todo', 1: 'review', 2: 'doing', 3: 'rejected', 4: 'done', 5: 'todo' }
+const ChangeStatusBadge = ({ status }) => <span className={`status-pill ${changeStatusClass[status] ?? 'todo'}`}>{enumLabel(status, changeStatusLabels)}</span>
+const signedDays = (days) => (days ? `${days > 0 ? '+' : ''}${toPersianDigits(days)} روز` : '—')
+const signedRials = (rials) => (rials ? `${rials > 0 ? '+' : ''}${rialsText(rials)}` : '—')
+
+function useChangeRequests(projectId) {
+  const [items, setItems] = useState(null)
+  const [error, setError] = useState('')
+  const [reloadKey, setReloadKey] = useState(0)
+
+  useEffect(() => {
+    let cancelled = false
+    if (!projectId) { setItems([]); return undefined }
+    setItems(null)
+    changeRequestsApi.list(projectId).then((result) => {
+      if (cancelled) return
+      setError(result.isSuccess ? '' : PersianMessages.error(result.error))
+      setItems(arrayPayload(result))
+    })
+    return () => { cancelled = true }
+  }, [projectId, reloadKey])
+
+  return { items, error, reload: () => setReloadKey((value) => value + 1) }
+}
 
 function ChangesPage({ data }) {
   const { can } = useAuth()
+  const [tab, setTab] = useState('requests')
   const projectIds = useMemo(() => (data.selectedProjectId ? [data.selectedProjectId] : []), [data.selectedProjectId])
   const contracts = useContractDetails(projectIds)
+  const changes = useChangeRequests(data.selectedProjectId)
   const [notice, setNotice] = useState(null)
   const [adding, setAdding] = useState(false)
+  const [changeForm, setChangeForm] = useState(null)
   const items = contracts.items || []
-  const rows = items.flatMap(({ contract, addenda }) => addenda.map((addendum) => ({ contract, addendum })))
-    .sort((a, b) => String(b.addendum.addendumDate || '').localeCompare(String(a.addendum.addendumDate || '')))
-  const approved = rows.filter((row) => row.addendum.approvalStatus === 2)
-  const net = approved.reduce((sum, row) => sum + Number(row.addendum.amountChange || 0), 0)
-  const days = approved.reduce((sum, row) => sum + Number(row.addendum.extensionDays || 0), 0)
-  const pending = rows.filter((row) => row.addendum.approvalStatus === 1).length
   const eligible = items.map(({ contract }) => contract).filter((contract) => contract.approvalStatus === 2 && contract.status !== 3)
 
-  const exportChanges = () => downloadCsv(`contract-changes-${data.selectedProject?.code || 'project'}.csv`,
-    ['قرارداد', 'طرف قرارداد', 'شماره', 'عنوان', 'تاریخ', 'تغییر مبلغ (ریال)', 'تمدید (روز)', 'تأیید'],
-    rows.map(({ contract, addendum }) => [contract.contractNumber, contract.counterparty, addendum.number, addendum.title, addendum.addendumDateFa || '', addendum.amountChange, addendum.extensionDays, enumLabel(addendum.approvalStatus, approvalLabels)]))
+  const actionNode = tab === 'requests'
+    ? can('Contracts.ManageChanges') && <button type="button" onClick={() => setChangeForm({ item: null })} disabled={!data.selectedProjectId}><Plus size={18} />درخواست تغییر</button>
+    : can('Contracts.ManageAddenda') && <button type="button" onClick={() => setAdding(true)} disabled={!eligible.length}><Plus size={18} />الحاقیه‌ی جدید</button>
 
   return (
     <>
       <TaskPageHeader
         section="کنترل و اجرا" title="مدیریت تغییرات" action={null}
-        description="تغییرهای قرارداد پروژه (الحاقیه‌ی مبلغ یا مدت). «درخواست تغییر پروژه» در این نسخه‌ی سامانه وجود ندارد."
-        actionNode={can('Contracts.ManageAddenda') && <button type="button" onClick={() => setAdding(true)} disabled={!eligible.length}><Plus size={18} />الحاقیه‌ی جدید</button>}
+        description="ثبت، بررسی و تصویب درخواست‌های تغییر پروژه با اثر آن بر دامنه، زمان و هزینه؛ و الحاقیه‌های قراردادها"
+        actionNode={actionNode}
       >
         <ProjectSelector data={data} />
       </TaskPageHeader>
@@ -3732,35 +3757,256 @@ function ChangesPage({ data }) {
         {!can('Contracts.View') ? <p className="data-state data-state--error">برای دیدن این بخش، دسترسی «مشاهده‌ی قراردادها» (Contracts.View) لازم است.</p> : (
           <>
             <PageNotice notice={notice} onClose={() => setNotice(null)} />
-            {contracts.error && <div className="users-notice error ctl-notice" role="alert"><CircleAlert size={16} /><span>{contracts.error}</span></div>}
-            <ControlKpis items={[
-              { icon: RefreshCw, tone: 'navy', label: 'الحاقیه', value: toPersianDigits(rows.length), note: 'همه‌ی وضعیت‌ها' },
-              { icon: CircleDollarSign, tone: net < 0 ? 'green' : 'red', label: 'خالص تغییر مبلغ', value: `${net > 0 ? '+' : ''}${rialsText(net)}`, note: 'ریال، الحاقیه‌های تأییدشده' },
-              { icon: Clock3, tone: 'blue', label: 'تمدید زمان', value: `${toPersianDigits(days)} روز`, note: 'الحاقیه‌های تأییدشده' },
-              { icon: CircleAlert, tone: 'red', label: 'در انتظار تأیید', value: toPersianDigits(pending), note: 'هنوز اعمال نشده' },
-            ]} />
-            <section className="task-panel task-table-panel ctl-panel ctl-block">
-              <div className="task-panel-title"><div><h3>الحاقیه‌های قراردادها</h3><p>الحاقیه فقط بعد از تأیید روی مبلغ و تاریخ پایان قرارداد اثر می‌گذارد.</p></div><button type="button" className="ctl-link" onClick={exportChanges} disabled={!rows.length}><Download size={14} /> خروجی Excel</button></div>
-              <DataState loading={contracts.items === null} empty={!rows.length}>
-                <div className="table-scroll"><table>
-                  <thead><tr><th>قرارداد</th><th>الحاقیه</th><th>تاریخ</th><th>تغییر مبلغ (ریال)</th><th>تمدید</th><th>تأیید</th></tr></thead>
-                  <tbody>{rows.map(({ contract, addendum }) => (
-                    <tr key={addendum.id}>
-                      <td className="ctl-main"><strong>{contract.title}</strong><small>{contract.counterparty}</small></td>
-                      <td className="ctl-main"><strong>{toPersianDigits(addendum.number)}. {addendum.title}</strong>{addendum.description && <small>{addendum.description}</small>}</td>
-                      <td>{addendum.addendumDateFa || '—'}</td>
-                      <td className={addendum.amountChange < 0 ? 'neg' : ''}>{addendum.amountChange > 0 ? '+' : ''}{rialsText(addendum.amountChange)}</td>
-                      <td>{addendum.extensionDays ? `${toPersianDigits(addendum.extensionDays)} روز` : '—'}</td>
-                      <td><ApprovalBadge status={addendum.approvalStatus} /></td>
-                    </tr>
-                  ))}</tbody>
-                </table></div>
-              </DataState>
-            </section>
+            <nav className="settings-subtabs ctl-subtabs">
+              <button type="button" className={tab === 'requests' ? 'active' : ''} onClick={() => setTab('requests')}><RefreshCw size={16} />درخواست‌های تغییر</button>
+              <button type="button" className={tab === 'addenda' ? 'active' : ''} onClick={() => setTab('addenda')}><FileText size={16} />الحاقیه‌های قرارداد</button>
+            </nav>
+            {tab === 'requests' && (
+              <ChangeRequestsPanel
+                data={data} changes={changes} contracts={items.map(({ contract }) => contract)} canManage={can('Contracts.ManageChanges')}
+                setNotice={setNotice} onEdit={(item) => setChangeForm({ item })}
+              />
+            )}
+            {tab === 'addenda' && <ContractAddendaPanel data={data} contracts={contracts} />}
+            {changeForm && (
+              <ChangeRequestFormDialog
+                data={data} item={changeForm.item} contracts={items.map(({ contract }) => contract)}
+                onClose={() => setChangeForm(null)} onSaved={(result) => { setChangeForm(null); setNotice(result); changes.reload() }}
+              />
+            )}
             {adding && <AddendumFormDialog contracts={eligible} tenantId={data.tenantId} onClose={() => setAdding(false)} onSaved={(result) => { setAdding(false); setNotice(result); contracts.reload() }} />}
           </>
         )}
       </DataState>
+    </>
+  )
+}
+
+function ChangeRequestsPanel({ data, changes, contracts, canManage, setNotice, onEdit }) {
+  const [detail, setDetail] = useState(null)
+  const [outcome, setOutcome] = useState(null)
+  const items = changes.items || []
+  const decided = items.filter((item) => item.status === 2 || item.status === 4)
+  const cost = decided.reduce((sum, item) => sum + moneyRials(item.costImpact), 0)
+  const days = decided.reduce((sum, item) => sum + Number(item.scheduleImpactDays || 0), 0)
+  const act = (call, text) => runAction(call, text, setNotice, changes.reload)
+  const contractTitle = (id) => contracts.find((contract) => contract.id === id)?.title
+
+  const exportChanges = () => downloadCsv(`change-requests-${data.selectedProject?.code || 'project'}.csv`,
+    ['کد', 'عنوان', 'نوع', 'اولویت', 'درخواست‌دهنده', 'قرارداد', 'اثر بر دامنه', 'اثر بر زمان (روز)', 'اثر بر هزینه (ریال)', 'وضعیت', 'تاریخ اجرا'],
+    items.map((item) => [item.code, item.title, enumLabel(item.type, changeTypeLabels), enumLabel(item.priority, changePriorityLabels), item.requestedBy || '',
+      contractTitle(item.contractId) || '', item.scopeImpact || '', item.scheduleImpactDays, moneyRials(item.costImpact), enumLabel(item.status, changeStatusLabels), item.implementedDateFa || '']))
+
+  return (
+    <>
+      {changes.error && <div className="users-notice error ctl-notice" role="alert"><CircleAlert size={16} /><span>{changes.error}</span></div>}
+      <ControlKpis items={[
+        { icon: RefreshCw, tone: 'navy', label: 'درخواست تغییر', value: toPersianDigits(items.length), note: `${toPersianDigits(items.filter((item) => item.status === 0).length)} پیش‌نویس` },
+        { icon: CircleAlert, tone: 'red', label: 'در انتظار تصمیم', value: toPersianDigits(items.filter((item) => item.status === 1).length), note: 'ارسال‌شده برای تأیید' },
+        { icon: CircleDollarSign, tone: cost < 0 ? 'green' : 'blue', label: 'اثر هزینه‌ی مصوب', value: signedRials(cost), note: 'ریال، تأییدشده و اجراشده' },
+        { icon: Clock3, tone: 'green', label: 'اثر زمانی مصوب', value: signedDays(days), note: 'تأییدشده و اجراشده' },
+      ]} />
+      <section className="task-panel task-table-panel ctl-panel ctl-block">
+        <div className="task-panel-title">
+          <div><h3>درخواست‌های تغییر پروژه</h3><p>هر درخواست پیش از ارسال باید اثرش بر دامنه، زمان و هزینه را داشته باشد؛ تصمیم از مسیر تأیید ثبت می‌شود.</p></div>
+          <button type="button" className="ctl-link" onClick={exportChanges} disabled={!items.length}><Download size={14} /> خروجی Excel</button>
+        </div>
+        <DataState loading={changes.items === null} empty={!items.length}>
+          <div className="table-scroll"><table>
+            <thead><tr><th>درخواست</th><th>نوع</th><th>اثر بر زمان</th><th>اثر بر هزینه (ریال)</th><th>وضعیت</th><th>عملیات</th></tr></thead>
+            <tbody>{items.map((item) => (
+              <tr key={item.id}>
+                <td className="ctl-main"><strong>{item.code} · {item.title}</strong><small>{[item.requestedBy && `درخواست‌دهنده: ${item.requestedBy}`, contractTitle(item.contractId) && `قرارداد: ${contractTitle(item.contractId)}`, `اولویت ${enumLabel(item.priority, changePriorityLabels)}`].filter(Boolean).join(' · ')}</small></td>
+                <td>{enumLabel(item.type, changeTypeLabels)}</td>
+                <td>{signedDays(item.scheduleImpactDays)}</td>
+                <td className={moneyRials(item.costImpact) > 0 ? 'neg' : ''}>{signedRials(moneyRials(item.costImpact))}</td>
+                <td><ChangeStatusBadge status={item.status} />{!item.hasImpactAssessment && item.status === 0 && <small className="ctl-sp neg"> بدون تحلیل اثر</small>}</td>
+                <td><span className="row-actions">
+                  <button type="button" title="جزئیات" aria-label="جزئیات" onClick={() => setDetail(item)}><Eye size={15} /></button>
+                  {canManage && (item.status === 0 || item.status === 3) && <button type="button" title="ویرایش" aria-label="ویرایش" onClick={() => onEdit(item)}><Pencil size={15} /></button>}
+                  {canManage && item.status === 0 && <button type="button" className="ok" title="ارسال برای تصمیم" aria-label="ارسال برای تصمیم" onClick={() => act(() => changeRequestsApi.submit(item.id), 'درخواست تغییر برای تصمیم ارسال شد.')}><Send size={15} /></button>}
+                  {canManage && item.status === 2 && <button type="button" className="ok" title="ثبت اجرا" aria-label="ثبت اجرا" onClick={() => setOutcome({ kind: 'implement', item })}><CheckCheck size={15} /></button>}
+                  {canManage && [0, 2, 3].includes(item.status) && <button type="button" title="لغو" aria-label="لغو" onClick={() => setOutcome({ kind: 'cancel', item })}><X size={15} /></button>}
+                  {canManage && item.status === 0 && <button type="button" className="danger" title="حذف" aria-label="حذف" onClick={() => window.confirm(`درخواست «${item.title}» حذف شود؟`) && act(() => changeRequestsApi.remove(item.id), 'درخواست تغییر حذف شد.')}><Trash2 size={15} /></button>}
+                </span></td>
+              </tr>
+            ))}</tbody>
+          </table></div>
+        </DataState>
+      </section>
+      {detail && <ChangeRequestDetailDialog item={detail} contractTitle={contractTitle(detail.contractId)} onClose={() => setDetail(null)} />}
+      {outcome && (
+        <ChangeOutcomeDialog
+          kind={outcome.kind} item={outcome.item} onClose={() => setOutcome(null)}
+          onSaved={(result) => { setOutcome(null); setNotice(result); changes.reload() }}
+        />
+      )}
+    </>
+  )
+}
+
+function ChangeRequestDetailDialog({ item, contractTitle, onClose }) {
+  const at = (value) => (value ? new Date(value).toLocaleDateString('fa-IR') : null)
+  const rows = [
+    ['نوع و اولویت', `${enumLabel(item.type, changeTypeLabels)} · ${enumLabel(item.priority, changePriorityLabels)}`],
+    ['درخواست‌دهنده', item.requestedBy], ['قرارداد مرتبط', contractTitle], ['شرح', item.description], ['دلیل', item.reason],
+    ['اثر بر دامنه', item.scopeImpact], ['اثر بر زمان', signedDays(item.scheduleImpactDays)], ['اثر بر هزینه', `${signedRials(moneyRials(item.costImpact))} ریال`],
+    ['سایر اثرها', item.otherImpact], ['ثبت', at(item.createdAtUtc)], ['ارسال برای تصمیم', at(item.submittedAtUtc)],
+    ['تصمیم', item.decidedAtUtc && `${enumLabel(item.status === 3 ? 3 : 2, changeStatusLabels)} در ${at(item.decidedAtUtc)}${item.decisionNote ? ` · «${item.decisionNote}»` : ''}`],
+    ['اجرا', item.implementedDateFa], ['یادداشت نتیجه', item.outcomeNote],
+  ].filter(([, value]) => value)
+  return (
+    <ControlDialog
+      size="sm" icon={RefreshCw} title={`${item.code} · ${item.title}`} subtitle={enumLabel(item.status, changeStatusLabels)} onClose={onClose}
+      footer={<div className="ue-foot-actions"><button type="button" className="ue-cancel" onClick={onClose}>بستن</button></div>}
+    >
+      <div className="ue-card">
+        {rows.map(([label, value]) => <p key={label} className="ue-note"><strong>{label}:</strong> {value}</p>)}
+      </div>
+    </ControlDialog>
+  )
+}
+
+function ChangeOutcomeDialog({ kind, item, onClose, onSaved }) {
+  const implementing = kind === 'implement'
+  const [date, setDate] = useState('')
+  const [note, setNote] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  async function submit(event) {
+    event.preventDefault()
+    setSaving(true); setError('')
+    const result = implementing
+      ? await changeRequestsApi.implement(item.id, { date: emptyToNull(date), note: emptyToNull(note.trim()) })
+      : await changeRequestsApi.cancel(item.id, emptyToNull(note.trim()))
+    setSaving(false)
+    if (!result.isSuccess) { setError(PersianMessages.error(result.error)); return }
+    onSaved({ type: 'success', text: implementing ? 'اجرای تغییر ثبت شد.' : 'درخواست تغییر لغو شد.' })
+  }
+
+  return (
+    <ControlDialog
+      size="sm" icon={implementing ? CheckCheck : X} title={implementing ? 'ثبت اجرای تغییر' : 'لغو درخواست تغییر'} subtitle={`${item.code} · ${item.title}`} onClose={onClose}
+      footer={(
+        <>
+          {error && <span className="ue-error"><TriangleAlert size={15} />{error}</span>}
+          <div className="ue-foot-actions"><button type="button" className="ue-cancel" onClick={onClose}>انصراف</button><button type="submit" form="change-outcome-form" className="ue-save" disabled={saving}>{saving ? 'در حال ذخیره...' : implementing ? 'ثبت اجرا' : 'لغو درخواست'}</button></div>
+        </>
+      )}
+    >
+      <form id="change-outcome-form" onSubmit={submit} noValidate>
+        <div className="ue-card"><div className="ue-grid">
+          {implementing && <CtlField label="تاریخ اجرا" hint="خالی بماند، امروز ثبت می‌شود"><input type="date" value={date} onChange={(e) => setDate(e.target.value)} autoFocus /></CtlField>}
+          <CtlField label={implementing ? 'چگونه اجرا شد' : 'دلیل لغو'} wide><textarea rows={2} value={note} onChange={(e) => setNote(e.target.value)} maxLength={2000} /></CtlField>
+        </div></div>
+      </form>
+    </ControlDialog>
+  )
+}
+
+function ChangeRequestFormDialog({ data, item, contracts, onClose, onSaved }) {
+  const [form, setForm] = useState({
+    title: item?.title || '', type: String(item?.type ?? 0), priority: String(item?.priority ?? 1), requestedBy: item?.requestedBy || '',
+    contractId: item?.contractId || '', description: item?.description || '', reason: item?.reason || '',
+    scopeImpact: item?.scopeImpact || '', scheduleImpactDays: item ? String(item.scheduleImpactDays || '') : '',
+    costImpact: item ? String(Math.round(moneyRials(item.costImpact)) || '') : '', otherImpact: item?.otherImpact || '',
+  })
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const set = (key) => (event) => setForm((current) => ({ ...current, [key]: event.target.value }))
+
+  async function submit(event) {
+    event.preventDefault()
+    if (!form.title.trim()) { setError('عنوان درخواست را وارد کنید.'); return }
+    const days = Number(toLatinDigits(form.scheduleImpactDays || '0'))
+    if (!Number.isInteger(days)) { setError('اثر بر زمان باید عدد صحیح (روز) باشد.'); return }
+    setSaving(true); setError('')
+    const fields = {
+      title: form.title.trim(), type: Number(form.type), priority: Number(form.priority), requestedBy: emptyToNull(form.requestedBy.trim()),
+      contractId: form.contractId || null, description: emptyToNull(form.description.trim()), reason: emptyToNull(form.reason.trim()),
+      scopeImpact: emptyToNull(form.scopeImpact.trim()), scheduleImpactDays: days, costImpact: Number(form.costImpact || 0), otherImpact: emptyToNull(form.otherImpact.trim()),
+    }
+    const result = item ? await changeRequestsApi.update(item.id, fields) : await changeRequestsApi.create({ tenantId: data.tenantId, projectId: data.selectedProjectId, ...fields })
+    setSaving(false)
+    if (!result.isSuccess) { setError(PersianMessages.error(result.error)); return }
+    onSaved({ type: 'success', text: item ? 'درخواست تغییر ذخیره شد.' : 'درخواست تغییر ثبت شد. برای تصمیم، آن را ارسال کنید.' })
+  }
+
+  return (
+    <ControlDialog
+      size="sm" icon={item ? Pencil : Plus} title={item ? `ویرایش ${item.code}` : 'درخواست تغییر تازه'} subtitle={item?.status === 3 ? 'ردشده؛ با ذخیره دوباره پیش‌نویس می‌شود' : undefined} onClose={onClose}
+      footer={(
+        <>
+          {error && <span className="ue-error"><TriangleAlert size={15} />{error}</span>}
+          <div className="ue-foot-actions"><button type="button" className="ue-cancel" onClick={onClose}>انصراف</button><button type="submit" form="change-request-form" className="ue-save" disabled={saving}>{saving ? 'در حال ذخیره...' : 'ذخیره'}</button></div>
+        </>
+      )}
+    >
+      <form id="change-request-form" onSubmit={submit} noValidate>
+        <div className="ue-card"><div className="ue-grid">
+          <CtlField label="عنوان" required wide><input value={form.title} onChange={set('title')} maxLength={300} autoFocus /></CtlField>
+          <CtlField label="نوع"><select value={form.type} onChange={set('type')}>{Object.entries(changeTypeLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></CtlField>
+          <CtlField label="اولویت"><select value={form.priority} onChange={set('priority')}>{Object.entries(changePriorityLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></CtlField>
+          <CtlField label="درخواست‌دهنده" hint="شخص یا واحد؛ می‌تواند بیرون از سامانه باشد"><input value={form.requestedBy} onChange={set('requestedBy')} maxLength={200} /></CtlField>
+          <CtlField label="قرارداد مرتبط"><select value={form.contractId} onChange={set('contractId')}><option value="">— ندارد —</option>{contracts.map((contract) => <option key={contract.id} value={contract.id}>{contract.title}</option>)}</select></CtlField>
+          <CtlField label="شرح تغییر" wide><textarea rows={2} value={form.description} onChange={set('description')} maxLength={4000} /></CtlField>
+          <CtlField label="دلیل" wide><textarea rows={2} value={form.reason} onChange={set('reason')} maxLength={2000} /></CtlField>
+        </div></div>
+        <div className="ue-card ue-card--accent"><div className="ue-grid">
+          <CtlField label="اثر بر دامنه" wide hint="پیش از ارسال برای تصمیم لازم است"><textarea rows={3} value={form.scopeImpact} onChange={set('scopeImpact')} maxLength={4000} /></CtlField>
+          <CtlField label="اثر بر زمان (روز)" hint="منفی یعنی صرفه‌جویی"><input className="ltr-input" value={form.scheduleImpactDays} onChange={set('scheduleImpactDays')} inputMode="numeric" /></CtlField>
+          <CtlField label="اثر بر هزینه (ریال)" hint={form.costImpact && form.costImpact !== '-' ? tomansHint(form.costImpact.replace('-', '')) : 'منفی یعنی صرفه‌جویی'}>
+            <AmountInput value={form.costImpact} onChange={(value) => setForm((current) => ({ ...current, costImpact: value }))} allowNegative />
+          </CtlField>
+          <CtlField label="سایر اثرها" wide hint="کیفیت، ریسک، منابع"><textarea rows={2} value={form.otherImpact} onChange={set('otherImpact')} maxLength={2000} /></CtlField>
+        </div></div>
+      </form>
+    </ControlDialog>
+  )
+}
+
+/** The addenda of the project's contracts: a change to a contract's amount or duration. */
+function ContractAddendaPanel({ data, contracts }) {
+  const items = contracts.items || []
+  const rows = items.flatMap(({ contract, addenda }) => addenda.map((addendum) => ({ contract, addendum })))
+    .sort((a, b) => String(b.addendum.addendumDate || '').localeCompare(String(a.addendum.addendumDate || '')))
+  const approved = rows.filter((row) => row.addendum.approvalStatus === 2)
+  const net = approved.reduce((sum, row) => sum + Number(row.addendum.amountChange || 0), 0)
+  const days = approved.reduce((sum, row) => sum + Number(row.addendum.extensionDays || 0), 0)
+  const pending = rows.filter((row) => row.addendum.approvalStatus === 1).length
+
+  const exportChanges = () => downloadCsv(`contract-changes-${data.selectedProject?.code || 'project'}.csv`,
+    ['قرارداد', 'طرف قرارداد', 'شماره', 'عنوان', 'تاریخ', 'تغییر مبلغ (ریال)', 'تمدید (روز)', 'تأیید'],
+    rows.map(({ contract, addendum }) => [contract.contractNumber, contract.counterparty, addendum.number, addendum.title, addendum.addendumDateFa || '', addendum.amountChange, addendum.extensionDays, enumLabel(addendum.approvalStatus, approvalLabels)]))
+
+  return (
+    <>
+      {contracts.error && <div className="users-notice error ctl-notice" role="alert"><CircleAlert size={16} /><span>{contracts.error}</span></div>}
+      <ControlKpis items={[
+        { icon: RefreshCw, tone: 'navy', label: 'الحاقیه', value: toPersianDigits(rows.length), note: 'همه‌ی وضعیت‌ها' },
+        { icon: CircleDollarSign, tone: net < 0 ? 'green' : 'red', label: 'خالص تغییر مبلغ', value: `${net > 0 ? '+' : ''}${rialsText(net)}`, note: 'ریال، الحاقیه‌های تأییدشده' },
+        { icon: Clock3, tone: 'blue', label: 'تمدید زمان', value: `${toPersianDigits(days)} روز`, note: 'الحاقیه‌های تأییدشده' },
+        { icon: CircleAlert, tone: 'red', label: 'در انتظار تأیید', value: toPersianDigits(pending), note: 'هنوز اعمال نشده' },
+      ]} />
+      <section className="task-panel task-table-panel ctl-panel ctl-block">
+        <div className="task-panel-title"><div><h3>الحاقیه‌های قراردادها</h3><p>الحاقیه فقط بعد از تأیید روی مبلغ و تاریخ پایان قرارداد اثر می‌گذارد.</p></div><button type="button" className="ctl-link" onClick={exportChanges} disabled={!rows.length}><Download size={14} /> خروجی Excel</button></div>
+        <DataState loading={contracts.items === null} empty={!rows.length}>
+          <div className="table-scroll"><table>
+            <thead><tr><th>قرارداد</th><th>الحاقیه</th><th>تاریخ</th><th>تغییر مبلغ (ریال)</th><th>تمدید</th><th>تأیید</th></tr></thead>
+            <tbody>{rows.map(({ contract, addendum }) => (
+              <tr key={addendum.id}>
+                <td className="ctl-main"><strong>{contract.title}</strong><small>{contract.counterparty}</small></td>
+                <td className="ctl-main"><strong>{toPersianDigits(addendum.number)}. {addendum.title}</strong>{addendum.description && <small>{addendum.description}</small>}</td>
+                <td>{addendum.addendumDateFa || '—'}</td>
+                <td className={addendum.amountChange < 0 ? 'neg' : ''}>{addendum.amountChange > 0 ? '+' : ''}{rialsText(addendum.amountChange)}</td>
+                <td>{addendum.extensionDays ? `${toPersianDigits(addendum.extensionDays)} روز` : '—'}</td>
+                <td><ApprovalBadge status={addendum.approvalStatus} /></td>
+              </tr>
+            ))}</tbody>
+          </table></div>
+        </DataState>
+      </section>
     </>
   )
 }

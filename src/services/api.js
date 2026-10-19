@@ -35,6 +35,26 @@ export const PersianMessages = {
     if (text.includes('invoice would take the total invoiced above the contract amount')) return 'جمع صورت‌وضعیت‌ها از مبلغ قرارداد بیشتر می‌شود.'
     if (text.includes('project already has a contract with this number')) return 'در این پروژه قراردادی با این شماره هست.'
     if (text.includes('addendum not found')) return 'الحاقیه پیدا نشد.'
+    // Change requests.
+    if (text.includes('describe the impact on scope')) return 'پیش از ارسال، اثر تغییر بر دامنه را بنویسید.'
+    if (text.includes('only a draft or a rejected change request can be edited')) return 'فقط درخواستِ پیش‌نویس یا ردشده ویرایش می‌شود.'
+    if (text.includes('only a draft change request can be submitted')) return 'فقط درخواستِ پیش‌نویس برای تصمیم ارسال می‌شود.'
+    if (text.includes('only a draft change request can be deleted')) return 'فقط درخواستِ پیش‌نویس حذف می‌شود؛ بقیه را لغو کنید.'
+    if (text.includes('only an approved change request can be marked as implemented')) return 'فقط درخواستِ تأییدشده اجراشده ثبت می‌شود.'
+    if (text.includes('this change request cannot be cancelled now')) return 'این درخواست در وضعیت فعلی لغو نمی‌شود.'
+    if (text.includes('change request not found')) return 'درخواست تغییر پیدا نشد.'
+    if (text.includes('the contract is not one of this project')) return 'این قرارداد مال همین پروژه نیست.'
+    // Suppliers, evaluations, links, milestones and obligations.
+    if (text.includes('a supplier with this name already exists')) return 'تأمین‌کننده‌ای با این نام هست.'
+    if (text.includes('a supplier with contracts cannot be deleted')) return 'تأمین‌کننده‌ای که قرارداد دارد حذف نمی‌شود.'
+    if (text.includes('the supplier is inactive')) return 'این تأمین‌کننده غیرفعال است.'
+    if (text.includes('supplier not found')) return 'تأمین‌کننده پیدا نشد.'
+    if (text.includes('every score is from')) return 'هر امتیاز باید از ۱ تا ۵ باشد.'
+    if (text.includes('the end of the period cannot be before its start')) return 'انتهای دوره نمی‌تواند قبل از ابتدای آن باشد.'
+    if (text.includes("the contract is not one of this supplier")) return 'این قرارداد مال همین تأمین‌کننده نیست.'
+    if (text.includes('this is already linked here')) return 'این مورد قبلاً همین‌جا پیوند خورده است.'
+    if (text.includes('milestone not found')) return 'نقطه‌ی عطف پیدا نشد.'
+    if (text.includes('obligation not found')) return 'تعهد پیدا نشد.'
     if (text.includes('contract not found')) return 'قرارداد پیدا نشد.'
     if (text.includes('invoice not found')) return 'صورت‌وضعیت پیدا نشد.'
     if (text.includes('addendum must change the amount')) return 'الحاقیه باید مبلغ یا مدت (یا هر دو) را تغییر دهد.'
@@ -441,6 +461,22 @@ export const contractsApi = {
   links: (contractId) => api.get(`${contractsBase}/${contractId}/links`),
   createLink: (contractId, payload) => api.post(`${contractsBase}/${contractId}/links`, payload),
   deleteLink: (contractId, id) => api.delete(`${contractsBase}/${contractId}/links/${id}`),
+}
+
+/**
+ * Change requests of a project (kept with the contracts). Type: Scope = 0, Schedule = 1, Cost = 2, Quality = 3, Other = 4;
+ * priority: Low = 0 ... Urgent = 3; status: Draft = 0, PendingApproval = 1, Approved = 2, Rejected = 3, Implemented = 4, Cancelled = 5.
+ * scheduleImpactDays and costImpact (rials) are negative for a saving; scopeImpact is required before submitting.
+ */
+const changeRequestsBase = '/api/project-management/change-requests'
+export const changeRequestsApi = {
+  list: (projectId) => api.get(`${changeRequestsBase}?${projectQuery({ projectId })}`),
+  create: (payload) => api.post(changeRequestsBase, payload),
+  update: (id, payload) => api.put(`${changeRequestsBase}/${id}`, payload),
+  remove: (id) => api.delete(`${changeRequestsBase}/${id}`),
+  submit: (id) => api.post(`${changeRequestsBase}/${id}/submit`),
+  implement: (id, { date, note }) => api.post(`${changeRequestsBase}/${id}/implement`, { date, note }),
+  cancel: (id, note) => api.post(`${changeRequestsBase}/${id}/cancel`, { note }),
 }
 
 /** Actions of a project (the Actions module), to link them to a contract as evidence. */
