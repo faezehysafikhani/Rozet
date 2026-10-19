@@ -127,8 +127,13 @@ export const identityApi = {
   logout: (refreshToken) => api.post('/api/identity/auth/logout', { refreshToken }, { anonymous: true }),
   refresh: (refreshToken) => api.post('/api/identity/auth/refresh', { refreshToken }, { anonymous: true }),
   me: () => api.get('/api/identity/auth/me'),
-  forgotPassword: (email, tenantSlug) =>
-    api.post('/api/identity/auth/forgot-password', { email, tenantSlug: tenantSlug || null }, { anonymous: true }),
+  // Password recovery is three steps. 1: a code is sent by SMS to the account's mobile number (the answer
+  // is the same whether or not the account exists). 2: the code is exchanged for a short-lived reset token.
+  // 3: the token sets the new password and ends every session of the user.
+  forgotPassword: (identifier, tenantSlug) =>
+    api.post('/api/identity/auth/forgot-password', { identifier, tenantSlug: tenantSlug || null }, { anonymous: true }),
+  verifyResetCode: (identifier, code, tenantSlug) =>
+    api.post('/api/identity/auth/forgot-password/verify', { identifier, code, tenantSlug: tenantSlug || null }, { anonymous: true }),
   resetPassword: (token, newPassword) =>
     api.post('/api/identity/auth/reset-password', { token, newPassword }, { anonymous: true }),
 }

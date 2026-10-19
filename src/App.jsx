@@ -58,7 +58,6 @@ import {
   WalletCards,
   Workflow,
   X,
-  Mail,
   Smartphone,
   SlidersHorizontal,
   Smile,
@@ -345,60 +344,93 @@ function AuthShell({ title, subtitle, children, onBack }) {
   )
 }
 
-function ForgotPassword({ onBack, onTokenIssued }) {
-  const [email, setEmail] = useState('')
-  const [message, setMessage] = useState('')
-  const [error, setError] = useState('')
-  const [busy, setBusy] = useState(false)
+// Core error codes (ProblemDetails.title) of the three recovery calls.
+const RECOVERY_ERRORS = {
+  'reset_code.invalid': 'کد تأیید صحیح نیست.',
+  'reset_code.expired': 'اعتبار کد تأیید به پایان رسیده است. کد جدید دریافت کنید.',
+  'reset_token.invalid': 'مهلت تعیین رمز عبور جدید به پایان رسیده است. دوباره کد بازیابی دریافت کنید.',
+  too_many_requests: 'تعداد تلاش‌ها زیاد است؛ کمی صبر کنید و دوباره تلاش کنید.',
+}
+const RESEND_COOLDOWN_SECONDS = 60 // the Core spaces two codes for one account by about this long
 
-  async function submit(event) {
-    event.preventDefault()
-    setBusy(true); setError(''); setMessage('')
-    const result = await identityApi.forgotPassword(email.trim())
-    setBusy(false)
-    if (!result.isSuccess) { setError(PersianMessages.error(result.error)); return }
-    setMessage('در صورت وجود حساب، لینک بازیابی ارسال شد.')
-    // Development convenience: the Core echoes the token when PasswordReset:ReturnTokenInResponse
-    // is enabled, so the flow is testable without a mail server.
-    if (result.value?.resetToken) onTokenIssued(result.value.resetToken)
-  }
-
-  return (
-    <AuthShell title="بازیابی رمز عبور" subtitle="ایمیل حساب خود را وارد کنید." onBack={onBack}>
-      <form onSubmit={submit}>
-        <label htmlFor="reset-email">ایمیل</label>
-        <div className="input-wrap">
-          <Mail size={20} />
-          <input id="reset-email" type="email" value={email} onChange={(e) => { setEmail(e.target.value); setError('') }} placeholder="name@company.ir" required />
-        </div>
-        {error && <p className="login-error" role="alert">{error}</p>}
-        {message && <p className="login-notice" role="status">{message}</p>}
-        <button className="login-btn" type="submit" disabled={busy}>{busy ? 'در حال ارسال...' : 'ارسال لینک بازیابی'} <ChevronLeft size={20} /></button>
-      </form>
-    </AuthShell>
-  )
+function formatCountdown(seconds) {
+  const safe = Math.max(0, seconds)
+  const minutes = Math.floor(safe / 60)
+  return `${String(minutes).padStart(2, '0')}:${String(safe % 60).padStart(2, '0')}`.replace(/\d/g, (digit) => Number(digit).toLocaleString('fa-IR'))
 }
 
-function ResetPassword({ initialToken = '', onBack }) {
-  const [token, setToken] = useState(initialToken)
+/**
+ * Password recovery, in the Core's three steps: identifier -> SMS code -> new password.
+ * The Core never reveals whether an account exists, so step 1 always moves on.
+ */
+function PasswordRecovery({ onBack }) {
+  const [step, setStep] = useState('identifier') // identifier | code | password | done
+  const [identifier, setIdentifier] = useState('')
+  const [code, setCode] = useState('')
+  const [resetToken, setResetToken] = useState('')
   const [password, setPassword] = useState('')
   const [confirm, setConfirm] = useState('')
   const [error, setError] = useState('')
-  const [done, setDone] = useState(false)
+  const [message, setMessage] = useState('')
   const [busy, setBusy] = useState(false)
+  const [codeLeft, setCodeLeft] = useState(0)     // seconds until the SMS code expires
+  const [resendLeft, setResendLeft] = useState(0) // seconds until a new code may be requested
 
-  async function submit(event) {
-    event.preventDefault()
-    if (password !== confirm) { setError('رمز عبور و تکرار آن یکسان نیستند.'); return }
-    if (password.length < 8) { setError('رمز عبور باید حداقل ۸ کاراکتر باشد.'); return }
-    setBusy(true); setError('')
-    const result = await identityApi.resetPassword(token.trim(), password)
+  useEffect(() => {
+    if (step !== 'code') return undefined
+    const timer = setInterval(() => {
+      setCodeLeft((value) => Math.max(0, value - 1))
+      setResendLeft((value) => Math.max(0, value - 1))
+    }, 1000)
+    return () => clearInterval(timer)
+  }, [step])
+
+  const fail = (result) => setError(RECOVERY_ERRORS[result.code] || PersianMessages.error(result.error))
+
+  async function requestCode(event) {
+    event?.preventDefault()
+    setBusy(true); setError(''); setMessage('')
+    const result = await identityApi.forgotPassword(identifier.trim())
     setBusy(false)
-    if (!result.isSuccess) { setError(PersianMessages.error(result.error)); return }
-    setDone(true)
+    if (!result.isSuccess) { fail(result); return }
+    setCode('')
+    setCodeLeft(result.value?.codeLifetimeSeconds || 300)
+    setResendLeft(RESEND_COOLDOWN_SECONDS)
+    setMessage(result.value?.message || 'در صورت وجود حساب کاربری معتبر، کد بازیابی به شماره تلفن ثبت‌شده ارسال خواهد شد.')
+    setStep('code')
   }
 
-  if (done) {
+  async function verifyCode(event) {
+    event.preventDefault()
+    setBusy(true); setError(''); setMessage('')
+    const result = await identityApi.verifyResetCode(identifier.trim(), code.trim())
+    setBusy(false)
+    if (!result.isSuccess) {
+      fail(result)
+      // The identifier used up its attempts: the outstanding code is withdrawn, so ask for a new one.
+      if (result.code === 'too_many_requests') setStep('identifier')
+      return
+    }
+    setResetToken(result.value.resetToken)
+    setStep('password')
+  }
+
+  async function setNewPassword(event) {
+    event.preventDefault()
+    if (password.length < 8) { setError('رمز عبور باید حداقل ۸ کاراکتر باشد.'); return }
+    if (password !== confirm) { setError('رمز عبور و تکرار آن یکسان نیستند.'); return }
+    setBusy(true); setError('')
+    const result = await identityApi.resetPassword(resetToken, password)
+    setBusy(false)
+    if (!result.isSuccess) {
+      fail(result)
+      if (result.code === 'reset_token.invalid') { setResetToken(''); setPassword(''); setConfirm(''); setStep('identifier') }
+      return
+    }
+    setStep('done')
+  }
+
+  if (step === 'done') {
     return (
       <AuthShell title="رمز عبور تغییر کرد" subtitle="اکنون می‌توانید با رمز جدید وارد شوید." onBack={onBack}>
         <p className="login-notice" role="status"><CheckCircle2 size={17} /> تمام نشست‌های قبلی شما باطل شدند.</p>
@@ -407,17 +439,55 @@ function ResetPassword({ initialToken = '', onBack }) {
     )
   }
 
+  if (step === 'password') {
+    return (
+      <AuthShell title="تعیین رمز عبور جدید" subtitle="کد تأیید شد. رمز عبور جدید خود را وارد کنید." onBack={onBack}>
+        <form onSubmit={setNewPassword}>
+          <label htmlFor="new-password">رمز عبور جدید</label>
+          <div className="input-wrap"><LockKeyhole size={20} /><input id="new-password" type="password" value={password} onChange={(e) => { setPassword(e.target.value); setError('') }} autoComplete="new-password" minLength={8} maxLength={128} required autoFocus /></div>
+          <label htmlFor="confirm-password">تکرار رمز عبور</label>
+          <div className="input-wrap"><LockKeyhole size={20} /><input id="confirm-password" type="password" value={confirm} onChange={(e) => { setConfirm(e.target.value); setError('') }} autoComplete="new-password" minLength={8} maxLength={128} required /></div>
+          {error && <p className="login-error" role="alert">{error}</p>}
+          <button className="login-btn" type="submit" disabled={busy}>{busy ? 'در حال ثبت...' : 'ثبت رمز جدید'} <ChevronLeft size={20} /></button>
+        </form>
+      </AuthShell>
+    )
+  }
+
+  if (step === 'code') {
+    return (
+      <AuthShell title="کد تأیید" subtitle="کد ارسال‌شده به شماره موبایل حساب را وارد کنید." onBack={onBack}>
+        <form onSubmit={verifyCode}>
+          {message && <p className="login-notice" role="status">{message}</p>}
+          <label htmlFor="reset-code">کد تأیید پیامکی</label>
+          <div className="input-wrap">
+            <Smartphone size={20} />
+            <input id="reset-code" className="code-input" inputMode="numeric" autoComplete="one-time-code" value={code} onChange={(e) => { setCode(e.target.value); setError('') }} maxLength={16} placeholder="------" required autoFocus />
+          </div>
+          <div className="recovery-meta">
+            <span>{codeLeft > 0 ? `اعتبار کد: ${formatCountdown(codeLeft)}` : 'اعتبار کد به پایان رسیده است.'}</span>
+            <button type="button" disabled={busy || resendLeft > 0} onClick={() => requestCode()}>
+              {resendLeft > 0 ? `ارسال دوباره (${formatCountdown(resendLeft)})` : 'ارسال دوباره کد'}
+            </button>
+          </div>
+          {error && <p className="login-error" role="alert">{error}</p>}
+          <button className="login-btn" type="submit" disabled={busy || !code.trim()}>{busy ? 'در حال بررسی...' : 'تأیید کد'} <ChevronLeft size={20} /></button>
+          <button className="forgot-link" type="button" onClick={() => { setStep('identifier'); setError(''); setMessage('') }}>تغییر نام کاربری یا شماره موبایل</button>
+        </form>
+      </AuthShell>
+    )
+  }
+
   return (
-    <AuthShell title="تعیین رمز عبور جدید" subtitle="توکن دریافتی و رمز جدید را وارد کنید." onBack={onBack}>
-      <form onSubmit={submit}>
-        <label htmlFor="reset-token">توکن بازیابی</label>
-        <div className="input-wrap"><KeyRound size={20} /><input id="reset-token" value={token} onChange={(e) => { setToken(e.target.value); setError('') }} required /></div>
-        <label htmlFor="new-password">رمز عبور جدید</label>
-        <div className="input-wrap"><LockKeyhole size={20} /><input id="new-password" type="password" value={password} onChange={(e) => { setPassword(e.target.value); setError('') }} minLength={8} required /></div>
-        <label htmlFor="confirm-password">تکرار رمز عبور</label>
-        <div className="input-wrap"><LockKeyhole size={20} /><input id="confirm-password" type="password" value={confirm} onChange={(e) => { setConfirm(e.target.value); setError('') }} minLength={8} required /></div>
+    <AuthShell title="بازیابی رمز عبور" subtitle="نام کاربری یا شماره موبایل حساب خود را وارد کنید تا کد بازیابی برایتان پیامک شود." onBack={onBack}>
+      <form onSubmit={requestCode}>
+        <label htmlFor="reset-identifier">نام کاربری یا شماره موبایل</label>
+        <div className="input-wrap">
+          <UserRound size={20} />
+          <input id="reset-identifier" type="text" value={identifier} onChange={(e) => { setIdentifier(e.target.value); setError('') }} autoComplete="username" placeholder="نام کاربری یا شماره موبایل" required autoFocus />
+        </div>
         {error && <p className="login-error" role="alert">{error}</p>}
-        <button className="login-btn" type="submit" disabled={busy}>{busy ? 'در حال ثبت...' : 'ثبت رمز جدید'} <ChevronLeft size={20} /></button>
+        <button className="login-btn" type="submit" disabled={busy || !identifier.trim()}>{busy ? 'در حال ارسال...' : 'ارسال کد بازیابی'} <ChevronLeft size={20} /></button>
       </form>
     </AuthShell>
   )
@@ -3156,12 +3226,8 @@ function Dashboard() {
 
 function AppRoutes() {
   const { isAuthenticated, booting } = useAuth()
-  // No router in this app; a token in the URL selects the reset screen on first paint.
-  const [screen, setScreen] = useState(() => {
-    const token = new URLSearchParams(window.location.search).get('token')
-    return token || window.location.pathname.includes('reset-password') ? 'reset' : 'login'
-  })
-  const [resetToken, setResetToken] = useState(() => new URLSearchParams(window.location.search).get('token') || '')
+  // No router in this app: the login screen and the password recovery wizard are the two signed-out screens.
+  const [screen, setScreen] = useState('login')
 
   if (booting) {
     return <main className="login-page" dir="rtl"><section className="login-panel"><div className="login-box"><Brand /><p>در حال بررسی نشست...</p></div></section></main>
@@ -3169,15 +3235,11 @@ function AppRoutes() {
 
   if (isAuthenticated) return <Dashboard />
 
-  if (screen === 'forgot') {
-    return <ForgotPassword onBack={() => setScreen('login')} onTokenIssued={(token) => { setResetToken(token); setScreen('reset') }} />
+  if (screen === 'recover') {
+    return <PasswordRecovery onBack={() => setScreen('login')} />
   }
 
-  if (screen === 'reset') {
-    return <ResetPassword initialToken={resetToken} onBack={() => setScreen('login')} />
-  }
-
-  return <Login onForgotPassword={() => setScreen('forgot')} />
+  return <Login onForgotPassword={() => setScreen('recover')} />
 }
 
 export default function App() {
