@@ -456,6 +456,8 @@ export const actionsApi = {
 const suppliersBase = '/api/project-management/suppliers'
 export const suppliersApi = {
   list: () => api.get(suppliersBase),
+  // Every supplier across all projects with its figures, late items, scores and attention reasons (names such as 'LowScore').
+  dashboard: () => api.get(`${suppliersBase}/dashboard`),
   get: (id) => api.get(`${suppliersBase}/${id}`),
   create: (payload) => api.post(suppliersBase, payload),
   update: (id, payload) => api.put(`${suppliersBase}/${id}`, payload),

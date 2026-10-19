@@ -3459,6 +3459,111 @@ function EvaluationFormDialog({ supplier, item, contracts, contractTitle, onClos
   )
 }
 
+/* ---- Supplier dashboard for senior management: every supplier across all projects, side by side ---- */
+
+const supplierAttentionLabels = {
+  LowScore: 'امتیاز پایین',
+  OverdueMilestones: 'نقطه‌ی عطف معوق',
+  MissedObligations: 'تعهد ایفانشده',
+  NotEvaluated: 'ارزیابی‌نشده با قرارداد فعال',
+}
+const supplierDashboardSorts = {
+  amount: ['بیشترین مبلغ قرارداد', (a, b) => moneyRials(b.contractAmount) - moneyRials(a.contractAmount)],
+  score: ['بهترین امتیاز', (a, b) => (b.latestScore ?? -1) - (a.latestScore ?? -1)],
+  weakest: ['ضعیف‌ترین امتیاز', (a, b) => (a.latestScore ?? 99) - (b.latestScore ?? 99)],
+  risk: ['بیشترین معوقات', (a, b) => (b.overdueMilestones + b.missedObligations) - (a.overdueMilestones + a.missedObligations)],
+  outstanding: ['بیشترین بدهی معوق', (a, b) => moneyRials(b.outstandingPayable) - moneyRials(a.outstandingPayable)],
+}
+
+function SupplierDashboard({ onEvaluate, reloadKey }) {
+  const [dashboard, setDashboard] = useState(null)
+  const [error, setError] = useState('')
+  const [sort, setSort] = useState('amount')
+
+  useEffect(() => {
+    let cancelled = false
+    suppliersApi.dashboard().then((result) => {
+      if (cancelled) return
+      setError(result.isSuccess ? '' : PersianMessages.error(result.error))
+      setDashboard(result.isSuccess ? unwrap(result) : { totals: null, rows: [] })
+    })
+    return () => { cancelled = true }
+  }, [reloadKey])
+
+  const rows = useMemo(() => [...(dashboard?.rows || [])].sort(supplierDashboardSorts[sort][1]), [dashboard, sort])
+  const attention = (dashboard?.rows || []).filter((row) => row.attention?.length)
+  const totals = dashboard?.totals
+  const exportDashboard = () => downloadCsv('supplier-dashboard.csv',
+    ['رتبه', 'تأمین‌کننده', 'نوع', 'پروژه', 'قرارداد', 'قرارداد فعال', 'مبلغ (ریال)', 'بدهی معوق (ریال)', 'نقطه‌ی عطف معوق', 'تعهد ایفانشده', 'آخرین امتیاز', 'میانگین امتیاز', 'نیازمند توجه'],
+    rows.map((row, index) => [index + 1, row.name, enumLabel(row.category, supplierCategoryLabels), row.projectCount, row.contractCount, row.activeContractCount,
+      moneyRials(row.contractAmount), moneyRials(row.outstandingPayable), row.overdueMilestones, row.missedObligations, row.latestScore ?? '', row.averageScore ?? '',
+      (row.attention || []).map((code) => supplierAttentionLabels[code] || code).join('، ')]))
+
+  if (dashboard === null) return <p className="data-state">در حال بارگذاری...</p>
+
+  return (
+    <>
+      {error && <div className="users-notice error ctl-notice" role="alert"><CircleAlert size={16} /><span>{error}</span></div>}
+      {totals && (
+        <ControlKpis items={[
+          { icon: Truck, tone: 'navy', label: 'تأمین‌کننده', value: toPersianDigits(totals.supplierCount), note: `${toPersianDigits(totals.activeSupplierCount)} فعال · ${toPersianDigits(totals.projectCount)} پروژه` },
+          { icon: CircleDollarSign, tone: 'blue', label: 'مبلغ قراردادها', value: rialsText(moneyRials(totals.contractAmount)), note: `ریال · بدهی معوق ${rialsText(moneyRials(totals.outstandingPayable))}` },
+          { icon: TriangleAlert, tone: 'red', label: 'نیازمند توجه', value: toPersianDigits(totals.needingAttention), note: `${toPersianDigits(totals.overdueMilestones)} نقطه‌ی عطف معوق · ${toPersianDigits(totals.missedObligations)} تعهد ایفانشده` },
+          { icon: ClipboardCheck, tone: 'green', label: 'میانگین امتیاز', value: scoreText(totals.averageLatestScore), note: `از آخرین ارزیابیِ ${toPersianDigits(totals.evaluatedSuppliers)} تأمین‌کننده` },
+        ]} />
+      )}
+
+      <section className="task-panel task-table-panel ctl-panel ctl-block">
+        <div className="task-panel-title"><div><h3>نیازمند توجه</h3><p>امتیاز آخرین ارزیابی زیر ۲٫۵، نقطه‌ی عطف یا تعهدِ عقب‌افتاده، یا قرارداد فعال بدون هیچ ارزیابی.</p></div></div>
+        {!attention.length ? <p className="ue-note">موردی نیازمند توجه نیست.</p> : (
+          <div className="table-scroll"><table>
+            <thead><tr><th>تأمین‌کننده</th><th>دلیل</th><th>آخرین امتیاز</th><th /></tr></thead>
+            <tbody>{attention.map((row) => (
+              <tr key={row.supplierId}>
+                <td className="ctl-main"><strong>{row.name}</strong><small>{toPersianDigits(row.activeContractCount)} قرارداد فعال در {toPersianDigits(row.projectCount)} پروژه</small></td>
+                <td><span className="ctl-links">{row.attention.map((code) => <span key={code} className="ctl-chip">{supplierAttentionLabels[code] || code}</span>)}</span></td>
+                <td><strong className={scoreClass(row.latestScore)}>{scoreText(row.latestScore)}</strong></td>
+                <td><span className="row-actions"><button type="button" title="ارزیابی‌های دوره‌ای" aria-label="ارزیابی‌های دوره‌ای" onClick={() => onEvaluate({ id: row.supplierId, name: row.name })}><ClipboardCheck size={15} /></button></span></td>
+              </tr>
+            ))}</tbody>
+          </table></div>
+        )}
+      </section>
+
+      <section className="task-panel task-table-panel ctl-panel ctl-block">
+        <div className="task-panel-title">
+          <div><h3>رتبه‌بندی تأمین‌کنندگان</h3><p>همه‌ی پروژه‌ها؛ مبلغ‌ها فقط از قراردادهای تأییدشده.</p></div>
+          <div className="ctl-filters">
+            <select className="ctl-select" value={sort} onChange={(e) => setSort(e.target.value)} aria-label="مرتب‌سازی">
+              {Object.entries(supplierDashboardSorts).map(([key, [label]]) => <option key={key} value={key}>{label}</option>)}
+            </select>
+            <button type="button" className="ctl-link" onClick={exportDashboard} disabled={!rows.length}><Download size={14} /> خروجی Excel</button>
+          </div>
+        </div>
+        <DataState loading={false} empty={!rows.length}>
+          <div className="table-scroll"><table>
+            <thead><tr><th>#</th><th>تأمین‌کننده</th><th>پروژه</th><th>قرارداد</th><th>مبلغ (ریال)</th><th>بدهی معوق</th><th>عطف معوق</th><th>تعهد ایفانشده</th><th>آخرین امتیاز</th><th>میانگین</th></tr></thead>
+            <tbody>{rows.map((row, index) => (
+              <tr key={row.supplierId}>
+                <td>{toPersianDigits(index + 1)}</td>
+                <td className="ctl-main"><strong>{row.name}</strong><small>{enumLabel(row.category, supplierCategoryLabels)}{row.status === 1 ? ' · غیرفعال' : ''}</small></td>
+                <td>{toPersianDigits(row.projectCount)}</td>
+                <td>{toPersianDigits(row.contractCount)}<small className="ctl-sp"> ({toPersianDigits(row.activeContractCount)} فعال)</small></td>
+                <td>{rialsText(moneyRials(row.contractAmount))}</td>
+                <td className={moneyRials(row.outstandingPayable) > 0 ? 'neg' : ''}>{rialsText(moneyRials(row.outstandingPayable))}</td>
+                <td className={row.overdueMilestones ? 'neg' : ''}>{toPersianDigits(row.overdueMilestones)}</td>
+                <td className={row.missedObligations ? 'neg' : ''}>{toPersianDigits(row.missedObligations)}</td>
+                <td title={row.latestPeriodEndFa ? `تا ${row.latestPeriodEndFa}` : 'ارزیابی نشده'}><strong className={scoreClass(row.latestScore)}>{scoreText(row.latestScore)}</strong></td>
+                <td>{scoreText(row.averageScore)}{row.evaluationCount > 0 && <small className="ctl-sp"> ({toPersianDigits(row.evaluationCount)})</small>}</td>
+              </tr>
+            ))}</tbody>
+          </table></div>
+        </DataState>
+      </section>
+    </>
+  )
+}
+
 function SuppliersPage({ data }) {
   const { can } = useAuth()
   const suppliers = useSuppliers()
@@ -3468,6 +3573,7 @@ function SuppliersPage({ data }) {
   const [open, setOpen] = useState(null)
   const [detail, setDetail] = useState(null)
   const [evaluating, setEvaluating] = useState(null)
+  const [view, setView] = useState('list')
   const canManage = can('Contracts.ManageSuppliers')
   const projectName = (id) => projectDisplayName(data.projects.find((project) => project.id === id))
   const items = suppliers.items || []
@@ -3503,6 +3609,12 @@ function SuppliersPage({ data }) {
           <>
             <PageNotice notice={notice} onClose={() => setNotice(null)} />
             {suppliers.error && <div className="users-notice error ctl-notice" role="alert"><CircleAlert size={16} /><span>{suppliers.error}</span></div>}
+            <nav className="settings-subtabs ctl-subtabs">
+              <button type="button" className={view === 'list' ? 'active' : ''} onClick={() => setView('list')}><Truck size={16} />فهرست و شناسنامه</button>
+              <button type="button" className={view === 'dashboard' ? 'active' : ''} onClick={() => setView('dashboard')}><LayoutDashboard size={16} />داشبورد مدیریتی</button>
+            </nav>
+            {view === 'dashboard' && <SupplierDashboard data={data} onEvaluate={setEvaluating} reloadKey={suppliers.items} />}
+            {view === 'list' && (<>
             <ControlKpis items={[
               { icon: Truck, tone: 'navy', label: 'تأمین‌کننده', value: toPersianDigits(items.length), note: `${toPersianDigits(items.filter((item) => item.status === 0).length)} فعال` },
               { icon: FileText, tone: 'blue', label: 'قرارداد', value: toPersianDigits(items.reduce((sum, item) => sum + (item.stats?.contractCount || 0), 0)), note: 'همه‌ی وضعیت‌ها' },
@@ -3566,6 +3678,7 @@ function SuppliersPage({ data }) {
                 </table></div>
               </DataState>
             </section>
+            </>)}
             {evaluating && (
               <SupplierEvaluationsDialog
                 supplier={evaluating} projects={data.projects} canEvaluate={can('Contracts.EvaluateSuppliers')}
