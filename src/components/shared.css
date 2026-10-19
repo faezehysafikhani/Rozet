@@ -1,0 +1,33 @@
+/* Shared building blocks (JalaliDateInput, ConfirmDialog). Kept out of styles.css on purpose. */
+
+.jdate { display: flex; gap: 6px; width: 100%; min-width: 0; direction: rtl; }
+.jdate select {
+  flex: 1 1 0; min-width: 0; width: auto; padding: 0 8px; height: 40px;
+  border: 1px solid #dfe3ea; border-radius: 9px; outline: 0;
+  color: #333d51; background: #fff; font: inherit;
+}
+.jdate select:first-child { flex: 0.8 1 0; }
+.jdate select:last-child { flex: 1.1 1 0; }
+.jdate select:focus { border-color: #bd8a34; }
+.jdate select:disabled { color: #7d8593; background: #f6f7f9; cursor: not-allowed; }
+.jdate--invalid select { border-color: #d98a8a; }
+
+.cf-backdrop {
+  position: fixed; inset: 0; z-index: 1300; display: grid; place-items: center; padding: 20px;
+  background: rgba(10, 22, 52, .5);
+}
+.cf-dialog {
+  width: min(440px, 100%); display: flex; flex-direction: column; gap: 14px; padding: 22px;
+  border-radius: 14px; background: #fff; box-shadow: 0 24px 60px rgba(10, 22, 52, .28);
+}
+.cf-dialog h3 { margin: 0; font-size: 1.0625rem; color: #26304a; }
+.cf-dialog p { margin: 0; color: #4c5568; line-height: 1.9; }
+.cf-error { padding: 9px 12px; border: 1px solid #f1c9c9; border-radius: 8px; color: #a14646; background: #fff5f5; font-size: .875rem; }
+.cf-actions { display: flex; justify-content: flex-start; gap: 8px; margin-top: 4px; }
+.cf-actions button {
+  height: 40px; padding: 0 20px; border: 1px solid #dfe3ea; border-radius: 9px;
+  color: #333d51; background: #fff; font: inherit; font-weight: 600; cursor: pointer;
+}
+.cf-actions button:disabled { opacity: .5; cursor: not-allowed; }
+.cf-actions .cf-confirm { border-color: transparent; color: #fff; background: #0e3471; }
+.cf-actions .cf-confirm--danger { background: #b3363b; }
