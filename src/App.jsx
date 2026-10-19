@@ -73,7 +73,7 @@ import {
   RotateCcw,
 } from 'lucide-react'
 import { AuthProvider, Can, useAuth } from './services/AuthContext'
-import { PersianMessages, contractsApi, costReportApi, groupsApi, identityApi, labelForModule, labelForPermission, orgChartApi, permissionsApi, platformApi, projectManagementApi, rolesApi, unwrap, usersApi } from './services/api'
+import { PersianMessages, contractsApi, costReportApi, groupsApi, identityApi, labelForModule, labelForPermission, orgChartApi, permissionsApi, platformApi, projectManagementApi, rolesApi, suppliersApi, unwrap, usersApi } from './services/api'
 import { DEFAULT_TENANT_ID } from './services/config'
 import { useChat } from './hooks/useChat'
 import { useNotifications } from './hooks/useNotifications'
@@ -2638,23 +2638,33 @@ function ContractFormDialog({ projectId, tenantId, contract, onClose, onSaved })
   const isNew = !contract
   const approved = contract?.approvalStatus === 2
   const [form, setForm] = useState({
-    contractNumber: contract?.contractNumber || '', title: contract?.title || '', counterparty: contract?.counterparty || '',
+    contractNumber: contract?.contractNumber || '', title: contract?.title || '', counterparty: contract?.counterparty || '', supplierId: contract?.supplierId || '',
     supervisorName: contract?.supervisorName || '', beneficiaryName: contract?.beneficiaryName || '', description: contract?.description || '',
     signDate: contract?.signDate || '', startDate: contract?.startDate || '', endDate: contract?.endDate || '',
     amount: contract ? String(Math.round(moneyRials(contract.originalAmount))) : '',
   })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  const [suppliers, setSuppliers] = useState([])
   const set = (key) => (event) => setForm((current) => ({ ...current, [key]: event.target.value }))
+
+  // The party of the contract is picked from the suppliers; a name typed instead finds (or starts) the supplier of that name.
+  useEffect(() => {
+    let cancelled = false
+    suppliersApi.list().then((result) => { if (!cancelled && result.isSuccess) setSuppliers(arrayPayload(result)) })
+    return () => { cancelled = true }
+  }, [])
+  const pickableSuppliers = suppliers.filter((item) => item.status === 0 || item.id === form.supplierId)
 
   async function submit(event) {
     event.preventDefault()
-    if (!form.contractNumber.trim() || !form.title.trim() || !form.counterparty.trim()) { setError('شماره، عنوان و طرف قرارداد را وارد کنید.'); return }
+    if (!form.contractNumber.trim() || !form.title.trim() || (!form.supplierId && !form.counterparty.trim())) { setError('شماره، عنوان و طرف قرارداد را وارد کنید.'); return }
     if (!form.amount || Number(form.amount) <= 0) { setError('مبلغ قرارداد (ریال) را وارد کنید.'); return }
     if (form.startDate && form.endDate && form.endDate < form.startDate) { setError('تاریخ پایان نمی‌تواند قبل از تاریخ شروع باشد.'); return }
     setSaving(true); setError('')
     const fields = {
-      contractNumber: toLatinDigits(form.contractNumber.trim()), title: form.title.trim(), counterparty: form.counterparty.trim(),
+      contractNumber: toLatinDigits(form.contractNumber.trim()), title: form.title.trim(),
+      ...(form.supplierId ? { supplierId: form.supplierId, counterparty: pickableSuppliers.find((item) => item.id === form.supplierId)?.name || form.counterparty.trim() } : { counterparty: form.counterparty.trim() }),
       description: emptyToNull(form.description.trim()), signDate: emptyToNull(form.signDate), startDate: emptyToNull(form.startDate), endDate: emptyToNull(form.endDate),
       originalAmount: Number(form.amount), supervisorName: emptyToNull(form.supervisorName.trim()), beneficiaryName: emptyToNull(form.beneficiaryName.trim()),
     }
@@ -2678,7 +2688,13 @@ function ContractFormDialog({ projectId, tenantId, contract, onClose, onSaved })
         <div className="ue-card"><div className="ue-grid">
           <CtlField label="شماره‌ی قرارداد" required><input className="ltr-input" value={form.contractNumber} onChange={set('contractNumber')} maxLength={100} autoFocus /></CtlField>
           <CtlField label="عنوان" required><input value={form.title} onChange={set('title')} maxLength={300} /></CtlField>
-          <CtlField label="طرف قرارداد" required hint="پیمانکار، تأمین‌کننده یا مشاور" wide><input value={form.counterparty} onChange={set('counterparty')} maxLength={300} /></CtlField>
+          <CtlField label="طرف قرارداد" required hint="پیمانکار، تأمین‌کننده یا مشاور؛ از فهرست انتخاب کنید یا نامِ تازه را بنویسید" wide>
+            <select value={form.supplierId} onChange={set('supplierId')}>
+              <option value="">— نام تازه (تایپی) —</option>
+              {pickableSuppliers.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+            </select>
+          </CtlField>
+          {!form.supplierId && <CtlField label="نام طرف قرارداد" wide><input value={form.counterparty} onChange={set('counterparty')} maxLength={300} /></CtlField>}
           <CtlField label="ناظر"><input value={form.supervisorName} onChange={set('supervisorName')} maxLength={300} /></CtlField>
           <CtlField label="بهره‌بردار"><input value={form.beneficiaryName} onChange={set('beneficiaryName')} maxLength={300} /></CtlField>
         </div></div>
@@ -2937,82 +2953,190 @@ function PaymentDialog({ contract, invoice, onClose, onSaved }) {
   )
 }
 
-/* ---- Suppliers: contracts grouped by the other party ---- */
+/* ---- Suppliers: the parties of the contracts, kept once per tenant ---- */
+
+const supplierCategoryLabels = { 0: 'پیمانکار', 1: 'تأمین‌کننده', 2: 'مشاور', 3: 'سایر' }
+const supplierStatusLabels = { 0: 'فعال', 1: 'غیرفعال' }
+
+function useSuppliers() {
+  const [items, setItems] = useState(null)
+  const [error, setError] = useState('')
+  const [reloadKey, setReloadKey] = useState(0)
+
+  useEffect(() => {
+    let cancelled = false
+    suppliersApi.list().then((result) => {
+      if (cancelled) return
+      setError(result.isSuccess ? '' : PersianMessages.error(result.error))
+      setItems(arrayPayload(result))
+    })
+    return () => { cancelled = true }
+  }, [reloadKey])
+
+  return { items, error, reload: () => setReloadKey((value) => value + 1) }
+}
+
+function SupplierFormDialog({ supplier, onClose, onSaved }) {
+  const isNew = !supplier
+  const [form, setForm] = useState({
+    name: supplier?.name || '', category: String(supplier?.category ?? 0), status: String(supplier?.status ?? 0),
+    nationalId: supplier?.nationalId || '', contactPerson: supplier?.contactPerson || '', phone: supplier?.phone || '',
+    email: supplier?.email || '', address: supplier?.address || '', description: supplier?.description || '',
+  })
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const set = (key) => (event) => setForm((current) => ({ ...current, [key]: event.target.value }))
+
+  async function submit(event) {
+    event.preventDefault()
+    if (!form.name.trim()) { setError('نام تأمین‌کننده را وارد کنید.'); return }
+    setSaving(true); setError('')
+    const fields = {
+      name: form.name.trim(), category: Number(form.category), nationalId: emptyToNull(form.nationalId.trim()), contactPerson: emptyToNull(form.contactPerson.trim()),
+      phone: emptyToNull(form.phone.trim()), email: emptyToNull(form.email.trim()), address: emptyToNull(form.address.trim()), description: emptyToNull(form.description.trim()),
+    }
+    const result = isNew ? await suppliersApi.create(fields) : await suppliersApi.update(supplier.id, { ...fields, status: Number(form.status) })
+    setSaving(false)
+    if (!result.isSuccess) { setError(PersianMessages.error(result.error)); return }
+    onSaved({ type: 'success', text: isNew ? `تأمین‌کننده‌ی «${fields.name}» ثبت شد.` : `تأمین‌کننده‌ی «${fields.name}» ذخیره شد.` })
+  }
+
+  return (
+    <ControlDialog
+      size="sm" icon={isNew ? Plus : Pencil} title={isNew ? 'تأمین‌کننده‌ی جدید' : `ویرایش «${supplier.name}»`} onClose={onClose}
+      footer={(
+        <>
+          {error && <span className="ue-error"><TriangleAlert size={15} />{error}</span>}
+          <div className="ue-foot-actions"><button type="button" className="ue-cancel" onClick={onClose}>انصراف</button><button type="submit" form="supplier-form" className="ue-save" disabled={saving}>{saving ? 'در حال ذخیره...' : isNew ? 'ثبت تأمین‌کننده' : 'ذخیره'}</button></div>
+        </>
+      )}
+    >
+      <form id="supplier-form" onSubmit={submit} noValidate>
+        <div className="ue-card"><div className="ue-grid">
+          <CtlField label="نام" required wide hint="با تغییر نام، نام طرف قرارداد در قراردادهای او هم عوض می‌شود"><input value={form.name} onChange={set('name')} maxLength={300} autoFocus /></CtlField>
+          <CtlField label="نوع"><select value={form.category} onChange={set('category')}>{Object.entries(supplierCategoryLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></CtlField>
+          {isNew ? <span /> : <CtlField label="وضعیت" hint="تأمین‌کننده‌ی غیرفعال در قرارداد تازه انتخاب نمی‌شود"><select value={form.status} onChange={set('status')}>{Object.entries(supplierStatusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></CtlField>}
+          <CtlField label="شناسه‌ی ملی / کد ملی"><input className="ltr-input" value={form.nationalId} onChange={set('nationalId')} maxLength={50} /></CtlField>
+          <CtlField label="رابط"><input value={form.contactPerson} onChange={set('contactPerson')} maxLength={200} /></CtlField>
+          <CtlField label="تلفن"><input className="ltr-input" value={form.phone} onChange={set('phone')} maxLength={50} /></CtlField>
+          <CtlField label="ایمیل"><input className="ltr-input" value={form.email} onChange={set('email')} maxLength={200} /></CtlField>
+          <CtlField label="نشانی" wide><input value={form.address} onChange={set('address')} maxLength={1000} /></CtlField>
+          <CtlField label="توضیحات" wide><textarea rows={2} value={form.description} onChange={set('description')} maxLength={4000} /></CtlField>
+        </div></div>
+      </form>
+    </ControlDialog>
+  )
+}
 
 function SuppliersPage({ data }) {
   const { can } = useAuth()
-  const [scope, setScope] = useState('project')
+  const suppliers = useSuppliers()
+  const [notice, setNotice] = useState(null)
+  const [form, setForm] = useState(null)
+  const [search, setSearch] = useState('')
   const [open, setOpen] = useState(null)
-  const ids = useMemo(() => (scope === 'all' ? data.projects.map((project) => project.id) : (data.selectedProjectId ? [data.selectedProjectId] : [])), [scope, data.projects, data.selectedProjectId])
-  const contracts = useContractDetails(ids)
+  const [detail, setDetail] = useState(null)
+  const canManage = can('Contracts.ManageSuppliers')
   const projectName = (id) => projectDisplayName(data.projects.find((project) => project.id === id))
-  const groups = useMemo(() => {
-    const map = new Map()
-    for (const { contract } of contracts.items || []) {
-      const name = contract.counterparty.trim()
-      if (!map.has(name)) map.set(name, { name, contracts: [], amount: 0, invoiced: 0, paid: 0, outstanding: 0 })
-      const group = map.get(name)
-      group.contracts.push(contract)
-      if (contract.approvalStatus === 2) {
-        group.amount += moneyRials(contract.summary?.currentAmount)
-        group.invoiced += moneyRials(contract.summary?.invoicedAmount)
-        group.paid += moneyRials(contract.summary?.paidAmount)
-        group.outstanding += moneyRials(contract.summary?.outstandingPayable)
-      }
-    }
-    return [...map.values()].sort((a, b) => b.amount - a.amount)
-  }, [contracts.items])
+  const items = suppliers.items || []
+  const shown = items.filter((item) => !search.trim() || `${item.name} ${item.nationalId || ''} ${item.contactPerson || ''}`.toLowerCase().includes(search.trim().toLowerCase()))
+  const total = (key) => items.reduce((sum, item) => sum + moneyRials(item.stats?.[key]), 0)
 
-  const exportSuppliers = () => downloadCsv('suppliers.csv', ['تأمین‌کننده', 'تعداد قرارداد', 'مبلغ (ریال)', 'صورت‌حساب‌شده (ریال)', 'پرداخت‌شده (ریال)', 'بدهی معوق (ریال)'],
-    groups.map((group) => [group.name, group.contracts.length, group.amount, group.invoiced, group.paid, group.outstanding]))
+  // The contracts of the supplier that is opened, with the figures of each.
+  useEffect(() => {
+    let cancelled = false
+    setDetail(null)
+    if (!open) return undefined
+    suppliersApi.get(open).then((result) => { if (!cancelled) setDetail(result.isSuccess ? unwrap(result) : { contracts: [], error: PersianMessages.error(result.error) }) })
+    return () => { cancelled = true }
+  }, [open, suppliers.items])
+
+  const remove = (item) => {
+    if (!window.confirm(`تأمین‌کننده‌ی «${item.name}» حذف شود؟`)) return
+    runAction(() => suppliersApi.remove(item.id), 'تأمین‌کننده حذف شد.', setNotice, suppliers.reload)
+  }
+
+  const exportSuppliers = () => downloadCsv('suppliers.csv', ['تأمین‌کننده', 'نوع', 'وضعیت', 'شناسه‌ی ملی', 'تعداد قرارداد', 'مبلغ (ریال)', 'صورت‌حساب‌شده (ریال)', 'پرداخت‌شده (ریال)', 'بدهی معوق (ریال)'],
+    shown.map((item) => [item.name, enumLabel(item.category, supplierCategoryLabels), enumLabel(item.status, supplierStatusLabels), item.nationalId || '', item.stats?.contractCount ?? 0,
+      moneyRials(item.stats?.contractAmount), moneyRials(item.stats?.invoicedAmount), moneyRials(item.stats?.paidAmount), moneyRials(item.stats?.outstandingPayable)]))
 
   return (
     <>
       <TaskPageHeader
         section="کنترل و اجرا" title="مدیریت تأمین‌کنندگان" action={null}
-        description="طرف‌های قرارداد پروژه (پیمانکار، تأمین‌کننده، مشاور) و مبلغ قرارداد، صورت‌حساب و پرداخت هر کدام"
-        actionNode={<select className="project-selector" value={scope} onChange={(e) => setScope(e.target.value)} aria-label="دامنه"><option value="project">فقط پروژه‌ی انتخاب‌شده</option><option value="all">همه‌ی پروژه‌ها</option></select>}
-      >
-        {scope === 'project' && <ProjectSelector data={data} />}
-      </TaskPageHeader>
-      <DataState loading={data.loading} error={data.error} empty={!data.projects.length}>
+        description="شناسنامه‌ی پیمانکاران، تأمین‌کنندگان و مشاوران، با قراردادها، صورت‌حساب‌ها و پرداخت هر کدام در همه‌ی پروژه‌ها"
+      />
+      <DataState loading={data.loading} error={data.error} empty={false}>
         {!can('Contracts.View') ? <p className="data-state data-state--error">برای دیدن این بخش، دسترسی «مشاهده‌ی قراردادها» (Contracts.View) لازم است.</p> : (
           <>
-            {contracts.error && <div className="users-notice error ctl-notice" role="alert"><CircleAlert size={16} /><span>{contracts.error}</span></div>}
+            <PageNotice notice={notice} onClose={() => setNotice(null)} />
+            {suppliers.error && <div className="users-notice error ctl-notice" role="alert"><CircleAlert size={16} /><span>{suppliers.error}</span></div>}
             <ControlKpis items={[
-              { icon: Truck, tone: 'navy', label: 'تأمین‌کننده', value: toPersianDigits(groups.length), note: 'طرف قرارداد متفاوت' },
-              { icon: FileText, tone: 'blue', label: 'قرارداد', value: toPersianDigits((contracts.items || []).length), note: 'همه‌ی وضعیت‌ها' },
-              { icon: CircleDollarSign, tone: 'red', label: 'صورت‌حساب‌شده', value: rialsText(groups.reduce((sum, group) => sum + group.invoiced, 0)), note: 'ریال، تأییدشده' },
-              { icon: CircleAlert, tone: 'green', label: 'بدهی معوق', value: rialsText(groups.reduce((sum, group) => sum + group.outstanding, 0)), note: 'ریال، هنوز پرداخت‌نشده' },
+              { icon: Truck, tone: 'navy', label: 'تأمین‌کننده', value: toPersianDigits(items.length), note: `${toPersianDigits(items.filter((item) => item.status === 0).length)} فعال` },
+              { icon: FileText, tone: 'blue', label: 'قرارداد', value: toPersianDigits(items.reduce((sum, item) => sum + (item.stats?.contractCount || 0), 0)), note: 'همه‌ی وضعیت‌ها' },
+              { icon: CircleDollarSign, tone: 'red', label: 'صورت‌حساب‌شده', value: rialsText(total('invoicedAmount')), note: 'ریال، تأییدشده' },
+              { icon: CircleAlert, tone: 'green', label: 'بدهی معوق', value: rialsText(total('outstandingPayable')), note: 'ریال، هنوز پرداخت‌نشده' },
             ]} />
             <section className="task-panel task-table-panel ctl-panel ctl-block">
-              <div className="task-panel-title"><div><h3>فهرست تأمین‌کنندگان</h3><p>مبلغ‌ها فقط از قراردادهای تأییدشده جمع شده است. برای دیدن قراردادهای هر کدام، روی نام بزنید.</p></div><button type="button" className="ctl-link" onClick={exportSuppliers} disabled={!groups.length}><Download size={14} /> خروجی Excel</button></div>
-              <DataState loading={contracts.items === null} empty={!groups.length}>
+              <div className="task-panel-title">
+                <div><h3>فهرست تأمین‌کنندگان</h3><p>مبلغ‌ها فقط از قراردادهای تأییدشده جمع شده است. برای دیدن قراردادهای هر کدام، روی نام بزنید.</p></div>
+                <div className="ctl-filters">
+                  <input className="users-search" type="search" placeholder="جست‌وجوی نام یا شناسه..." value={search} onChange={(e) => setSearch(e.target.value)} aria-label="جست‌وجو" />
+                  <button type="button" className="ctl-link" onClick={exportSuppliers} disabled={!shown.length}><Download size={14} /> خروجی Excel</button>
+                  {canManage && <button type="button" className="users-add" onClick={() => setForm({ supplier: null })}><Plus size={16} />تأمین‌کننده‌ی جدید</button>}
+                </div>
+              </div>
+              <DataState loading={suppliers.items === null} empty={!shown.length}>
                 <div className="table-scroll"><table>
-                  <thead><tr><th>تأمین‌کننده</th><th>قرارداد</th><th>مبلغ (ریال)</th><th>صورت‌حساب‌شده</th><th>پرداخت‌شده</th><th>بدهی معوق</th></tr></thead>
+                  <thead><tr><th>تأمین‌کننده</th><th>نوع</th><th>قرارداد</th><th>مبلغ (ریال)</th><th>صورت‌حساب‌شده</th><th>پرداخت‌شده</th><th>بدهی معوق</th><th>وضعیت</th>{canManage && <th>عملیات</th>}</tr></thead>
                   <tbody>
-                    {groups.map((group) => (
-                      <Fragment key={group.name}>
-                        <tr className="cost-clickable" onClick={() => setOpen(open === group.name ? null : group.name)}>
-                          <td><strong><ChevronDown size={14} className={open === group.name ? 'cost-open' : ''} /> {group.name}</strong></td>
-                          <td>{toPersianDigits(group.contracts.length)}</td><td>{rialsText(group.amount)}</td><td>{rialsText(group.invoiced)}</td><td>{rialsText(group.paid)}</td>
-                          <td className={group.outstanding > 0 ? 'neg' : ''}>{rialsText(group.outstanding)}</td>
+                    {shown.map((item) => (
+                      <Fragment key={item.id}>
+                        <tr className="cost-clickable" onClick={() => setOpen(open === item.id ? null : item.id)}>
+                          <td className="ctl-main"><strong><ChevronDown size={14} className={open === item.id ? 'cost-open' : ''} /> {item.name}</strong>{(item.nationalId || item.contactPerson) && <small>{[item.nationalId && `شناسه ${toPersianDigits(item.nationalId)}`, item.contactPerson].filter(Boolean).join(' · ')}</small>}</td>
+                          <td>{enumLabel(item.category, supplierCategoryLabels)}</td>
+                          <td>{toPersianDigits(item.stats?.contractCount ?? 0)}</td>
+                          <td>{rialsText(moneyRials(item.stats?.contractAmount))}</td>
+                          <td>{rialsText(moneyRials(item.stats?.invoicedAmount))}</td>
+                          <td>{rialsText(moneyRials(item.stats?.paidAmount))}</td>
+                          <td className={moneyRials(item.stats?.outstandingPayable) > 0 ? 'neg' : ''}>{rialsText(moneyRials(item.stats?.outstandingPayable))}</td>
+                          <td>{enumLabel(item.status, supplierStatusLabels)}</td>
+                          {canManage && (
+                            <td onClick={(e) => e.stopPropagation()}>
+                              <span className="row-actions">
+                                <button type="button" title="ویرایش" aria-label="ویرایش" onClick={() => setForm({ supplier: item })}><Pencil size={15} /></button>
+                                <button type="button" className="danger" title="حذف" aria-label="حذف" onClick={() => remove(item)}><Trash2 size={15} /></button>
+                              </span>
+                            </td>
+                          )}
                         </tr>
-                        {open === group.name && group.contracts.map((contract) => (
-                          <tr key={contract.id} className="cost-subrow">
-                            <td colSpan={2}>{contract.title} <small className="ctl-sp">شماره {contract.contractNumberFa}{scope === 'all' ? ` · ${projectName(contract.projectId)}` : ''}</small></td>
-                            <td>{rialsText(moneyRials(contract.approvalStatus === 2 ? contract.summary?.currentAmount : contract.originalAmount))}</td>
-                            <td>{contract.approvalStatus === 2 ? rialsText(moneyRials(contract.summary?.invoicedAmount)) : '—'}</td>
-                            <td>{contract.approvalStatus === 2 ? rialsText(moneyRials(contract.summary?.paidAmount)) : '—'}</td>
-                            <td><ApprovalBadge status={contract.approvalStatus} /></td>
-                          </tr>
-                        ))}
+                        {open === item.id && (detail === null
+                          ? <tr className="cost-subrow"><td colSpan={canManage ? 9 : 8}>در حال بارگذاری...</td></tr>
+                          : !(detail.contracts || []).length
+                            ? <tr className="cost-subrow"><td colSpan={canManage ? 9 : 8}>{detail.error || 'این تأمین‌کننده هنوز قراردادی ندارد.'}</td></tr>
+                            : detail.contracts.map((contract) => (
+                              <tr key={contract.id} className="cost-subrow">
+                                <td colSpan={2}>{contract.title} <small className="ctl-sp">شماره {contract.contractNumberFa} · {projectName(contract.projectId)}</small></td>
+                                <td />
+                                <td>{rialsText(moneyRials(contract.approvalStatus === 2 ? contract.summary?.currentAmount : contract.originalAmount))}</td>
+                                <td>{contract.approvalStatus === 2 ? rialsText(moneyRials(contract.summary?.invoicedAmount)) : '—'}</td>
+                                <td>{contract.approvalStatus === 2 ? rialsText(moneyRials(contract.summary?.paidAmount)) : '—'}</td>
+                                <td>{contract.approvalStatus === 2 ? rialsText(moneyRials(contract.summary?.outstandingPayable)) : '—'}</td>
+                                <td colSpan={canManage ? 2 : 1}><ApprovalBadge status={contract.approvalStatus} /></td>
+                              </tr>
+                            )))}
                       </Fragment>
                     ))}
                   </tbody>
                 </table></div>
               </DataState>
             </section>
+            {form && (
+              <SupplierFormDialog
+                supplier={form.supplier} onClose={() => setForm(null)}
+                onSaved={(result) => { setForm(null); setNotice(result); suppliers.reload() }}
+              />
+            )}
           </>
         )}
       </DataState>

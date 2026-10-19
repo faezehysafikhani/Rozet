@@ -427,6 +427,20 @@ export const contractsApi = {
     api.put(`${contractsBase}/${contractId}/invoices/${id}/payment`, { paidAmount, paymentDate }),
 }
 
+/**
+ * Suppliers (contractors, suppliers, consultants), kept once per tenant; a contract points at one. Category: Contractor = 0,
+ * Supplier = 1, Consultant = 2, Other = 3; status: Active = 0, Inactive = 1. The list carries each supplier's figures
+ * (approved contracts only); get adds its contracts. A supplier with contracts cannot be deleted.
+ */
+const suppliersBase = '/api/project-management/suppliers'
+export const suppliersApi = {
+  list: () => api.get(suppliersBase),
+  get: (id) => api.get(`${suppliersBase}/${id}`),
+  create: (payload) => api.post(suppliersBase, payload),
+  update: (id, payload) => api.put(`${suppliersBase}/${id}`, payload),
+  remove: (id) => api.delete(`${suppliersBase}/${id}`),
+}
+
 /** Cost against progress of one project (earned value) and the physical S-curve. */
 export const costReportApi = {
   // Reporting.ViewAll sees any project; others see the projects they are a team member of, and need Contracts.View.
