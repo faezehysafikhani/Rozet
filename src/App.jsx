@@ -70,6 +70,7 @@ import { DEFAULT_TENANT_ID } from './services/config'
 import { useChat } from './hooks/useChat'
 import { useNotifications } from './hooks/useNotifications'
 import DocumentsPage from './features/project-management/documents/DocumentsPage'
+import CalendarPage from './features/project-management/calendar/CalendarPage'
 import { useDashboard } from './hooks/useDashboard'
 
 // A sidebar entry is a container for several sections, so it is shown when ANY of the
@@ -1096,27 +1097,6 @@ function KanbanBoard({ data }) {
   return <><TaskPageHeader title="برد کانبان" description="نمای دیداری وضعیت وظایف موجود در Nexus Core" actionNode={<CreateButton kind="task" data={data} label="ایجاد وظیفه جدید" />}><ProjectSelector data={data} /></TaskPageHeader><div className="kanban-toolbar"><div className="view-switch"><button className="active">کانبان</button><button>اسکرامبان</button></div></div><DataState loading={data.loading} error={data.error} empty={!normalized.length}><div className="kanban-board">{columns.map((column) => <section className="kanban-column" key={column.title}><header><div><i className={column.tone} /><strong>{column.title}</strong><span>{column.tasks.length.toLocaleString('fa-IR')}</span></div></header>{column.tasks.map((task) => <article className="kanban-card" key={task.id}><div><span className={`priority ${task.priority === 'بالا' || task.priority === 'بحرانی' ? 'high' : task.priority === 'متوسط' ? 'medium' : 'low'}`}>{task.priority}</span><MoreHorizontal size={16} /></div><h4>{task.title}</h4><p>{task.project}</p><footer><span><Clock3 size={14} />{task.due}</span><i>{initialsOf(task.owner).slice(0, 1)}</i></footer></article>)}</section>)}</div></DataState></>
 }
 
-function ProjectCalendar({ data }) {
-  const today = new Date()
-  const year = today.getFullYear()
-  const month = today.getMonth()
-  const firstDay = new Date(year, month, 1)
-  const leading = (firstDay.getDay() + 1) % 7
-  const daysInMonth = new Date(year, month + 1, 0).getDate()
-  const cells = Array.from({ length: Math.ceil((leading + daysInMonth) / 7) * 7 }, (_, index) => index < leading || index >= leading + daysInMonth ? null : index - leading + 1)
-  const byDay = data.tasks.reduce((map, task) => {
-    if (!task.dueDate) return map
-    const date = new Date(`${task.dueDate}T00:00:00`)
-    if (date.getFullYear() === year && date.getMonth() === month) {
-      const day = date.getDate()
-      if (!map[day]) map[day] = []
-      map[day].push(normalizeTask(task, data.userName))
-    }
-    return map
-  }, {})
-  return <><TaskPageHeader title="تقویم پروژه" description="تقویم موعد وظایف؛ Core هنوز endpoint رویداد پروژه مستقل ندارد" action={null}><ProjectSelector data={data} /></TaskPageHeader><div className="calendar-toolbar"><button>امروز</button><div><ChevronLeft size={18} /><strong>{today.toLocaleDateString('fa-IR', { month: 'long', year: 'numeric' })}</strong><ChevronLeft className="flip" size={18} /></div></div><DataState loading={data.loading} error={data.error} empty={!data.tasks.length}><section className="calendar-card"><div className="calendar-weekdays">{['شنبه','یکشنبه','دوشنبه','سه‌شنبه','چهارشنبه','پنجشنبه','جمعه'].map((day) => <span key={day}>{day}</span>)}</div><div className="calendar-days">{cells.map((day, index) => <div className={day === today.getDate() ? 'today' : ''} key={index}>{day && <b>{day.toLocaleString('fa-IR')}</b>}{(byDay[day] || []).slice(0, 3).map((task) => <span className={`event ${task.priority === 'بالا' || task.priority === 'بحرانی' ? 'gold' : task.status === 'تکمیل شده' ? 'green' : 'blue'}`} key={task.id}>{task.title}</span>)}</div>)}</div></section></DataState></>
-}
-
 function ProjectPlanning({ data }) {
   const project = data.selectedProject
   return (
@@ -1240,7 +1220,6 @@ function UnsupportedProjectArea({ title, message }) {
 function TaskManagement({ active, data }) {
   if (active === 'همه وظایف') return <AllTasks data={data} />
   if (active === 'برد کانبان') return <KanbanBoard data={data} />
-  if (active === 'تقویم پروژه') return <ProjectCalendar data={data} />
   if (active === 'جلسات و صورت‌جلسات') return <Meetings />
   if (active === 'گردش کار و الگوها') return <Workflows />
   if (active === 'ماتریس مسئولیت‌ها (RACI)') return <RaciMatrix data={data} />
@@ -1249,6 +1228,7 @@ function TaskManagement({ active, data }) {
 
 function ProjectManagement({ active, data }) {
   if (active === 'برنامه‌ریزی پروژه') return <ProjectPlanning data={data} />
+  if (active === 'تقویم پروژه') return <CalendarPage data={data} />
   if (active === 'مدیریت مستندات') return <DocumentsPage data={data} />
   if (active === 'کنترل پیشرفت پروژه') return <ProjectProgress data={data} />
   if (active === 'مدیریت استراتژیک پروژه‌ها') return <ProjectStrategic data={data} />

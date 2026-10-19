@@ -1,0 +1,70 @@
+.cal-panel { padding: 18px; }
+.cal-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 14px; }
+.cal-nav { display: flex; align-items: center; gap: 4px; }
+.cal-nav strong { min-width: 130px; text-align: center; color: #17233d; font-size: 1.125rem; }
+.cal-nav button, .cal-today { display: inline-flex; align-items: center; gap: 6px; height: 38px; padding: 0 12px; border: 1px solid #dfe3ea; border-radius: 9px; color: #46506a; background: #fff; font: inherit; cursor: pointer; }
+.cal-nav button { width: 38px; padding: 0; justify-content: center; }
+.cal-nav button:hover, .cal-today:hover { background: #f4f6fb; }
+.cal-toolbar select { height: 38px; padding: 0 10px; border: 1px solid #dfe3ea; border-radius: 9px; font: inherit; color: #333d51; background: #fff; }
+.cal-legend { display: flex; flex-wrap: wrap; gap: 6px; margin-inline-start: auto; }
+.cal-chip { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border: 1px solid transparent; border-radius: 999px; font: inherit; font-size: .875rem; cursor: pointer; }
+.cal-chip b { font-weight: 600; opacity: .8; }
+.cal-chip.off { opacity: .45; text-decoration: line-through; }
+
+.cal-note { display: flex; align-items: center; gap: 6px; margin: 0 0 10px; padding: 8px 12px; border-radius: 9px; color: #6e5a2b; background: #fbf1dd; font-size: .9rem; }
+.cal-note--error { color: #a5423c; background: #fbeae9; }
+.cal-note button { margin-inline-start: auto; border: 0; background: none; color: inherit; text-decoration: underline; cursor: pointer; font: inherit; }
+
+.cal-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); border: 1px solid #e6e9ef; border-radius: 12px; overflow: hidden; background: #e6e9ef; gap: 1px; }
+.cal-weekday { padding: 9px 4px; text-align: center; color: #6c7589; background: #f7f8fa; font-size: .9rem; font-weight: 600; }
+.cal-weekday.weekend { color: #b85650; }
+.cal-cell { min-height: 112px; display: flex; flex-direction: column; gap: 3px; padding: 6px; background: #fff; cursor: pointer; outline: 0; }
+.cal-cell:hover { background: #fafbfd; }
+.cal-cell:focus-visible { box-shadow: inset 0 0 0 2px #bd8a34; }
+.cal-cell.dim { background: #fbfbfc; }
+.cal-cell.dim > header b { color: #b8bdc8; }
+.cal-cell.off { background: #fbf6f6; }
+.cal-cell.off > header b { color: #b85650; }
+.cal-cell.holiday > header small { color: #b85650; }
+.cal-cell.today > header b { display: inline-grid; place-items: center; min-width: 26px; height: 26px; border-radius: 50%; color: #fff; background: #0e3471; }
+.cal-cell.selected { box-shadow: inset 0 0 0 2px #bd8a34; }
+.cal-cell > header { display: flex; align-items: center; justify-content: space-between; gap: 6px; min-height: 26px; }
+.cal-cell > header b { color: #26304a; font-size: .95rem; }
+.cal-cell > header small { max-width: 70%; overflow: hidden; color: #98a0ae; font-size: .75rem; text-overflow: ellipsis; white-space: nowrap; }
+.cal-cell > em { color: #8b92a2; font-size: .78rem; font-style: normal; }
+
+.cal-event { display: block; padding: 2px 6px; overflow: hidden; border-radius: 6px; font-size: .8rem; line-height: 1.6; text-overflow: ellipsis; white-space: nowrap; }
+.cal-event.done { opacity: .55; text-decoration: line-through; }
+.cal-event.overdue { box-shadow: inset 0 0 0 1px #d98a8a; }
+
+/* One colour per kind; the legend chips, the day chips and the detail rows share it. */
+.cal-ev--project { color: #6b4aa0; background: #f0e9f8; }
+.cal-ev--deliverable { color: #a8601f; background: #fbeadb; }
+.cal-ev--activity { color: #23785f; background: #e3f4ee; }
+.cal-ev--action { color: #926d1c; background: #fbf1dd; }
+.cal-ev--task { color: #285f9c; background: #e7f1fa; }
+
+.cal-details { margin-top: 16px; }
+.cal-list { display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.cal-list li { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid #eceef2; border-radius: 10px; background: #fff; }
+.cal-list li.overdue { border-color: #f1c9c9; }
+.cal-list li > div { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.cal-list li strong { color: #26304a; overflow-wrap: anywhere; }
+.cal-list li small { color: #8e96a7; }
+.cal-kind { padding: 3px 10px; border-radius: 8px; font-size: .8125rem; white-space: nowrap; }
+.cal-list li.cal-ev--project, .cal-list li.cal-ev--deliverable, .cal-list li.cal-ev--activity, .cal-list li.cal-ev--action, .cal-list li.cal-ev--task { background: #fff; color: inherit; }
+.cal-list li.cal-ev--project .cal-kind { background: #f0e9f8; color: #6b4aa0; }
+.cal-list li.cal-ev--deliverable .cal-kind { background: #fbeadb; color: #a8601f; }
+.cal-list li.cal-ev--activity .cal-kind { background: #e3f4ee; color: #23785f; }
+.cal-list li.cal-ev--action .cal-kind { background: #fbf1dd; color: #926d1c; }
+.cal-list li.cal-ev--task .cal-kind { background: #e7f1fa; color: #285f9c; }
+.cal-status { padding: 3px 10px; border-radius: 10px; color: #6e7686; background: #eef0f3; font-size: .85rem; white-space: nowrap; }
+.cal-status.done { color: #3d845b; background: #e6f3eb; }
+.cal-status.overdue { color: #ac4d49; background: #fbeae9; }
+
+@media (max-width: 760px) {
+  .cal-cell { min-height: 84px; padding: 4px; }
+  .cal-event { font-size: .7rem; padding: 1px 4px; }
+  .cal-cell > header small { display: none; }
+  .cal-legend { margin-inline-start: 0; }
+}
