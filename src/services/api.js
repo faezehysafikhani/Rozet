@@ -425,6 +425,16 @@ export const contractsApi = {
   // paidAmount is the invoice's TOTAL paid so far (not an increment); paymentDate is the date of the latest payment.
   recordPayment: (contractId, id, { paidAmount, paymentDate }) =>
     api.put(`${contractsBase}/${contractId}/invoices/${id}/payment`, { paidAmount, paymentDate }),
+  // Milestones (NotStarted = 0, InProgress = 1, Completed = 2) and obligations (party Supplier = 0, Employer = 1; status Open = 0,
+  // Fulfilled = 1, Breached = 2) of a contract. Reading needs Contracts.View, changing them Contracts.Edit.
+  milestones: (contractId) => api.get(`${contractsBase}/${contractId}/milestones`),
+  createMilestone: (contractId, payload) => api.post(`${contractsBase}/${contractId}/milestones`, payload),
+  updateMilestone: (contractId, id, payload) => api.put(`${contractsBase}/${contractId}/milestones/${id}`, payload),
+  deleteMilestone: (contractId, id) => api.delete(`${contractsBase}/${contractId}/milestones/${id}`),
+  obligations: (contractId) => api.get(`${contractsBase}/${contractId}/obligations`),
+  createObligation: (contractId, payload) => api.post(`${contractsBase}/${contractId}/obligations`, payload),
+  updateObligation: (contractId, id, payload) => api.put(`${contractsBase}/${contractId}/obligations/${id}`, payload),
+  deleteObligation: (contractId, id) => api.delete(`${contractsBase}/${contractId}/obligations/${id}`),
 }
 
 /**

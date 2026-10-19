@@ -5,10 +5,12 @@ import {
   BookOpen,
   Boxes,
   Building2,
+  CalendarCheck,
   CalendarDays,
   CalendarRange,
   ChartNoAxesCombined,
   CheckCircle2,
+  ClipboardCheck,
   CheckCheck,
   CheckSquare2,
   ChevronLeft,
@@ -2638,7 +2640,7 @@ function ContractFormDialog({ projectId, tenantId, contract, onClose, onSaved })
   const isNew = !contract
   const approved = contract?.approvalStatus === 2
   const [form, setForm] = useState({
-    contractNumber: contract?.contractNumber || '', title: contract?.title || '', counterparty: contract?.counterparty || '', supplierId: contract?.supplierId || '',
+    contractNumber: contract?.contractNumber || '', title: contract?.title || '', counterparty: contract?.counterparty || '', supplierId: contract?.supplierId || '', scopeOfWork: contract?.scopeOfWork || '',
     supervisorName: contract?.supervisorName || '', beneficiaryName: contract?.beneficiaryName || '', description: contract?.description || '',
     signDate: contract?.signDate || '', startDate: contract?.startDate || '', endDate: contract?.endDate || '',
     amount: contract ? String(Math.round(moneyRials(contract.originalAmount))) : '',
@@ -2665,7 +2667,7 @@ function ContractFormDialog({ projectId, tenantId, contract, onClose, onSaved })
     const fields = {
       contractNumber: toLatinDigits(form.contractNumber.trim()), title: form.title.trim(),
       ...(form.supplierId ? { supplierId: form.supplierId, counterparty: pickableSuppliers.find((item) => item.id === form.supplierId)?.name || form.counterparty.trim() } : { counterparty: form.counterparty.trim() }),
-      description: emptyToNull(form.description.trim()), signDate: emptyToNull(form.signDate), startDate: emptyToNull(form.startDate), endDate: emptyToNull(form.endDate),
+      description: emptyToNull(form.description.trim()), scopeOfWork: form.scopeOfWork.trim(), signDate: emptyToNull(form.signDate), startDate: emptyToNull(form.startDate), endDate: emptyToNull(form.endDate),
       originalAmount: Number(form.amount), supervisorName: emptyToNull(form.supervisorName.trim()), beneficiaryName: emptyToNull(form.beneficiaryName.trim()),
     }
     const result = isNew ? await contractsApi.create({ tenantId, projectId, ...fields }) : await contractsApi.update(contract.id, fields)
@@ -2706,6 +2708,7 @@ function ContractFormDialog({ projectId, tenantId, contract, onClose, onSaved })
           <CtlField label="تاریخ امضا"><input type="date" value={form.signDate} onChange={set('signDate')} /></CtlField>
           <CtlField label="تاریخ شروع"><input type="date" value={form.startDate} onChange={set('startDate')} /></CtlField>
           <CtlField label="تاریخ پایان"><input type="date" value={form.endDate} onChange={set('endDate')} /></CtlField>
+          <CtlField label="محدوده‌ی کار" wide hint="آنچه پیمان شامل می‌شود"><textarea rows={3} value={form.scopeOfWork} onChange={set('scopeOfWork')} maxLength={4000} /></CtlField>
           <CtlField label="توضیحات" wide><textarea rows={2} value={form.description} onChange={set('description')} maxLength={4000} /></CtlField>
         </div></div>
       </form>
@@ -2747,6 +2750,8 @@ function ContractDetailDialog({ detail, rights, data, onClose, reload }) {
         )}
       </p>
       {!approved && <p className="ue-note">الحاقیه و صورت‌وضعیت فقط بعد از تأیید قرارداد ثبت می‌شود.</p>}
+      {contract.scopeOfWork && <p className="ue-note"><strong>محدوده‌ی کار:</strong> {contract.scopeOfWork}</p>}
+      <ContractCommitments contract={contract} canEdit={rights.edit} />
 
       <section className="ue-section">
         <div className="ue-section-head"><h4><RefreshCw size={16} />الحاقیه‌ها</h4>{rights.addenda && open && <button type="button" className="ctl-link" onClick={() => setSub({ kind: 'addendum', item: null })}><Plus size={14} /> الحاقیه‌ی جدید</button>}</div>
@@ -2801,6 +2806,177 @@ function ContractDetailDialog({ detail, rights, data, onClose, reload }) {
       {sub?.kind === 'addendum' && <AddendumFormDialog contract={contract} tenantId={data.tenantId} item={sub.item} onClose={() => setSub(null)} onSaved={(result) => { setSub(null); setNotice(result); reload() }} />}
       {sub?.kind === 'invoice' && <InvoiceFormDialog contract={contract} tenantId={data.tenantId} item={sub.item} onClose={() => setSub(null)} onSaved={(result) => { setSub(null); setNotice(result); reload() }} />}
       {sub?.kind === 'payment' && <PaymentDialog contract={contract} invoice={sub.item} onClose={() => setSub(null)} onSaved={(result) => { setSub(null); setNotice(result); reload() }} />}
+    </ControlDialog>
+  )
+}
+
+const milestoneStatusLabels = { 0: 'شروع‌نشده', 1: 'در حال انجام', 2: 'انجام‌شده' }
+const obligationStatusLabels = { 0: 'باز', 1: 'ایفا شده', 2: 'نقض شده' }
+const obligationPartyLabels = { 0: 'طرف قرارداد', 1: 'کارفرما' }
+
+/** The milestones and obligations of one contract, read when the dialog opens and again after each change. */
+function ContractCommitments({ contract, canEdit }) {
+  const [milestones, setMilestones] = useState(null)
+  const [obligations, setObligations] = useState(null)
+  const [reloadKey, setReloadKey] = useState(0)
+  const [notice, setNotice] = useState(null)
+  const [sub, setSub] = useState(null)
+  const reload = () => setReloadKey((value) => value + 1)
+
+  useEffect(() => {
+    let cancelled = false
+    contractsApi.milestones(contract.id).then((result) => { if (!cancelled) setMilestones(result.isSuccess ? arrayPayload(result) : []) })
+    contractsApi.obligations(contract.id).then((result) => { if (!cancelled) setObligations(result.isSuccess ? arrayPayload(result) : []) })
+    return () => { cancelled = true }
+  }, [contract.id, reloadKey])
+
+  const act = (call, text) => runAction(call, text, setNotice, reload)
+  const done = (result) => { setSub(null); setNotice(result); reload() }
+
+  return (
+    <>
+      <PageNotice notice={notice} onClose={() => setNotice(null)} />
+      <section className="ue-section">
+        <div className="ue-section-head"><h4><CalendarCheck size={16} />نقاط عطف</h4>{canEdit && <button type="button" className="ctl-link" onClick={() => setSub({ kind: 'milestone', item: null })}><Plus size={14} /> نقطه‌ی عطف تازه</button>}</div>
+        {milestones === null ? <p className="ue-note">در حال بارگذاری...</p> : !milestones.length ? <p className="ue-note">نقطه‌ی عطفی ثبت نشده است.</p> : (
+          <div className="table-scroll"><table className="cost-sub">
+            <thead><tr><th>عنوان</th><th>سررسید</th><th>وضعیت</th><th>انجام</th><th /></tr></thead>
+            <tbody>{milestones.map((item) => (
+              <tr key={item.id}>
+                <td>{item.title}{item.description && <small className="ctl-sp"> {item.description}</small>}</td>
+                <td className={item.isOverdue ? 'neg' : ''}>{item.dueDateFa}{item.isOverdue && <small className="ctl-sp"> معوق</small>}</td>
+                <td>{enumLabel(item.status, milestoneStatusLabels)}</td>
+                <td>{item.completedDateFa || '—'}</td>
+                <td>{canEdit && (
+                  <span className="row-actions">
+                    <button type="button" title="ویرایش" aria-label="ویرایش" onClick={() => setSub({ kind: 'milestone', item })}><Pencil size={15} /></button>
+                    <button type="button" className="danger" title="حذف" aria-label="حذف" onClick={() => window.confirm('این نقطه‌ی عطف حذف شود؟') && act(() => contractsApi.deleteMilestone(contract.id, item.id), 'نقطه‌ی عطف حذف شد.')}><Trash2 size={15} /></button>
+                  </span>
+                )}</td>
+              </tr>
+            ))}</tbody>
+          </table></div>
+        )}
+      </section>
+
+      <section className="ue-section">
+        <div className="ue-section-head"><h4><ClipboardCheck size={16} />تعهدات</h4>{canEdit && <button type="button" className="ctl-link" onClick={() => setSub({ kind: 'obligation', item: null })}><Plus size={14} /> تعهد تازه</button>}</div>
+        {obligations === null ? <p className="ue-note">در حال بارگذاری...</p> : !obligations.length ? <p className="ue-note">تعهدی ثبت نشده است.</p> : (
+          <div className="table-scroll"><table className="cost-sub">
+            <thead><tr><th>عنوان</th><th>بر عهده‌ی</th><th>سررسید</th><th>وضعیت</th><th /></tr></thead>
+            <tbody>{obligations.map((item) => (
+              <tr key={item.id}>
+                <td>{item.title}{item.description && <small className="ctl-sp"> {item.description}</small>}</td>
+                <td>{enumLabel(item.party, obligationPartyLabels)}</td>
+                <td className={item.isOverdue ? 'neg' : ''}>{item.dueDateFa || '—'}{item.isOverdue && <small className="ctl-sp"> معوق</small>}</td>
+                <td>{enumLabel(item.status, obligationStatusLabels)}{item.fulfilledDateFa && <small className="ctl-sp"> {item.fulfilledDateFa}</small>}</td>
+                <td>{canEdit && (
+                  <span className="row-actions">
+                    <button type="button" title="ویرایش" aria-label="ویرایش" onClick={() => setSub({ kind: 'obligation', item })}><Pencil size={15} /></button>
+                    <button type="button" className="danger" title="حذف" aria-label="حذف" onClick={() => window.confirm('این تعهد حذف شود؟') && act(() => contractsApi.deleteObligation(contract.id, item.id), 'تعهد حذف شد.')}><Trash2 size={15} /></button>
+                  </span>
+                )}</td>
+              </tr>
+            ))}</tbody>
+          </table></div>
+        )}
+      </section>
+
+      {sub?.kind === 'milestone' && <MilestoneFormDialog contract={contract} item={sub.item} onClose={() => setSub(null)} onSaved={done} />}
+      {sub?.kind === 'obligation' && <ObligationFormDialog contract={contract} item={sub.item} onClose={() => setSub(null)} onSaved={done} />}
+    </>
+  )
+}
+
+function MilestoneFormDialog({ contract, item, onClose, onSaved }) {
+  const [form, setForm] = useState({
+    title: item?.title || '', description: item?.description || '', dueDate: item?.dueDate || '',
+    status: String(item?.status ?? 0), completedDate: item?.completedDate || '',
+  })
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const set = (key) => (event) => setForm((current) => ({ ...current, [key]: event.target.value }))
+
+  async function submit(event) {
+    event.preventDefault()
+    if (!form.title.trim() || !form.dueDate) { setError('عنوان و سررسید را وارد کنید.'); return }
+    setSaving(true); setError('')
+    const payload = {
+      title: form.title.trim(), description: emptyToNull(form.description.trim()), dueDate: form.dueDate,
+      status: Number(form.status), completedDate: form.status === '2' ? emptyToNull(form.completedDate) : null,
+    }
+    const result = item ? await contractsApi.updateMilestone(contract.id, item.id, payload) : await contractsApi.createMilestone(contract.id, payload)
+    setSaving(false)
+    if (!result.isSuccess) { setError(PersianMessages.error(result.error)); return }
+    onSaved({ type: 'success', text: item ? 'نقطه‌ی عطف ذخیره شد.' : 'نقطه‌ی عطف ثبت شد.' })
+  }
+
+  return (
+    <ControlDialog
+      size="sm" icon={item ? Pencil : Plus} title={item ? `ویرایش «${item.title}»` : 'نقطه‌ی عطف تازه'} onClose={onClose}
+      footer={(
+        <>
+          {error && <span className="ue-error"><TriangleAlert size={15} />{error}</span>}
+          <div className="ue-foot-actions"><button type="button" className="ue-cancel" onClick={onClose}>انصراف</button><button type="submit" form="milestone-form" className="ue-save" disabled={saving}>{saving ? 'در حال ذخیره...' : 'ذخیره'}</button></div>
+        </>
+      )}
+    >
+      <form id="milestone-form" onSubmit={submit} noValidate>
+        <div className="ue-card"><div className="ue-grid">
+          <CtlField label="عنوان" required wide><input value={form.title} onChange={set('title')} maxLength={300} autoFocus /></CtlField>
+          <CtlField label="سررسید" required><input type="date" value={form.dueDate} onChange={set('dueDate')} /></CtlField>
+          <CtlField label="وضعیت"><select value={form.status} onChange={set('status')}>{Object.entries(milestoneStatusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></CtlField>
+          {form.status === '2' && <CtlField label="تاریخ انجام" hint="خالی بماند، امروز ثبت می‌شود"><input type="date" value={form.completedDate} onChange={set('completedDate')} /></CtlField>}
+          <CtlField label="توضیحات" wide><textarea rows={2} value={form.description} onChange={set('description')} maxLength={2000} /></CtlField>
+        </div></div>
+      </form>
+    </ControlDialog>
+  )
+}
+
+function ObligationFormDialog({ contract, item, onClose, onSaved }) {
+  const [form, setForm] = useState({
+    title: item?.title || '', description: item?.description || '', party: String(item?.party ?? 0), dueDate: item?.dueDate || '',
+    status: String(item?.status ?? 0), fulfilledDate: item?.fulfilledDate || '',
+  })
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const set = (key) => (event) => setForm((current) => ({ ...current, [key]: event.target.value }))
+
+  async function submit(event) {
+    event.preventDefault()
+    if (!form.title.trim()) { setError('عنوان تعهد را وارد کنید.'); return }
+    setSaving(true); setError('')
+    const payload = {
+      title: form.title.trim(), description: emptyToNull(form.description.trim()), party: Number(form.party), dueDate: emptyToNull(form.dueDate),
+      status: Number(form.status), fulfilledDate: form.status === '1' ? emptyToNull(form.fulfilledDate) : null,
+    }
+    const result = item ? await contractsApi.updateObligation(contract.id, item.id, payload) : await contractsApi.createObligation(contract.id, payload)
+    setSaving(false)
+    if (!result.isSuccess) { setError(PersianMessages.error(result.error)); return }
+    onSaved({ type: 'success', text: item ? 'تعهد ذخیره شد.' : 'تعهد ثبت شد.' })
+  }
+
+  return (
+    <ControlDialog
+      size="sm" icon={item ? Pencil : Plus} title={item ? `ویرایش «${item.title}»` : 'تعهد تازه'} onClose={onClose}
+      footer={(
+        <>
+          {error && <span className="ue-error"><TriangleAlert size={15} />{error}</span>}
+          <div className="ue-foot-actions"><button type="button" className="ue-cancel" onClick={onClose}>انصراف</button><button type="submit" form="obligation-form" className="ue-save" disabled={saving}>{saving ? 'در حال ذخیره...' : 'ذخیره'}</button></div>
+        </>
+      )}
+    >
+      <form id="obligation-form" onSubmit={submit} noValidate>
+        <div className="ue-card"><div className="ue-grid">
+          <CtlField label="عنوان" required wide><input value={form.title} onChange={set('title')} maxLength={300} autoFocus /></CtlField>
+          <CtlField label="بر عهده‌ی"><select value={form.party} onChange={set('party')}>{Object.entries(obligationPartyLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></CtlField>
+          <CtlField label="سررسید" hint="اختیاری"><input type="date" value={form.dueDate} onChange={set('dueDate')} /></CtlField>
+          <CtlField label="وضعیت"><select value={form.status} onChange={set('status')}>{Object.entries(obligationStatusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></CtlField>
+          {form.status === '1' && <CtlField label="تاریخ ایفا" hint="خالی بماند، امروز ثبت می‌شود"><input type="date" value={form.fulfilledDate} onChange={set('fulfilledDate')} /></CtlField>}
+          <CtlField label="توضیحات" wide><textarea rows={2} value={form.description} onChange={set('description')} maxLength={2000} /></CtlField>
+        </div></div>
+      </form>
     </ControlDialog>
   )
 }
