@@ -6,6 +6,9 @@ import {
   Boxes,
   Building2,
   CalendarCheck,
+  ArrowDownUp,
+  Camera,
+  Check,
   CalendarDays,
   CalendarRange,
   ChartNoAxesCombined,
@@ -13,34 +16,44 @@ import {
   ClipboardCheck,
   CheckCheck,
   CheckSquare2,
+  ChevronDown,
   ChevronLeft,
+  CircleAlert,
   CircleDollarSign,
   CircleDashed,
   CircleHelp,
   Clock3,
+  CloudUpload,
   Columns3,
   Eye,
   EyeOff,
   FileChartColumn,
   FileText,
   Filter,
+  Lock,
   FolderOpen,
+  Grid3x3,
   Handshake,
   History,
   KeyRound,
   LayoutDashboard,
   ListTodo,
+  LoaderCircle,
   LogOut,
   Menu,
   MessagesSquare,
   MessageCircle,
+  MessageSquareText,
+  RotateCcw,
   MoreHorizontal,
   Network,
+  Palette,
   Plus,
   Paperclip,
   Pencil,
   Presentation,
   RefreshCw,
+  Save,
   Search,
   Send,
   Settings,
@@ -50,6 +63,7 @@ import {
   TrendingUp,
   TriangleAlert,
   Truck,
+  Upload,
   UserRound,
   UserCog,
   UserPlus,
@@ -65,17 +79,13 @@ import {
   SlidersHorizontal,
   Smile,
   LockKeyhole,
-  ChevronDown,
-  CircleAlert,
   Download,
-  Grid3x3,
-  LoaderCircle,
-  MessageSquareText,
-  RotateCcw,
   Trash2,
+  Sun,
+  Moon,
 } from 'lucide-react'
 import { AuthProvider, Can, useAuth } from './services/AuthContext'
-import { PersianMessages, actionsApi, changeRequestsApi, contractsApi, costReportApi, groupsApi, identityApi, labelForModule, labelForPermission, orgChartApi, permissionsApi, platformApi, projectManagementApi, rolesApi, suppliersApi, unwrap, usersApi, workflowApi } from './services/api'
+import { PersianMessages, actionsApi, changeRequestsApi, contractsApi, costReportApi, groupsApi, identityApi, labelForModule, labelForPermission, orgChartApi, permissionsApi, platformApi, projectManagementApi, rolesApi, suppliersApi, unwrap, usersApi, workflowApi, accountApi, myTeamsApi, smsPanelApi, uploadPolicyApi } from './services/api'
 import { DEFAULT_TENANT_ID } from './services/config'
 import { useChat } from './hooks/useChat'
 import { useNotifications } from './hooks/useNotifications'
@@ -93,6 +103,7 @@ import ProgressPage from './features/project-management/progress/ProgressPage'
 import PlanToolsPanel from './features/project-management/baselines/PlanToolsPanel'
 import SchedulePanel from './features/project-management/schedule/SchedulePanel'
 import { useDashboard } from './hooks/useDashboard'
+import { PRESET_AVATARS } from './utils/avatars'
 
 // A sidebar entry is a container for several sections, so it is shown when ANY of the
 // permissions below was granted - not just one hard-coded permission. Entries not listed
@@ -108,7 +119,7 @@ const menuPermissions = {
 
 // Which granted permissions surface each section of the user-management screen.
 const sectionPermissions = {
-  users: ['users.view', 'users.create', 'users.update', 'users.assign_roles'],
+  users: ['users.view'],
   loginHistory: ['audit_logs.view'],
   access: [
     'roles.view', 'roles.create', 'roles.update', 'roles.assign_permissions',
@@ -130,20 +141,58 @@ function Pagination({ pageNumber, pageSize, totalCount, onChange }) {
 
   return (
     <div className="table-pager">
-      <span>نمایش {from} تا {to} از {totalCount} رکورد</span>
+      <span>نمایش {toPersianDigits(from)} تا {toPersianDigits(to)} از {toPersianDigits(totalCount)} مورد</span>
       <div>
         <button type="button" disabled={pageNumber <= 1} onClick={() => onChange(pageNumber - 1)}>قبلی</button>
-        <b>صفحه {pageNumber} از {totalPages}</b>
+        <b>صفحه {toPersianDigits(pageNumber)} از {toPersianDigits(totalPages)}</b>
         <button type="button" disabled={pageNumber >= totalPages} onClick={() => onChange(pageNumber + 1)}>بعدی</button>
       </div>
     </div>
   )
 }
 
+function toPersianDigits(value) {
+  return String(value ?? '').replace(/\d/g, (digit) => '۰۱۲۳۴۵۶۷۸۹'[digit])
+}
+
 function initialsOf(name = '') {
   const parts = String(name).trim().split(/\s+/)
   if (!parts[0]) return '؟'
   return parts.length > 1 ? `${parts[0][0]}\u200c${parts[1][0]}` : parts[0].slice(0, 2)
+}
+
+// Core's upload-policy default (Uploads.MaxFileSizeKb) is 200KB; avatars are stored as a data
+// URL on the user record, so the file is resized/compressed client-side to fit under that.
+const AVATAR_MAX_BYTES = 200 * 1024
+
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(reader.result)
+    reader.onerror = () => reject(reader.error)
+    reader.readAsDataURL(file)
+  })
+}
+
+/** Resizes an image into a square canvas and re-encodes it as JPEG, shrinking until it fits. */
+async function compressImageToDataUrl(file, maxSide = 220, quality = 0.8) {
+  const original = await readFileAsDataUrl(file)
+  const image = await new Promise((resolve, reject) => {
+    const img = new Image()
+    img.onload = () => resolve(img)
+    img.onerror = reject
+    img.src = original
+  })
+  const scale = Math.min(1, maxSide / Math.max(image.width, image.height))
+  const canvas = document.createElement('canvas')
+  canvas.width = Math.round(image.width * scale)
+  canvas.height = Math.round(image.height * scale)
+  const context = canvas.getContext('2d')
+  // JPEG has no alpha: without a backdrop, transparent PNG areas would come out black.
+  context.fillStyle = '#fff'
+  context.fillRect(0, 0, canvas.width, canvas.height)
+  context.drawImage(image, 0, 0, canvas.width, canvas.height)
+  return canvas.toDataURL('image/jpeg', quality)
 }
 
 function formatDateTime(value) {
@@ -218,7 +267,9 @@ const menuItems = [
 ]
 
 const dashboardLabel = 'داشبورد اصلی'
-const userProfileLabel = 'پروفایل کاربر'
+// Same label as the «ارتباطات و سیستم» submenu's «تنظیمات» entry, so the topbar's profile
+// button and the sidebar both land on the one settings page.
+const userProfileLabel = 'تنظیمات'
 const submenuLabels = menuItems.flatMap((item) => item.children || []).map((item) => item.label)
 
 function isMenuItemActive(item, active) {
@@ -279,12 +330,12 @@ function Login({ onForgotPassword }) {
   return (
     <main className="login-page" dir="rtl">
       <section className="login-visual" aria-label="معرفی سامانه روزت">
-  <img
-    src="/login-visual2.png"
-    alt="سامانه روزت"
-    className="login-visual-image"
-  />
-</section>
+        <img
+          src="/login-visual2.png"
+          alt="سامانه روزت"
+          className="login-visual-image"
+        />
+      </section>
 
       <section className="login-panel">
         <div className="login-box">
@@ -349,12 +400,12 @@ function AuthShell({ title, subtitle, children, onBack }) {
     <main className="login-page" dir="rtl">
       <section className="login-visual" aria-label="معرفی سامانه روزت">
         <section className="login-visual" aria-label="معرفی سامانه روزت">
-  <img
-    src="/login-visual2.png"
-    alt="سامانه روزت"
-    className="login-visual-image"
-  />
-</section>  
+          <img
+            src="/login-visual2.png"
+            alt="سامانه روزت"
+            className="login-visual-image"
+          />
+        </section>
       </section>
       <section className="login-panel">
         <div className="login-box">
@@ -600,71 +651,71 @@ function useProjectManagementData() {
 
   useEffect(() => {
     let cancelled = false
-    ;(async () => {
-      setLoading(true)
-      setError('')
-      const [projectResult, userResult] = await Promise.all([
-        projectManagementApi.projects({ tenantId, pageNumber: 1, pageSize: 50 }),
-        usersApi.list({ tenantId, pageNumber: 1, pageSize: 200 }),
-      ])
-      if (cancelled) return
-      if (!projectResult.isSuccess) setError(PersianMessages.error(projectResult.error))
-      const projectItems = arrayPayload(projectResult)
-      setProjects(projectItems)
-      setProjectTotal(totalPayload(projectResult, projectItems))
-      setUsers(arrayPayload(userResult))
-      setSelectedProjectId((current) => current && projectItems.some((p) => p.id === current) ? current : projectItems[0]?.id || '')
-      setLoading(false)
-    })()
+      ; (async () => {
+        setLoading(true)
+        setError('')
+        const [projectResult, userResult] = await Promise.all([
+          projectManagementApi.projects({ tenantId, pageNumber: 1, pageSize: 50 }),
+          usersApi.list({ tenantId, pageNumber: 1, pageSize: 200 }),
+        ])
+        if (cancelled) return
+        if (!projectResult.isSuccess) setError(PersianMessages.error(projectResult.error))
+        const projectItems = arrayPayload(projectResult)
+        setProjects(projectItems)
+        setProjectTotal(totalPayload(projectResult, projectItems))
+        setUsers(arrayPayload(userResult))
+        setSelectedProjectId((current) => current && projectItems.some((p) => p.id === current) ? current : projectItems[0]?.id || '')
+        setLoading(false)
+      })()
     return () => { cancelled = true }
   }, [tenantId, refreshKey])
 
   useEffect(() => {
     let cancelled = false
-    ;(async () => {
-      if (!projects.length) {
-        setTasks([])
-        return
-      }
-      const results = await Promise.all(projects.map((project) => projectManagementApi.agileTasks({ projectId: project.id })))
-      if (cancelled) return
-      setTasks(results.flatMap((result, index) => arrayPayload(result).map((task) => ({ ...task, projectName: projectDisplayName(projects[index]) }))))
-    })()
+      ; (async () => {
+        if (!projects.length) {
+          setTasks([])
+          return
+        }
+        const results = await Promise.all(projects.map((project) => projectManagementApi.agileTasks({ projectId: project.id })))
+        if (cancelled) return
+        setTasks(results.flatMap((result, index) => arrayPayload(result).map((task) => ({ ...task, projectName: projectDisplayName(projects[index]) }))))
+      })()
     return () => { cancelled = true }
   }, [projects])
 
   useEffect(() => {
     let cancelled = false
-    ;(async () => {
-      if (!selectedProjectId) {
-        setActivities([]); setProgressUpdates([]); setDocuments([]); setRisks([])
-        setStakeholders([]); setTeamMembers([]); setGovernanceRoles([]); setDeliverables([]); setKpis([])
-        return
-      }
-      setLoadingDetails(true)
-      const [activityResult, progressResult, documentResult, riskResult, stakeholderResult, memberResult, governanceResult, deliverableResult, kpiResult] = await Promise.all([
-        projectManagementApi.waterfallActivities(selectedProjectId),
-        projectManagementApi.progressUpdates(selectedProjectId),
-        projectManagementApi.documents(selectedProjectId),
-        projectManagementApi.risks(selectedProjectId),
-        projectManagementApi.stakeholders(selectedProjectId),
-        projectManagementApi.teamMembers(selectedProjectId),
-        projectManagementApi.governanceRoles(selectedProjectId),
-        projectManagementApi.deliverables(selectedProjectId),
-        projectManagementApi.kpis({ projectId: selectedProjectId }),
-      ])
-      if (cancelled) return
-      setActivities(arrayPayload(activityResult))
-      setProgressUpdates(arrayPayload(progressResult))
-      setDocuments(arrayPayload(documentResult))
-      setRisks(arrayPayload(riskResult))
-      setStakeholders(arrayPayload(stakeholderResult))
-      setTeamMembers(arrayPayload(memberResult))
-      setGovernanceRoles(arrayPayload(governanceResult))
-      setDeliverables(arrayPayload(deliverableResult))
-      setKpis(arrayPayload(kpiResult))
-      setLoadingDetails(false)
-    })()
+      ; (async () => {
+        if (!selectedProjectId) {
+          setActivities([]); setProgressUpdates([]); setDocuments([]); setRisks([])
+          setStakeholders([]); setTeamMembers([]); setGovernanceRoles([]); setDeliverables([]); setKpis([])
+          return
+        }
+        setLoadingDetails(true)
+        const [activityResult, progressResult, documentResult, riskResult, stakeholderResult, memberResult, governanceResult, deliverableResult, kpiResult] = await Promise.all([
+          projectManagementApi.waterfallActivities(selectedProjectId),
+          projectManagementApi.progressUpdates(selectedProjectId),
+          projectManagementApi.documents(selectedProjectId),
+          projectManagementApi.risks(selectedProjectId),
+          projectManagementApi.stakeholders(selectedProjectId),
+          projectManagementApi.teamMembers(selectedProjectId),
+          projectManagementApi.governanceRoles(selectedProjectId),
+          projectManagementApi.deliverables(selectedProjectId),
+          projectManagementApi.kpis({ projectId: selectedProjectId }),
+        ])
+        if (cancelled) return
+        setActivities(arrayPayload(activityResult))
+        setProgressUpdates(arrayPayload(progressResult))
+        setDocuments(arrayPayload(documentResult))
+        setRisks(arrayPayload(riskResult))
+        setStakeholders(arrayPayload(stakeholderResult))
+        setTeamMembers(arrayPayload(memberResult))
+        setGovernanceRoles(arrayPayload(governanceResult))
+        setDeliverables(arrayPayload(deliverableResult))
+        setKpis(arrayPayload(kpiResult))
+        setLoadingDetails(false)
+      })()
     return () => { cancelled = true }
   }, [selectedProjectId, refreshKey])
 
@@ -968,27 +1019,27 @@ function TaskDashboard({ data }) {
         <ProjectSelector data={data} />
       </TaskPageHeader>
       <DataState loading={data.loading} error={data.error} empty={!data.projects.length}>
-      <div className="task-kpis">
-        <article><span className="task-kpi-icon navy"><ListTodo size={21} /></span><div><small>کل وظایف</small><strong>{normalized.length.toLocaleString('fa-IR')}</strong><p>در {data.projectTotal.toLocaleString('fa-IR')} پروژه</p></div></article>
-        <article><span className="task-kpi-icon blue"><Clock3 size={21} /></span><div><small>در حال انجام</small><strong>{doing.toLocaleString('fa-IR')}</strong><p>از Agile Tasks</p></div></article>
-        <article><span className="task-kpi-icon green"><CheckCircle2 size={21} /></span><div><small>تکمیل شده</small><strong>{done.toLocaleString('fa-IR')}</strong><p>{normalized.length ? Math.round((done / normalized.length) * 100).toLocaleString('fa-IR') : '۰'}٪ از کل</p></div></article>
-        <article><span className="task-kpi-icon red"><TriangleAlert size={21} /></span><div><small>دارای تأخیر</small><strong>{overdue.toLocaleString('fa-IR')}</strong><p>براساس موعد انجام</p></div></article>
-      </div>
-      <div className="task-dashboard-grid">
-        <section className="task-panel project-progress">
-          <div className="task-panel-title"><div><h3>پیشرفت وظایف پروژه‌ها</h3><p>درصد وظایف تکمیل‌شده به تفکیک پروژه مرجع</p></div><button>مشاهده همه</button></div>
-          {projectRows.length ? projectRows.map(([name, percent, count]) => <div className="progress-row" key={name}><div><strong>{name}</strong><span>{count}</span></div><div className="progress-track"><i style={{ width: `${percent}%` }} /></div><em>{percent}٪</em></div>) : <p className="data-state">هنوز وظیفه‌ای برای پروژه‌ها ثبت نشده است.</p>}
-        </section>
-        <section className="task-panel workload-panel">
-          <div className="task-panel-title"><div><h3>توزیع حجم کار تیم</h3><p>وظایف فعال اعضای پروژه</p></div><MoreHorizontal size={18} /></div>
-          {Object.entries(normalized.reduce((map, task) => {
-            if (task.owner !== '—' && task.status !== 'تکمیل شده') map[task.owner] = (map[task.owner] || 0) + 1
-            return map
-          }, {})).slice(0, 5).map(([name, count], index) => <div className="workload-row" key={name}><span className={`mini-avatar tone-${index}`}>{initialsOf(name)}</span><div><strong>{name}</strong><small>عضو تیم پروژه</small></div><b>{count.toLocaleString('fa-IR')} وظیفه</b></div>)}
-          {!normalized.length && <p className="data-state">برای محاسبه حجم کار، وظیفه‌ای ثبت نشده است.</p>}
-        </section>
-      </div>
-      <TaskList compact data={data} />
+        <div className="task-kpis">
+          <article><span className="task-kpi-icon navy"><ListTodo size={21} /></span><div><small>کل وظایف</small><strong>{normalized.length.toLocaleString('fa-IR')}</strong><p>در {data.projectTotal.toLocaleString('fa-IR')} پروژه</p></div></article>
+          <article><span className="task-kpi-icon blue"><Clock3 size={21} /></span><div><small>در حال انجام</small><strong>{doing.toLocaleString('fa-IR')}</strong><p>از Agile Tasks</p></div></article>
+          <article><span className="task-kpi-icon green"><CheckCircle2 size={21} /></span><div><small>تکمیل شده</small><strong>{done.toLocaleString('fa-IR')}</strong><p>{normalized.length ? Math.round((done / normalized.length) * 100).toLocaleString('fa-IR') : '۰'}٪ از کل</p></div></article>
+          <article><span className="task-kpi-icon red"><TriangleAlert size={21} /></span><div><small>دارای تأخیر</small><strong>{overdue.toLocaleString('fa-IR')}</strong><p>براساس موعد انجام</p></div></article>
+        </div>
+        <div className="task-dashboard-grid">
+          <section className="task-panel project-progress">
+            <div className="task-panel-title"><div><h3>پیشرفت وظایف پروژه‌ها</h3><p>درصد وظایف تکمیل‌شده به تفکیک پروژه مرجع</p></div><button>مشاهده همه</button></div>
+            {projectRows.length ? projectRows.map(([name, percent, count]) => <div className="progress-row" key={name}><div><strong>{name}</strong><span>{count}</span></div><div className="progress-track"><i style={{ width: `${percent}%` }} /></div><em>{percent}٪</em></div>) : <p className="data-state">هنوز وظیفه‌ای برای پروژه‌ها ثبت نشده است.</p>}
+          </section>
+          <section className="task-panel workload-panel">
+            <div className="task-panel-title"><div><h3>توزیع حجم کار تیم</h3><p>وظایف فعال اعضای پروژه</p></div><MoreHorizontal size={18} /></div>
+            {Object.entries(normalized.reduce((map, task) => {
+              if (task.owner !== '—' && task.status !== 'تکمیل شده') map[task.owner] = (map[task.owner] || 0) + 1
+              return map
+            }, {})).slice(0, 5).map(([name, count], index) => <div className="workload-row" key={name}><span className={`mini-avatar tone-${index}`}>{initialsOf(name)}</span><div><strong>{name}</strong><small>عضو تیم پروژه</small></div><b>{count.toLocaleString('fa-IR')} وظیفه</b></div>)}
+            {!normalized.length && <p className="data-state">برای محاسبه حجم کار، وظیفه‌ای ثبت نشده است.</p>}
+          </section>
+        </div>
+        <TaskList compact data={data} />
       </DataState>
     </>
   )
@@ -1009,9 +1060,9 @@ function TaskList({ compact = false, data }) {
     <section className={`task-panel task-table-panel ${compact ? 'compact' : ''}`}>
       <div className="task-panel-title"><div><h3>{compact ? 'وظایف نزدیک به موعد' : 'فهرست وظایف'}</h3><p>{compact ? 'وظایفی که از API وظایف دریافت شده‌اند' : 'مدیریت، فیلتر و پیگیری وظایف پروژه‌ها از Nexus Core'}</p></div>{compact ? <button>مشاهده همه</button> : <div className="table-actions"><label><Search size={16} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="جست‌وجوی وظیفه..." /></label><button><Filter size={16} />فیلترها</button></div>}</div>
       <DataState loading={data?.loading} error={data?.error} empty={!shownTasks.length}>
-      <div className="table-scroll"><table><thead><tr><th>عنوان وظیفه</th><th>پروژه مرجع</th><th>مسئول</th><th>مهلت انجام</th><th>اولویت</th><th>وضعیت</th><th>پیشرفت</th><th /></tr></thead><tbody>
-        {shownTasks.map((task) => <tr key={task.id}><td><span className="task-check" /><strong>{task.title}</strong></td><td>{task.project}</td><td><span className="owner-cell"><i>{initialsOf(task.owner).slice(0, 1)}</i>{task.owner}</span></td><td>{task.due}</td><td><span className={`priority ${task.priority === 'بالا' || task.priority === 'بحرانی' ? 'high' : task.priority === 'متوسط' ? 'medium' : 'low'}`}>{task.priority}</span></td><td><StatusPill status={task.status} /></td><td><span className="inline-progress"><i><b style={{ width: `${task.progress}%` }} /></i>{task.progress.toLocaleString('fa-IR')}٪</span></td><td><MoreHorizontal size={17} /></td></tr>)}
-      </tbody></table></div>
+        <div className="table-scroll"><table><thead><tr><th>عنوان وظیفه</th><th>پروژه مرجع</th><th>مسئول</th><th>مهلت انجام</th><th>اولویت</th><th>وضعیت</th><th>پیشرفت</th><th /></tr></thead><tbody>
+          {shownTasks.map((task) => <tr key={task.id}><td><span className="task-check" /><strong>{task.title}</strong></td><td>{task.project}</td><td><span className="owner-cell"><i>{initialsOf(task.owner).slice(0, 1)}</i>{task.owner}</span></td><td>{task.due}</td><td><span className={`priority ${task.priority === 'بالا' || task.priority === 'بحرانی' ? 'high' : task.priority === 'متوسط' ? 'medium' : 'low'}`}>{task.priority}</span></td><td><StatusPill status={task.status} /></td><td><span className="inline-progress"><i><b style={{ width: `${task.progress}%` }} /></i>{task.progress.toLocaleString('fa-IR')}٪</span></td><td><MoreHorizontal size={17} /></td></tr>)}
+        </tbody></table></div>
       </DataState>
     </section>
   )
@@ -1052,10 +1103,6 @@ function ProjectPlanning({ data }) {
 const toLatinDigits = (value) => String(value || '')
   .replace(/[۰-۹]/g, (d) => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(d)))
   .replace(/[٠-٩]/g, (d) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)))
-
-function toPersianDigits(value) {
-  return String(value ?? '').replace(/\d/g, (digit) => '۰۱۲۳۴۵۶۷۸۹'[digit])
-}
 
 /** Dialogs are drawn straight into <body>: inside the page content they would sit under the top bar. */
 function ModalPortal({ children }) {
@@ -4301,449 +4348,631 @@ function ChatPage() {
  * User management - all data comes from /api/identity/*                *
  * ------------------------------------------------------------------ */
 
-function UsersTable() {
-  const { user: currentUser } = useAuth()
-  const tenantId = currentUser?.tenantId || DEFAULT_TENANT_ID
-  const PAGE_SIZE = 10
-  const [users, setUsers] = useState([])
-  const [roles, setRoles] = useState([])
-  const [total, setTotal] = useState(0)
-  const [page, setPage] = useState(1)
-  const [search, setSearch] = useState('')
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
-  const [editing, setEditing] = useState(null)
-  const [rolesFor, setRolesFor] = useState(null)
-  const { can } = useAuth()
+const NATIONAL_CODE = /^[0-9]{10}$/
+const PHONE_NUMBER = /^(\+?[0-9]{8,15}|0?9[0-9]{9})$/
+const EMAIL_ADDRESS = /^[^@\s]+@[^@\s]+\.[^@\s]+$/
 
-  async function load(targetPage = page) {
-    setLoading(true)
-    const result = await usersApi.list({ tenantId, pageNumber: targetPage, pageSize: PAGE_SIZE, search })
-    if (!result.isSuccess) setError(PersianMessages.error(result.error))
-    else setError('')
-    const paged = unwrap(result)
-    setUsers(paged?.items || [])
-    setTotal(paged?.totalCount || 0)
-    setLoading(false)
-  }
-
-  // Any new search starts from the first page.
-  useEffect(() => { setPage(1) }, [search])
-  useEffect(() => { load(page) }, [page, search])
+/** Debounced copy of a fast-changing value, e.g. a search box. */
+function useDebounced(value, delay = 350) {
+  const [debounced, setDebounced] = useState(value)
   useEffect(() => {
-    if (!can('roles.view')) return
-    rolesApi.list(tenantId).then((r) => setRoles(unwrap(r, []) || []))
-  }, [tenantId])
-
-  const activeCount = users.filter((u) => u.isActive).length
-
-  async function toggleActive(user) {
-    const result = await usersApi.update(user.id, { displayName: user.displayName, isActive: !user.isActive })
-    if (!result.isSuccess) { setError(PersianMessages.error(result.error)); return }
-    load(page)
-  }
-
-  async function saveRoles(userId, roleIds) {
-    const result = await usersApi.assignRoles(userId, roleIds)
-    if (!result.isSuccess) { setError(PersianMessages.error(result.error)); return }
-    setRolesFor(null)
-    load(page)
-  }
-
-  return (
-    <section className="users-card">
-      <div className="users-toolbar">
-        <div><span className="active-count">فعال در این صفحه: {activeCount}</span><span className="inactive-count">غیرفعال: {users.length - activeCount}</span></div>
-        <div>
-          <label><Search size={16} /><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="جست‌وجوی کاربر..." /></label>
-          <button onClick={() => load(page)}><RefreshCw size={16} />به‌روزرسانی</button>
-        </div>
-      </div>
-      {error && <p className="login-error" role="alert">{error}</p>}
-      <div className="table-scroll">
-        <table className="users-table">
-          <thead><tr><th>کاربر</th><th>ایمیل</th><th>آخرین ورود</th><th>سمت سازمانی</th><th>وضعیت</th><th>عملیات</th></tr></thead>
-          <tbody>
-            {users.map((user, index) => (
-              <tr key={user.id}>
-                <td><span className={`user-identity tone-${index % 5}`}><i>{initialsOf(user.displayName)}</i><span><strong>{user.displayName}</strong><small>{user.id.slice(0, 8)}</small></span></span></td>
-                <td>{user.email}</td>
-                <td>{formatDateTime(user.lastLoginAtUtc)}</td>
-                <td>{(user.roles || []).map((role) => <span className="access-badge" key={role}><Shield size={13} />{role}</span>)}</td>
-                <td><span className={`user-status ${user.isActive ? 'active' : ''}`}><i />{user.isActive ? 'فعال' : 'غیرفعال'}</span></td>
-                <td>
-                  <span className="row-actions">
-                    <Can permission="users.update"><button title="ویرایش" onClick={() => setEditing(user)}><Pencil size={15} /></button></Can>
-                    <Can permission="users.assign_roles"><button title="سمت سازمانی" onClick={() => setRolesFor(user)}><KeyRound size={15} /></button></Can>
-                    <Can permission="users.update"><button title={user.isActive ? 'غیرفعال کردن' : 'فعال کردن'} onClick={() => toggleActive(user)}>{user.isActive ? <EyeOff size={15} /> : <Eye size={15} />}</button></Can>
-                  </span>
-                </td>
-              </tr>
-            ))}
-            {!loading && !users.length && <tr><td colSpan={6}>کاربری یافت نشد.</td></tr>}
-            {loading && <tr><td colSpan={6}>در حال بارگذاری...</td></tr>}
-          </tbody>
-        </table>
-      </div>
-      <Pagination pageNumber={page} pageSize={PAGE_SIZE} totalCount={total} onChange={setPage} />
-      {/* The Core exposes no delete-user endpoint, so no delete action is offered. */}
-      {editing && <UserEditor user={editing} roles={roles} onClose={() => setEditing(null)} onSaved={() => load(page)} />}
-      {rolesFor && <RoleAssigner user={rolesFor} roles={roles} onClose={() => setRolesFor(null)} onSave={saveRoles} />}
-    </section>
-  )
+    const timer = setTimeout(() => setDebounced(value), delay)
+    return () => clearTimeout(timer)
+  }, [value, delay])
+  return debounced
 }
 
-/* ------------------------------------------------------------------ *
- * Full user editor - four tabs over the Core's identity + profile APIs *
- * ------------------------------------------------------------------ */
+const userFullName = (user) => `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.displayName
 
-const EMPLOYMENT_TYPES = ['تمام‌وقت', 'پاره‌وقت', 'قراردادی', 'پیمانکار', 'کارآموز']
-const UI_LANGUAGES = [['fa', 'فارسی'], ['en', 'English'], ['ar', 'العربية']]
-const TIME_ZONES = ['Asia/Tehran', 'Asia/Dubai', 'Asia/Baku', 'Europe/Istanbul', 'UTC']
-
-const EMPTY_PROFILE = {
-  firstName: '', lastName: '', nationalCode: '', birthDate: '',
-  mobileNumber: '', phoneNumber: '', emergencyContactName: '', emergencyContactPhone: '', address: '',
-  employeeCode: '', jobTitle: '', department: '', officeLocation: '', hireDate: '', employmentType: '',
-  language: '', timeZone: '', notes: '',
-}
-
-/** The Core returns DateOnly as "YYYY-MM-DD", which is exactly what <input type="date"> wants. */
-const toDateInput = (value) => (value ? String(value).slice(0, 10) : '')
-const fromDateInput = (value) => (value ? value : null)
-
-function Field({ label, children, hint }) {
+function Field({ label, children, hint, required, wide }) {
   return (
-    <label className="ue-field">
-      <span>{label}</span>
+    <label className={`ue-field${wide ? ' ue-field--wide' : ''}`}>
+      <span>{label}{required && <b className="ue-required"> *</b>}</span>
       {children}
       {hint && <small>{hint}</small>}
     </label>
   )
 }
 
-function UserEditor({ user, roles, onClose, onSaved }) {
-  const { can } = useAuth()
-  const [tab, setTab] = useState('پایه')
-  const [displayName, setDisplayName] = useState(user.displayName)
-  const [isActive, setIsActive] = useState(user.isActive)
-  const [profile, setProfile] = useState(EMPTY_PROFILE)
-  const [roleIds, setRoleIds] = useState([])
-  const [initialRoleIds, setInitialRoleIds] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState('')
-  const [message, setMessage] = useState('')
-
-  const canEdit = can('users.update')
-  const canEditRoles = can('users.assign_roles')
-
-  // One round trip gives identity fields, current roles and the extended profile.
-  useEffect(() => {
-    let cancelled = false
-    ;(async () => {
-      const result = await usersApi.detail(user.id)
-      if (cancelled) return
-      if (!result.isSuccess) {
-        setError(PersianMessages.error(result.error))
-        setLoading(false)
-        return
-      }
-      const detail = unwrap(result)
-      setDisplayName(detail.displayName)
-      setIsActive(detail.isActive)
-      setRoleIds(detail.roleIds || [])
-      setInitialRoleIds(detail.roleIds || [])
-      setProfile({
-        ...EMPTY_PROFILE,
-        ...Object.fromEntries(Object.entries(detail.profile || {}).map(([k, v]) => [k, v ?? ''])),
-        birthDate: toDateInput(detail.profile?.birthDate),
-        hireDate: toDateInput(detail.profile?.hireDate),
-      })
-      setLoading(false)
-    })()
-    return () => { cancelled = true }
-  }, [user.id])
-
-  const set = (key) => (event) => setProfile((current) => ({ ...current, [key]: event.target.value }))
-
-  const rolesChanged = useMemo(() => {
-    const a = [...roleIds].sort().join(',')
-    const b = [...initialRoleIds].sort().join(',')
-    return a !== b
-  }, [roleIds, initialRoleIds])
-
-  function toggleRole(roleId) {
-    setRoleIds((current) => current.includes(roleId) ? current.filter((id) => id !== roleId) : [...current, roleId])
-  }
-
-  async function save() {
-    setBusy(true)
-    setError('')
-    setMessage('')
-
-    // Three independent Core endpoints, each guarded by its own permission.
-    if (canEdit) {
-      const identityResult = await usersApi.update(user.id, { displayName: displayName.trim(), isActive })
-      if (!identityResult.isSuccess) { setError(PersianMessages.error(identityResult.error)); setBusy(false); return }
-
-      const profileResult = await usersApi.updateProfile(user.id, {
-        ...profile,
-        birthDate: fromDateInput(profile.birthDate),
-        hireDate: fromDateInput(profile.hireDate),
-      })
-      if (!profileResult.isSuccess) { setError(PersianMessages.error(profileResult.error)); setBusy(false); return }
-    }
-
-    if (canEditRoles && rolesChanged) {
-      const rolesResult = await usersApi.assignRoles(user.id, roleIds)
-      if (!rolesResult.isSuccess) { setError(PersianMessages.error(rolesResult.error)); setBusy(false); return }
-      setInitialRoleIds(roleIds)
-    }
-
-    setBusy(false)
-    setMessage('تغییرات ذخیره شد.')
-    onSaved()
-  }
-
-  const tabs = [
-    { key: 'پایه', label: 'اطلاعات پایه', icon: UserRound },
-    { key: 'تماس', label: 'اطلاعات تماس', icon: Smartphone },
-    { key: 'سازمانی', label: 'اطلاعات سازمانی', icon: Building2 },
-    { key: 'تنظیمات', label: 'تنظیمات و یادداشت', icon: SlidersHorizontal },
-  ]
-
+/** The same dialog shell for the user form and the access dialog. */
+function UserDialog({ title, icon: Icon, subtitle, size, onClose, footer, children }) {
   return (
-    <div className="ue-backdrop" role="dialog" aria-modal="true">
-      <div className="ue-modal">
+    <ModalPortal><div className="ue-backdrop" role="dialog" aria-modal="true" aria-label={title} onMouseDown={(e) => { if (e.target === e.currentTarget) onClose() }}>
+      <div className={`ue-modal${size === 'sm' ? ' ue-modal--sm' : ''}`}>
         <header className="ue-head">
-          <span className="user-identity tone-0"><i>{initialsOf(displayName || user.displayName)}</i></span>
+          <span className="ue-head-icon"><Icon size={19} /></span>
           <div className="ue-head-title">
-            <strong>{displayName || user.displayName}</strong>
-            <small>{user.email}</small>
+            <strong>{title}</strong>
+            {subtitle && <small>{subtitle}</small>}
           </div>
-          <span className={`user-status ${isActive ? 'active' : ''}`}><i />{isActive ? 'فعال' : 'غیرفعال'}</span>
           <button type="button" className="ue-close" onClick={onClose} aria-label="بستن"><X size={19} /></button>
         </header>
-
-        <nav className="ue-tabs">
-          {tabs.map(({ key, label, icon: Icon }) => (
-            <button type="button" key={key} className={tab === key ? 'active' : ''} onClick={() => setTab(key)}>
-              <Icon size={16} />{label}
-            </button>
-          ))}
-        </nav>
-
-        <div className="ue-body">
-          {loading && <p className="rz-chat__empty">در حال بارگذاری اطلاعات کاربر...</p>}
-
-          {!loading && tab === 'پایه' && (
-            <>
-              <div className="ue-grid">
-                <Field label="نام"><input value={profile.firstName} onChange={set('firstName')} disabled={!canEdit} /></Field>
-                <Field label="نام خانوادگی"><input value={profile.lastName} onChange={set('lastName')} disabled={!canEdit} /></Field>
-                <Field label="نام نمایشی" hint="این نام در سراسر سامانه دیده می‌شود.">
-                  <input value={displayName} onChange={(e) => setDisplayName(e.target.value)} disabled={!canEdit} />
-                </Field>
-                <Field label="ایمیل" hint="ایمیل شناسه ورود است و از این صفحه قابل تغییر نیست.">
-                  <input value={user.email} disabled readOnly />
-                </Field>
-                <Field label="کد ملی"><input value={profile.nationalCode} onChange={set('nationalCode')} disabled={!canEdit} inputMode="numeric" /></Field>
-                <Field label="تاریخ تولد"><input type="date" value={profile.birthDate} onChange={set('birthDate')} disabled={!canEdit} /></Field>
-              </div>
-              <label className="ue-switch">
-                <input type="checkbox" checked={isActive} onChange={(e) => setIsActive(e.target.checked)} disabled={!canEdit} />
-                <span><strong>حساب کاربری فعال باشد</strong><small>کاربر غیرفعال نمی‌تواند وارد سامانه شود.</small></span>
-              </label>
-              <p className="ue-meta"><Clock3 size={14} />آخرین ورود: {formatDateTime(user.lastLoginAtUtc)}</p>
-            </>
-          )}
-
-          {!loading && tab === 'تماس' && (
-            <div className="ue-grid">
-              <Field label="تلفن همراه"><input value={profile.mobileNumber} onChange={set('mobileNumber')} disabled={!canEdit} inputMode="tel" /></Field>
-              <Field label="تلفن ثابت / داخلی"><input value={profile.phoneNumber} onChange={set('phoneNumber')} disabled={!canEdit} inputMode="tel" /></Field>
-              <Field label="نام فرد رابط اضطراری"><input value={profile.emergencyContactName} onChange={set('emergencyContactName')} disabled={!canEdit} /></Field>
-              <Field label="تلفن رابط اضطراری"><input value={profile.emergencyContactPhone} onChange={set('emergencyContactPhone')} disabled={!canEdit} inputMode="tel" /></Field>
-              <Field label="نشانی" hint="نشانی کامل محل سکونت یا مکاتبه.">
-                <textarea rows={3} value={profile.address} onChange={set('address')} disabled={!canEdit} />
-              </Field>
-            </div>
-          )}
-
-          {!loading && tab === 'سازمانی' && (
-            <>
-              <div className="ue-grid">
-                <Field label="کد پرسنلی"><input value={profile.employeeCode} onChange={set('employeeCode')} disabled={!canEdit} /></Field>
-                <Field label="عنوان شغلی"><input value={profile.jobTitle} onChange={set('jobTitle')} disabled={!canEdit} /></Field>
-                <Field label="واحد / دپارتمان"><input value={profile.department} onChange={set('department')} disabled={!canEdit} /></Field>
-                <Field label="محل استقرار"><input value={profile.officeLocation} onChange={set('officeLocation')} disabled={!canEdit} /></Field>
-                <Field label="تاریخ استخدام"><input type="date" value={profile.hireDate} onChange={set('hireDate')} disabled={!canEdit} /></Field>
-                <Field label="نوع همکاری">
-                  <select value={profile.employmentType} onChange={set('employmentType')} disabled={!canEdit}>
-                    <option value="">انتخاب کنید</option>
-                    {EMPLOYMENT_TYPES.map((item) => <option key={item} value={item}>{item}</option>)}
-                  </select>
-                </Field>
-              </div>
-
-              <div className="ue-section">
-                <h4><Shield size={16} />سمت سازمانی</h4>
-                <p>سمت سازمانی تعیین می‌کند کاربر چه دسترسی‌هایی دارد و در کجای چارت سازمانی قرار می‌گیرد.</p>
-                {roles.length ? (
-                  <ul className="ue-roles">
-                    {roles.map((role) => (
-                      <li key={role.id}>
-                        <label className={canEditRoles ? '' : 'is-locked'}>
-                          <input type="checkbox" checked={roleIds.includes(role.id)} disabled={!canEditRoles} onChange={() => toggleRole(role.id)} />
-                          <span className="access-check"><CheckCheck size={13} /></span>
-                          <span className="access-text">
-                            <strong>{role.name}</strong>
-                            <code>{role.description || `${(role.permissions || []).length} دسترسی`}</code>
-                          </span>
-                        </label>
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <p className="rz-chat__empty">برای مشاهده سمت‌های سازمانی به دسترسی «مشاهده سمت‌های سازمانی» نیاز دارید.</p>
-                )}
-              </div>
-            </>
-          )}
-
-          {!loading && tab === 'تنظیمات' && (
-            <>
-              <div className="ue-grid">
-                <Field label="زبان رابط کاربری">
-                  <select value={profile.language} onChange={set('language')} disabled={!canEdit}>
-                    <option value="">پیش‌فرض سامانه</option>
-                    {UI_LANGUAGES.map(([code, label]) => <option key={code} value={code}>{label}</option>)}
-                  </select>
-                </Field>
-                <Field label="منطقه زمانی">
-                  <select value={profile.timeZone} onChange={set('timeZone')} disabled={!canEdit}>
-                    <option value="">پیش‌فرض سامانه</option>
-                    {TIME_ZONES.map((zone) => <option key={zone} value={zone}>{zone}</option>)}
-                  </select>
-                </Field>
-              </div>
-              <Field label="یادداشت داخلی" hint="این یادداشت فقط برای مدیران سامانه قابل مشاهده است.">
-                <textarea rows={5} value={profile.notes} onChange={set('notes')} disabled={!canEdit} />
-              </Field>
-            </>
-          )}
-        </div>
-
-        <footer className="ue-foot">
-          {error && <span className="ue-error"><TriangleAlert size={15} />{error}</span>}
-          {!error && message && <span className="ue-ok"><CheckCircle2 size={15} />{message}</span>}
-          {!error && !message && !canEdit && <span className="ue-hint"><LockKeyhole size={14} />فقط مشاهده — دسترسی ویرایش ندارید.</span>}
-          <div className="ue-foot-actions">
-            <button type="button" className="ue-cancel" onClick={onClose}>انصراف</button>
-            <button type="button" className="ue-save" onClick={save} disabled={loading || busy || (!canEdit && !canEditRoles)}>
-              {busy ? 'در حال ذخیره...' : 'ذخیره تغییرات'}
-            </button>
-          </div>
-        </footer>
+        <div className="ue-body">{children}</div>
+        <footer className="ue-foot">{footer}</footer>
       </div>
-    </div>
+    </div></ModalPortal>
   )
 }
 
-function RoleAssigner({ user, roles, onClose, onSave }) {
-  const [selected, setSelected] = useState(() => roles.filter((r) => (user.roles || []).includes(r.name)).map((r) => r.id))
-
-  return (
-    <aside className="notification-drawer">
-      <header><div><KeyRound size={19} /><h3>نقش‌های کاربر</h3></div><button onClick={onClose}><X size={18} /></button></header>
-      <p>{user.displayName}</p>
-      <div className="notify-methods">
-        <strong>نقش‌های موجود</strong>
-        {roles.map((role) => (
-          <label key={role.id}>
-            <input type="checkbox" checked={selected.includes(role.id)} onChange={(e) => setSelected((current) => e.target.checked ? [...current, role.id] : current.filter((id) => id !== role.id))} />
-            <span><Shield size={16} />{role.name}</span>
-          </label>
-        ))}
-        {!roles.length && <p>برای مشاهده نقش‌ها به دسترسی roles.view نیاز دارید.</p>}
-      </div>
-      <button className="drawer-save" onClick={() => onSave(user.id, selected)}>ذخیره نقش‌ها</button>
-    </aside>
-  )
-}
-
-/** Login history is derived from the platform audit log (identity.login / identity.login_failed). */
-function LoginHistory() {
-  const { user } = useAuth()
+function UsersTable() {
+  const { user: currentUser, can } = useAuth()
+  const tenantId = currentUser?.tenantId || DEFAULT_TENANT_ID
   const PAGE_SIZE = 10
-  const [logs, setLogs] = useState([])
+  const [users, setUsers] = useState([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
-  const [onlyLogins, setOnlyLogins] = useState(true)
+  const [search, setSearch] = useState('')
+  const debouncedSearch = useDebounced(search)
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
+  const [reloadKey, setReloadKey] = useState(0)
+  const [notice, setNotice] = useState(null)
+  const [editing, setEditing] = useState(null)
+  const [accessOf, setAccessOf] = useState(null)
 
-  async function load(targetPage = page) {
-    setLoading(true)
-    const result = await platformApi.auditLogs({ tenantId: user?.tenantId, pageNumber: targetPage, pageSize: PAGE_SIZE })
-    if (!result.isSuccess) setError(PersianMessages.error(result.error))
-    else setError('')
-    const paged = unwrap(result)
-    setLogs(paged?.items || [])
-    setTotal(paged?.totalCount || 0)
-    setLoading(false)
+  // What the signed-in user may do here (the Core checks every one of them again).
+  const rights = {
+    create: can('users.create'),
+    update: can('users.update'),
+    changeStatus: can('users.change_status'),
+    assignRoles: can('users.assign_roles'),
+    assignPermissions: can('users.assign_permissions'),
   }
 
-  useEffect(() => { load(page) }, [page])
+  // Any new search starts from the first page.
+  useEffect(() => { setPage(1) }, [debouncedSearch])
 
-  // The Core has no server-side action filter, so the toggle narrows the current page only.
-  const shown = onlyLogins ? logs.filter((log) => log.action.startsWith('identity.login')) : logs
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    usersApi.list({ tenantId, pageNumber: page, pageSize: PAGE_SIZE, search: debouncedSearch }).then((result) => {
+      if (cancelled) return
+      if (!result.isSuccess) setNotice({ type: 'error', text: PersianMessages.error(result.error) })
+      const paged = unwrap(result)
+      setUsers(paged?.items || [])
+      setTotal(paged?.totalCount || 0)
+      setLoading(false)
+    })
+    return () => { cancelled = true }
+  }, [tenantId, page, debouncedSearch, reloadKey])
 
-  const actionLabels = {
-    'identity.login': 'ورود موفق',
-    'identity.login_failed': 'ورود ناموفق',
-    'identity.forgot_password': 'درخواست بازیابی رمز',
-    'identity.reset_password': 'تغییر رمز عبور',
-    'users.create': 'ایجاد کاربر',
-    'users.update': 'ویرایش کاربر',
-    'users.assign_roles': 'تغییر سمت سازمانی',
-    'users.assign_permissions': 'تغییر دسترسی کاربر',
-    'roles.create': 'ایجاد سمت سازمانی',
-    'roles.update': 'ویرایش سمت سازمانی',
-    'roles.assign_permissions': 'تغییر دسترسی سمت سازمانی',
+  const reload = () => setReloadKey((key) => key + 1)
+
+  async function toggleStatus(user) {
+    const enable = !user.isActive
+    if (!enable && !window.confirm(`حساب «${userFullName(user)}» غیرفعال شود؟ کاربر بلافاصله از سامانه خارج می‌شود.`)) return
+    const result = await usersApi.setStatus(user.id, enable)
+    if (!result.isSuccess) { setNotice({ type: 'error', text: PersianMessages.error(result.error) }); return }
+    setNotice({ type: 'success', text: `حساب «${userFullName(user)}» ${enable ? 'فعال' : 'غیرفعال'} شد.` })
+    reload()
   }
 
   return (
     <section className="users-card">
-      <div className="history-notice">
-        <History size={21} />
-        <div><strong>گزارش ورود و رویدادهای امنیتی</strong><p>سوابق از سرویس platform/audit-logs دریافت می‌شود.</p></div>
-        <button onClick={() => load(page)}>به‌روزرسانی</button>
-      </div>
       <div className="users-toolbar">
-        <label className="check-row"><input type="checkbox" checked={onlyLogins} onChange={(e) => setOnlyLogins(e.target.checked)} /><span>فقط رویدادهای ورود</span></label>
+        <label className="users-search"><Search size={16} /><input type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="جستجو در نام، کد ملی، موبایل، ایمیل، نقش..." /></label>
+        {rights.create && <button type="button" className="users-add" onClick={() => setEditing('new')}><UserPlus size={16} />کاربر جدید</button>}
       </div>
-      {error && <p className="login-error" role="alert">{error}</p>}
+      {notice && (
+        <div className={`users-notice ${notice.type}`} role={notice.type === 'error' ? 'alert' : 'status'}>
+          {notice.type === 'error' ? <CircleAlert size={16} /> : <CheckCircle2 size={16} />}
+          <span>{notice.text}</span>
+          <button type="button" onClick={() => setNotice(null)} aria-label="بستن"><X size={15} /></button>
+        </div>
+      )}
       <div className="table-scroll">
         <table className="users-table">
-          <thead><tr><th>رویداد</th><th>تاریخ و زمان</th><th>نشانی IP</th><th>کاربر</th><th>وضعیت</th></tr></thead>
-          <tbody>
-            {shown.map((log) => (
-              <tr key={log.id}>
-                <td><strong>{actionLabels[log.action] || log.action}</strong></td>
-                <td>{formatDateTime(log.occurredAtUtc)}</td>
-                <td><code>{log.ipAddress || '—'}</code></td>
-                <td>{log.details || '—'}</td>
-                <td>
-                  {log.action === 'identity.login' && <span className="login-result success">موفق</span>}
-                  {log.action === 'identity.login_failed' && <span className="login-result failed">ناموفق</span>}
-                  {!log.action.startsWith('identity.login') && <span>—</span>}
-                </td>
-              </tr>
+          <thead><tr><th>کاربر</th><th>نام کاربری (کد ملی)</th><th>شماره موبایل</th><th>نقش</th><th>آخرین ورود</th><th>وضعیت</th><th>عملیات</th></tr></thead>
+          <tbody className={loading ? 'is-loading' : ''}>
+            {users.map((user, index) => {
+              const isSelf = user.id === currentUser?.id
+              const lockedReason = user.isSystem ? 'مدیر اصلی سیستم از این بخش قابل تغییر نیست.' : isSelf ? 'این عملیات برای حساب خودتان مجاز نیست.' : ''
+              return (
+                <tr key={user.id}>
+                  <td>
+                    <span className={`user-identity tone-${index % 5}`}>
+                      <i>{initialsOf(userFullName(user))}</i>
+                      <span>
+                        <strong>{userFullName(user)}{user.isSystem && <em className="user-system" title="ایجادشده توسط سیستم؛ قابل حذف، غیرفعال‌سازی یا تغییر دسترسی نیست"><Lock size={12} />مدیر اصلی</em>}</strong>
+                        {user.email && <small className="ltr-cell">{user.email}</small>}
+                      </span>
+                    </span>
+                  </td>
+                  <td className="ltr-cell">{user.username ? toPersianDigits(user.username) : <span className="users-missing">ثبت نشده</span>}</td>
+                  <td className="ltr-cell">{user.phoneNumber ? toPersianDigits(user.phoneNumber) : '—'}</td>
+                  <td>{(user.roles || []).length ? user.roles.map((role) => <span className="access-badge" key={role}><Shield size={13} />{role}</span>) : <span className="users-missing">بدون نقش</span>}</td>
+                  <td>{user.lastLoginAtUtc ? formatDateTime(user.lastLoginAtUtc) : 'ثبت نشده'}</td>
+                  <td><span className={`user-status ${user.isActive ? 'active' : ''}`}><i />{user.isActive ? 'فعال' : 'غیرفعال'}</span></td>
+                  <td>
+                    <span className="row-actions">
+                      {rights.update && (
+                        <button type="button" title={user.isSystem ? 'مشخصات مدیر اصلی سیستم از این بخش قابل تغییر نیست؛ رمز خود را از «تنظیمات» تغییر می‌دهد.' : 'ویرایش'} aria-label="ویرایش" disabled={user.isSystem} onClick={() => setEditing(user)}><Pencil size={15} /></button>
+                      )}
+                      {(rights.assignRoles || rights.assignPermissions) && (
+                        <button type="button" title={lockedReason || 'دسترسی‌ها'} aria-label="دسترسی‌ها" disabled={Boolean(lockedReason)} onClick={() => setAccessOf(user)}><ShieldCheck size={15} /></button>
+                      )}
+                      {rights.changeStatus && (user.isActive
+                        ? <button type="button" className="danger" title={lockedReason || 'غیرفعال‌سازی'} aria-label="غیرفعال‌سازی" disabled={Boolean(lockedReason)} onClick={() => toggleStatus(user)}><EyeOff size={15} /></button>
+                        : <button type="button" className="ok" title="فعال‌سازی" aria-label="فعال‌سازی" onClick={() => toggleStatus(user)}><Eye size={15} /></button>)}
+                    </span>
+                  </td>
+                </tr>
+              )
+            })}
+            {loading && !users.length && <tr><td colSpan={7} className="users-empty"><LoaderCircle size={18} className="spin" /></td></tr>}
+            {!loading && !users.length && <tr><td colSpan={7} className="users-empty">کاربری یافت نشد.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+      <Pagination pageNumber={page} pageSize={PAGE_SIZE} totalCount={total} onChange={setPage} />
+      {/* The Core exposes a delete endpoint, but disabling is the safe default: a user is referenced by tasks and chats. */}
+      {editing && (
+        <UserFormDialog
+          user={editing === 'new' ? null : editing}
+          tenantId={tenantId}
+          canAssignRoles={rights.assignRoles}
+          onClose={() => setEditing(null)}
+          onSaved={(result) => { setEditing(null); setNotice(result); reload() }}
+        />
+      )}
+      {accessOf && (
+        <UserAccessDialog
+          user={accessOf}
+          tenantId={tenantId}
+          rights={rights}
+          onClose={() => setAccessOf(null)}
+          onSaved={(result) => { setAccessOf(null); setNotice(result); reload() }}
+        />
+      )}
+    </section>
+  )
+}
+
+/* Create / edit one account: the fields the Core keeps - name, national code (the username),
+   mobile number, e-mail and password. Roles can be picked while creating; later changes (and
+   direct permissions) live in the access dialog. */
+function UserFormDialog({ user, tenantId, canAssignRoles, onClose, onSaved }) {
+  const isNew = !user
+  const [form, setForm] = useState({
+    firstName: user?.firstName || (user && !user.lastName ? user.displayName : ''),
+    lastName: user?.lastName || '',
+    username: user?.username || '',
+    phoneNumber: user?.phoneNumber || '',
+    email: user?.email || '',
+    password: '',
+  })
+  const [passwordConfirm, setPasswordConfirm] = useState('')
+  const [roles, setRoles] = useState([])
+  const [roleIds, setRoleIds] = useState([])
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  // The role list needs roles.view; without it the account is still created, just without roles.
+  useEffect(() => {
+    if (!isNew || !canAssignRoles) return
+    rolesApi.list(tenantId).then((result) => setRoles(unwrap(result, []) || []))
+  }, [isNew, canAssignRoles, tenantId])
+
+  const set = (key) => (event) => {
+    const value = key === 'username' || key === 'phoneNumber' ? toLatinDigits(event.target.value) : event.target.value
+    setForm((current) => ({ ...current, [key]: value }))
+  }
+
+  // An older username (from before the national-code rule) may stay as it is.
+  const usernameChanged = isNew || form.username.trim() !== (user?.username || '')
+  const passwordMismatch = Boolean(passwordConfirm) && form.password !== passwordConfirm
+
+  function validate() {
+    if (!form.firstName.trim() || !form.lastName.trim()) return 'نام و نام خانوادگی را وارد کنید.'
+    if (usernameChanged && !NATIONAL_CODE.test(form.username.trim())) return 'نام کاربری باید کد ملی ۱۰ رقمی باشد (فقط عدد).'
+    if (!form.phoneNumber.trim()) return 'شماره موبایل را وارد کنید.'
+    if (!PHONE_NUMBER.test(form.phoneNumber.replace(/[\s\-()]/g, ''))) return 'شماره موبایل معتبر نیست (مثال: 09121234567).'
+    if (form.email.trim() && !EMAIL_ADDRESS.test(form.email.trim())) return 'ایمیل معتبر نیست.'
+    if (isNew && form.password.length < 8) return 'رمز عبور اولیه باید حداقل ۸ کاراکتر باشد.'
+    if (!isNew && form.password && form.password.length < 8) return 'رمز عبور جدید باید حداقل ۸ کاراکتر باشد.'
+    if (form.password !== passwordConfirm) return 'رمز عبور و تکرار آن یکسان نیستند.'
+    return ''
+  }
+
+  async function submit(event) {
+    event.preventDefault()
+    const problem = validate()
+    if (problem) { setError(problem); return }
+    setSaving(true)
+    setError('')
+    const firstName = form.firstName.trim()
+    const lastName = form.lastName.trim()
+    const fullName = `${firstName} ${lastName}`.trim()
+
+    if (isNew) {
+      const created = await usersApi.create({
+        tenantId,
+        username: form.username.trim(),
+        firstName,
+        lastName,
+        phoneNumber: form.phoneNumber.trim(),
+        password: form.password,
+        email: form.email.trim() || null,
+        isActive: true,
+      })
+      if (!created.isSuccess) { setSaving(false); setError(PersianMessages.error(created.error)); return }
+      if (canAssignRoles && roleIds.length) {
+        const assigned = await usersApi.assignRoles(unwrap(created).id, roleIds)
+        if (!assigned.isSuccess) {
+          onSaved({ type: 'error', text: `کاربر «${fullName}» ایجاد شد، اما نقش‌ها ذخیره نشد: ${PersianMessages.error(assigned.error)} از دکمه‌ی «دسترسی‌ها» دوباره امتحان کنید.` })
+          return
+        }
+      }
+      onSaved({ type: 'success', text: `کاربر «${fullName}» ایجاد شد.` })
+      return
+    }
+
+    const saved = await usersApi.update(user.id, {
+      displayName: fullName || user.displayName,
+      isActive: user.isActive,
+      firstName,
+      lastName,
+      username: form.username.trim(),
+      phoneNumber: form.phoneNumber.trim(),
+      email: form.email.trim(),
+      password: form.password.trim() || null,
+    })
+    if (!saved.isSuccess) { setSaving(false); setError(PersianMessages.error(saved.error)); return }
+    onSaved({ type: 'success', text: `مشخصات «${fullName}» ذخیره شد.` })
+  }
+
+  return (
+    <UserDialog
+      size="sm"
+      icon={isNew ? UserPlus : Pencil}
+      title={isNew ? 'ایجاد کاربر جدید' : `ویرایش «${userFullName(user)}»`}
+      onClose={onClose}
+      footer={(
+        <>
+          {error && <span className="ue-error"><TriangleAlert size={15} />{error}</span>}
+          <div className="ue-foot-actions">
+            <button type="button" className="ue-cancel" onClick={onClose}>انصراف</button>
+            <button type="submit" form="user-form" className="ue-save" disabled={saving}>{saving ? 'در حال ذخیره...' : isNew ? 'ایجاد کاربر' : 'ذخیره تغییرات'}</button>
+          </div>
+        </>
+      )}
+    >
+      <form id="user-form" onSubmit={submit} noValidate>
+        <div className="ue-card">
+          <div className="ue-grid">
+            <Field label="نام" required><input value={form.firstName} onChange={set('firstName')} maxLength={80} autoFocus /></Field>
+            <Field label="نام خانوادگی" required><input value={form.lastName} onChange={set('lastName')} maxLength={80} /></Field>
+            <Field label="نام کاربری (کد ملی)" required hint={!isNew && user?.username && !NATIONAL_CODE.test(user.username) ? 'نام کاربری فعلی پیش از قانون کد ملی ثبت شده؛ اگر تغییرش دهید باید کد ملی ۱۰ رقمی باشد.' : 'دقیقاً ۱۰ رقم، فقط عدد.'}>
+              <input className="ltr-input" value={form.username} onChange={set('username')} inputMode="numeric" maxLength={usernameChanged ? 10 : 64} autoComplete="off" />
+            </Field>
+            <Field label="شماره موبایل" required hint="برای ورود و دریافت پیامک.">
+              <input className="ltr-input" value={form.phoneNumber} onChange={set('phoneNumber')} inputMode="tel" placeholder="09121234567" autoComplete="off" />
+            </Field>
+            <Field label="ایمیل" hint="اختیاری؛ برای ارسال لینک بازیابی رمز عبور." wide>
+              <input className="ltr-input" type="email" value={form.email} onChange={set('email')} autoComplete="off" />
+            </Field>
+          </div>
+        </div>
+
+        <div className="ue-card ue-card--accent">
+          <div className="ue-grid">
+            <Field label={isNew ? 'رمز عبور اولیه' : 'رمز عبور جدید'} required={isNew} hint={isNew ? 'حداقل ۸ کاراکتر.' : 'خالی بگذارید تا رمز فعلی بماند.'}>
+              <input className="ltr-input" type="password" value={form.password} onChange={set('password')} autoComplete="new-password" />
+            </Field>
+            <Field label="تکرار رمز عبور" required={isNew} hint={passwordMismatch ? 'رمزها یکسان نیستند.' : undefined}>
+              <input className={`ltr-input${passwordMismatch ? ' is-invalid' : ''}`} type="password" value={passwordConfirm} onChange={(e) => setPasswordConfirm(e.target.value)} autoComplete="new-password" aria-invalid={passwordMismatch} />
+            </Field>
+          </div>
+        </div>
+
+        {isNew && canAssignRoles && roles.length > 0 && (
+          <div className="ue-card ue-card--accent">
+            <h5 className="ue-card-title">نقش‌ها</h5>
+            <ul className="ue-roles ue-roles--wrap">
+              {roles.map((role) => (
+                <li key={role.id}>
+                  <label>
+                    <input type="checkbox" checked={roleIds.includes(role.id)} onChange={(e) => setRoleIds((ids) => e.target.checked ? [...ids, role.id] : ids.filter((id) => id !== role.id))} />
+                    <span className="access-check"><CheckCheck size={13} /></span>
+                    <span className="access-text"><strong>{role.name}</strong></span>
+                  </label>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </form>
+    </UserDialog>
+  )
+}
+
+/* Where a permission reaches one user from, and whether it is in effect for them. */
+function accessIsEffective(entry, direct, denied) {
+  if (denied.has(entry.permissionId)) return false
+  return direct.has(entry.permissionId) || entry.grantedByRole || entry.grantedByGroup || Boolean(entry.grantedAsPrerequisite)
+}
+
+/* Turning one permission on or off for this user. Off: the direct grant goes, and when a role,
+   a group or another permission would still give it, it is denied to the user. On: a denial goes,
+   and it is granted directly only when nothing else gives it. */
+function toggleUserAccess(entry, enable, direct, denied) {
+  const nextDirect = new Set(direct)
+  const nextDenied = new Set(denied)
+  const inherited = entry.grantedByRole || entry.grantedByGroup || Boolean(entry.grantedAsPrerequisite)
+  if (enable) {
+    nextDenied.delete(entry.permissionId)
+    if (!inherited) nextDirect.add(entry.permissionId)
+  } else {
+    nextDirect.delete(entry.permissionId)
+    if (inherited) nextDenied.add(entry.permissionId)
+  }
+  return { direct: nextDirect, denied: nextDenied }
+}
+
+function AccessSourceBadges({ entry, direct, denied }) {
+  const roles = (entry.grantingRoles || []).join('، ')
+  const groups = (entry.grantingGroups || []).join('، ')
+  if (denied.has(entry.permissionId)) {
+    const despite = [entry.grantedByRole && `سمت ${roles}`, entry.grantedByGroup && `گروه ${groups}`].filter(Boolean).join(' و ')
+    return (
+      <span className="access-inherited access-inherited--denied" title={despite ? `با وجود دسترسی از طریق ${despite}، برای این کاربر ممنوع شده است.` : 'برای این کاربر ممنوع شده است.'}>
+        غیرفعال برای این کاربر
+      </span>
+    )
+  }
+  return (
+    <>
+      {direct.has(entry.permissionId) && <span className="access-inherited access-inherited--direct">دسترسی مستقیم</span>}
+      {entry.grantedByRole && <span className="access-inherited" title={roles}><ShieldCheck size={13} />نقش: {roles}</span>}
+      {entry.grantedByGroup && <span className="access-inherited access-inherited--group" title={groups}><Users2 size={13} />گروه: {groups}</span>}
+      {entry.grantedAsPrerequisite && !direct.has(entry.permissionId) && !entry.grantedByRole && !entry.grantedByGroup && (
+        <span className="access-inherited access-inherited--prereq" title="مجوز دیگری از این کاربر به آن نیاز دارد.">لازمه‌ی مجوزی دیگر</span>
+      )}
+    </>
+  )
+}
+
+/* The roles of one user and, permission by permission, what they actually have and why. */
+function UserAccessDialog({ user, tenantId, rights, onClose, onSaved }) {
+  const [roles, setRoles] = useState([])
+  const [access, setAccess] = useState(null)
+  const [roleIds, setRoleIds] = useState([])
+  const [direct, setDirect] = useState(new Set())
+  const [denied, setDenied] = useState(new Set())
+  const [filter, setFilter] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    let cancelled = false
+    // The role list needs roles.view; without it the permissions are still shown.
+    Promise.all([rolesApi.list(tenantId), usersApi.permissions(user.id)]).then(([roleResult, accessResult]) => {
+      if (cancelled) return
+      if (!accessResult.isSuccess) { setError(PersianMessages.error(accessResult.error)); return }
+      const roleList = unwrap(roleResult, []) || []
+      const userAccess = unwrap(accessResult)
+      setRoles(roleList)
+      setAccess(userAccess)
+      setRoleIds(roleList.filter((role) => (userAccess.roles || []).includes(role.name)).map((role) => role.id))
+      setDirect(new Set(userAccess.permissions.filter((p) => p.grantedDirectly).map((p) => p.permissionId)))
+      setDenied(new Set(userAccess.permissions.filter((p) => p.deniedForUser).map((p) => p.permissionId)))
+    })
+    return () => { cancelled = true }
+  }, [user.id, tenantId])
+
+  const modules = useMemo(() => {
+    const term = filter.trim().toLowerCase()
+    const grouped = new Map()
+    for (const entry of access?.permissions || []) {
+      if (term && !`${labelForPermission(entry)} ${entry.name} ${labelForModule(entry.module)}`.toLowerCase().includes(term)) continue
+      if (!grouped.has(entry.module)) grouped.set(entry.module, [])
+      grouped.get(entry.module).push(entry)
+    }
+    return Array.from(grouped, ([module, permissions]) => ({ module, permissions }))
+  }, [access, filter])
+
+  async function save() {
+    if (!access) return
+    setSaving(true)
+    setError('')
+    const originalRoleIds = roles.filter((role) => (access.roles || []).includes(role.name)).map((role) => role.id).sort().join(',')
+    if (rights.assignRoles && [...roleIds].sort().join(',') !== originalRoleIds) {
+      const result = await usersApi.assignRoles(user.id, roleIds)
+      if (!result.isSuccess) { setSaving(false); setError(PersianMessages.error(result.error)); return }
+    }
+    const originalDirect = access.permissions.filter((p) => p.grantedDirectly).map((p) => p.permissionId).sort().join(',')
+    const originalDenied = access.permissions.filter((p) => p.deniedForUser).map((p) => p.permissionId).sort().join(',')
+    if (rights.assignPermissions && ([...direct].sort().join(',') !== originalDirect || [...denied].sort().join(',') !== originalDenied)) {
+      const result = await usersApi.assignPermissions(user.id, [...direct], [...denied])
+      if (!result.isSuccess) { setSaving(false); setError(PersianMessages.error(result.error)); return }
+    }
+    onSaved({ type: 'success', text: `دسترسی‌های «${userFullName(user)}» ذخیره شد. تغییرات پس از ورود دوباره‌ی کاربر اعمال می‌شود.` })
+  }
+
+  const nothingEditable = !rights.assignRoles && !rights.assignPermissions
+
+  return (
+    <UserDialog
+      icon={ShieldCheck}
+      title={`دسترسی‌های «${userFullName(user)}»`}
+      subtitle={user.email || undefined}
+      onClose={onClose}
+      footer={(
+        <>
+          {error && <span className="ue-error"><TriangleAlert size={15} />{error}</span>}
+          <div className="ue-foot-actions">
+            <button type="button" className="ue-cancel" onClick={onClose}>انصراف</button>
+            <button type="button" className="ue-save" onClick={save} disabled={saving || !access || nothingEditable}>{saving ? 'در حال ذخیره...' : 'ذخیره دسترسی‌ها'}</button>
+          </div>
+        </>
+      )}
+    >
+      {!access ? (
+        error ? null : <p className="users-empty"><LoaderCircle size={18} className="spin" /></p>
+      ) : (
+        <>
+          <section className="ue-section ue-section--first">
+            <h4><Shield size={16} />نقش‌ها</h4>
+            {roles.length ? (
+              <ul className="ue-roles ue-roles--wrap">
+                {roles.map((role) => (
+                  <li key={role.id}>
+                    <label className={rights.assignRoles ? '' : 'is-locked'}>
+                      <input type="checkbox" disabled={!rights.assignRoles} checked={roleIds.includes(role.id)} onChange={(e) => setRoleIds((ids) => e.target.checked ? [...ids, role.id] : ids.filter((id) => id !== role.id))} />
+                      <span className="access-check"><CheckCheck size={13} /></span>
+                      <span className="access-text">
+                        <strong>{role.name}</strong>
+                        <code>{toPersianDigits((role.permissions || []).length)} مجوز</code>
+                      </span>
+                    </label>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="ue-note">برای دیدن و تغییر نقش‌ها به دسترسی «مشاهده نقش‌ها» نیاز دارید.</p>
+            )}
+          </section>
+
+          <section className="ue-section">
+            <div className="ue-section-head">
+              <h4><KeyRound size={16} />مجوزهای این کاربر</h4>
+              <label className="users-search users-search--sm"><Search size={15} /><input type="search" value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="جستجوی مجوز..." /></label>
+            </div>
+            <p className="ue-note">
+              تیک هر مجوز یعنی این کاربر واقعاً آن را دارد. برداشتن تیک مجوزی که از نقش یا گروه می‌آید، آن را فقط برای همین کاربر غیرفعال می‌کند و نقش یا گروه تغییر نمی‌کند؛ با زدن دوباره‌ی تیک، دسترسی برمی‌گردد. فقط مجوزهایی را می‌توانید بدهید یا غیرفعال کنید که خودتان دارید.
+            </p>
+            {modules.map((group) => (
+              <div className="access-group" key={group.module}>
+                <h5>{labelForModule(group.module)}</h5>
+                <ul>
+                  {group.permissions.map((entry) => (
+                    <li key={entry.permissionId}>
+                      <label className={rights.assignPermissions ? '' : 'is-locked'}>
+                        <input
+                          type="checkbox"
+                          disabled={!rights.assignPermissions}
+                          checked={accessIsEffective(entry, direct, denied)}
+                          onChange={(e) => {
+                            const next = toggleUserAccess(entry, e.target.checked, direct, denied)
+                            setDirect(next.direct)
+                            setDenied(next.denied)
+                          }}
+                        />
+                        <span className="access-check"><CheckCheck size={13} /></span>
+                        <span className="access-text">
+                          <strong>{labelForPermission(entry)}</strong>
+                          <code>{entry.name}</code>
+                        </span>
+                        <span className="access-inherited-wrap"><AccessSourceBadges entry={entry} direct={direct} denied={denied} /></span>
+                      </label>
+                    </li>
+                  ))}
+                </ul>
+              </div>
             ))}
-            {loading && <tr><td colSpan={5}>در حال بارگذاری...</td></tr>}
-            {!loading && !shown.length && <tr><td colSpan={5}>رکوردی در این صفحه یافت نشد.</td></tr>}
+            {!modules.length && <p className="ue-note">مجوزی پیدا نشد.</p>}
+          </section>
+        </>
+      )}
+    </UserDialog>
+  )
+}
+
+/** Sign-in history, derived from the platform audit log (identity.login*). */
+const LOGIN_OUTCOMES = {
+  'identity.login': { label: 'ورود موفق', tone: 'success' },
+  'identity.login_failed': { label: 'ورود ناموفق', tone: 'failed' },
+  'identity.login_blocked': { label: 'مسدود (تلاش زیاد)', tone: 'warn' },
+  'identity.login_captcha_failed': { label: 'کد امنیتی نادرست', tone: 'warn' },
+}
+
+const LOGIN_REASONS = {
+  'unknown account': 'حساب ناموجود',
+  'wrong password': 'رمز نادرست',
+  'account disabled': 'حساب غیرفعال',
+}
+
+/** "0912... (wrong password)" -> the identifier that was typed and a Persian reason. */
+function describeLogin(details) {
+  if (!details) return { identifier: '—', reason: null }
+  const match = /^(.*) \(([^)]+)\)$/.exec(details)
+  return match ? { identifier: match[1], reason: LOGIN_REASONS[match[2]] || match[2] } : { identifier: details, reason: null }
+}
+
+const jalaliDate = new Intl.DateTimeFormat('fa-IR', { year: 'numeric', month: '2-digit', day: '2-digit' })
+const jalaliTime = new Intl.DateTimeFormat('fa-IR', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
+
+function LoginHistory() {
+  const { user } = useAuth()
+  const PAGE_SIZE = 15
+  const [logs, setLogs] = useState([])
+  const [total, setTotal] = useState(0)
+  const [page, setPage] = useState(1)
+  const [search, setSearch] = useState('')
+  const debouncedSearch = useDebounced(search)
+  const [newestFirst, setNewestFirst] = useState(true)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+
+  // A new search or sort order starts from the first page.
+  useEffect(() => { setPage(1) }, [debouncedSearch, newestFirst])
+
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    // The Core filters by action prefix ("identity.login" also covers failed / blocked attempts).
+    platformApi.auditLogs({
+      tenantId: user?.tenantId, pageNumber: page, pageSize: PAGE_SIZE,
+      action: 'identity.login', search: debouncedSearch.trim(), sort: newestFirst ? 'desc' : 'asc',
+    }).then((result) => {
+      if (cancelled) return
+      setError(result.isSuccess ? '' : PersianMessages.error(result.error))
+      const paged = unwrap(result)
+      setLogs(paged?.items || [])
+      setTotal(paged?.totalCount || 0)
+      setLoading(false)
+    })
+    return () => { cancelled = true }
+  }, [user?.tenantId, page, debouncedSearch, newestFirst])
+
+  return (
+    <section className="users-card">
+      <div className="users-toolbar">
+        <label className="users-search"><Search size={16} /><input type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="جستجو در کاربر، نام کاربری، IP، رویداد..." /></label>
+        <span className="users-toolbar-note">داده‌ها از رویدادهای ثبت‌شده‌ی سامانه خوانده می‌شوند.</span>
+      </div>
+      {error && <div className="users-notice error" role="alert"><CircleAlert size={16} /><span>{error}</span></div>}
+      <div className="table-scroll">
+        <table className="users-table">
+          <thead>
+            <tr>
+              <th>کاربر</th>
+              <th>نام کاربری / شناسه واردشده</th>
+              <th><button type="button" className="th-sort" onClick={() => setNewestFirst((value) => !value)} title="تغییر ترتیب">تاریخ <ArrowDownUp size={13} /></button></th>
+              <th>ساعت</th>
+              <th>وضعیت</th>
+              <th>علت</th>
+              <th>IP</th>
+            </tr>
+          </thead>
+          <tbody className={loading ? 'is-loading' : ''}>
+            {logs.map((log) => {
+              const outcome = LOGIN_OUTCOMES[log.action] || { label: log.action, tone: 'neutral' }
+              const { identifier, reason } = describeLogin(log.details)
+              const when = new Date(log.occurredAtUtc)
+              return (
+                <tr key={log.id}>
+                  <td><strong>{log.userDisplayName || <span className="users-missing">نامشخص</span>}</strong></td>
+                  <td className="ltr-cell">{toPersianDigits(log.username || identifier)}</td>
+                  <td>{jalaliDate.format(when)}</td>
+                  <td>{jalaliTime.format(when)}</td>
+                  <td><span className={`login-result ${outcome.tone}`}>{outcome.label}</span></td>
+                  <td>{reason || '—'}</td>
+                  <td className="ltr-cell"><code>{log.ipAddress || '—'}</code></td>
+                </tr>
+              )
+            })}
+            {loading && !logs.length && <tr><td colSpan={7} className="users-empty"><LoaderCircle size={18} className="spin" /></td></tr>}
+            {!loading && !logs.length && <tr><td colSpan={7} className="users-empty">رویدادی یافت نشد.</td></tr>}
           </tbody>
         </table>
       </div>
@@ -5543,43 +5772,8 @@ function UserAccessPanel() {
   )
 }
 
-function UserCreator({ onClose, onCreated }) {
-  const { user } = useAuth()
-  const [email, setEmail] = useState('')
-  const [displayName, setDisplayName] = useState('')
-  const [password, setPassword] = useState('')
-  const [error, setError] = useState('')
-  const [busy, setBusy] = useState(false)
-
-  async function save() {
-    setBusy(true); setError('')
-    const result = await usersApi.create({
-      tenantId: user?.tenantId || DEFAULT_TENANT_ID,
-      email: email.trim(),
-      displayName: displayName.trim(),
-      password,
-      isActive: true,
-    })
-    setBusy(false)
-    if (!result.isSuccess) { setError(PersianMessages.error(result.error)); return }
-    onCreated()
-  }
-
-  return (
-    <aside className="notification-drawer">
-      <header><div><UserPlus size={19} /><h3>کاربر جدید</h3></div><button onClick={onClose}><X size={18} /></button></header>
-      <label>ایمیل<input type="email" value={email} onChange={(e) => setEmail(e.target.value)} /></label>
-      <label>نام نمایشی<input value={displayName} onChange={(e) => setDisplayName(e.target.value)} /></label>
-      <label>رمز عبور (حداقل ۸ کاراکتر)<input type="password" value={password} onChange={(e) => setPassword(e.target.value)} /></label>
-      {error && <p className="login-error" role="alert">{error}</p>}
-      <button className="drawer-save" onClick={save} disabled={busy}>{busy ? 'در حال ایجاد...' : 'ایجاد کاربر'}</button>
-    </aside>
-  )
-}
-
 function UserManagement() {
   const [tab, setTab] = useState('کاربران')
-  const [creating, setCreating] = useState(false)
   const { canReach } = useAuth()
   const tabs = [
     { label: 'کاربران', icon: UsersRound, permissions: sectionPermissions.users },
@@ -5592,10 +5786,870 @@ function UserManagement() {
   useEffect(() => {
     if (tabs.length && !tabs.some((item) => item.label === tab)) setTab(tabs[0].label)
   }, [tabs, tab])
-  return <div className="user-management"><div className="task-page-header"><div><span>تنظیمات سازمانی</span><h1>مدیریت کاربران</h1><p>مدیریت حساب‌ها، ساختار سازمانی و سطوح دسترسی</p></div>{tab === 'کاربران' && <Can permission="users.create"><button onClick={() => setCreating(true)}><UserPlus size={18} />کاربر جدید</button></Can>}</div><nav className="user-tabs">{tabs.map(({label,icon:Icon}) => <button key={label} className={tab === label ? 'active' : ''} onClick={() => setTab(label)}><Icon size={17} />{label}</button>)}</nav>{tab === 'کاربران' && <UsersTable />}{tab === 'تاریخچه ورود' && <LoginHistory />}{tab === 'چارت سازمانی' && <OrgChart />}{tab === 'نقش‌ها و دسترسی‌ها' && <AccessControl />}{creating && <UserCreator onClose={() => setCreating(false)} onCreated={() => { setCreating(false); setTab('کاربران') }} />}</div>
+  return <div className="user-management"><div className="task-page-header"><div><span>تنظیمات سازمانی</span><h1>مدیریت کاربران</h1><p>مدیریت حساب‌ها، ساختار سازمانی و سطوح دسترسی</p></div></div><nav className="user-tabs">{tabs.map(({ label, icon: Icon }) => <button key={label} className={tab === label ? 'active' : ''} onClick={() => setTab(label)}><Icon size={17} />{label}</button>)}</nav>{tab === 'کاربران' && <UsersTable />}{tab === 'تاریخچه ورود' && <LoginHistory />}{tab === 'چارت سازمانی' && <OrgChart />}{tab === 'نقش‌ها و دسترسی‌ها' && <AccessControl />}</div>
 }
 
-function UserProfile() {
+// «تنظیمات»: a tabbed settings page (today just «پروفایل»; more tabs land here later,
+// each a sibling of ProfileTab, the same way UserManagement's own tabs are laid out).
+function SystemSettings() {
+  const { canReach } = useAuth()
+  const [tab, setTab] = useState('پروفایل')
+  const tabs = [
+    { label: 'پروفایل', icon: UserCog },
+    // Shown to those given their teams to see (groups.view_own) or to build (groups.manage_own).
+    ...(canReach(['groups.view_own', 'groups.manage_own']) ? [{ label: 'مدیریت تیم کاری', icon: Users }] : []),
+    { label: 'ظاهر سامانه', icon: Palette },
+    ...(canReach('sms_settings.view') ? [{ label: 'پنل پیامکی', icon: MessageSquareText }] : []),
+    ...(canReach([...sectionPermissions.users, ...sectionPermissions.loginHistory]) ? [{ label: 'مدیریت کاربران', icon: UsersRound }] : []),
+  ]
+  const current = tabs.some((item) => item.label === tab) ? tab : tabs[0].label
+
+  return (
+    <section className="profile-page">
+      <div className="task-page-header">
+        <div><span>تنظیمات شخصی</span><h1>تنظیمات</h1><p>پروفایل، امنیت و تنظیمات حساب کاربری شما</p></div>
+      </div>
+      <nav className="user-tabs">{tabs.map(({ label, icon: Icon }) => <button key={label} className={current === label ? 'active' : ''} onClick={() => setTab(label)}><Icon size={17} />{label}</button>)}</nav>
+      {current === 'پروفایل' && <ProfileTab />}
+      {current === 'مدیریت تیم کاری' && <CollapsibleCard icon={Users} title="مدیریت تیم کاری من"><MyWorkTeams /></CollapsibleCard>}
+      {current === 'ظاهر سامانه' && <AppearanceTab />}
+      {current === 'پنل پیامکی' && <SmsPanelTab />}
+      {current === 'مدیریت کاربران' && <UsersSettingsTab />}
+    </section>
+  )
+}
+
+/**
+ * Settings → «مدیریت کاربران»: the user list and the sign-in history, as sub-tabs. The same
+ * panels as the «مدیریت کاربران» page of the side menu; LDAP and SSO are deliberately not here.
+ */
+function UsersSettingsTab() {
+  const { canReach } = useAuth()
+  const [tab, setTab] = useState('مدیریت کاربران')
+  const tabs = [
+    { label: 'مدیریت کاربران', icon: UsersRound, permissions: sectionPermissions.users },
+    { label: 'تاریخچه ورود', icon: History, permissions: sectionPermissions.loginHistory },
+  ].filter((item) => canReach(item.permissions))
+  const current = tabs.some((item) => item.label === tab) ? tab : tabs[0]?.label
+
+  return (
+    <div className="users-settings">
+      <div className="settings-subtabs-row">
+        <nav className="settings-subtabs">
+          {tabs.map(({ label, icon: Icon }) => (
+            <button key={label} type="button" className={current === label ? 'active' : ''} onClick={() => setTab(label)}><Icon size={16} />{label}</button>
+          ))}
+        </nav>
+      </div>
+      {current === 'مدیریت کاربران' && <UsersTable />}
+      {current === 'تاریخچه ورود' && <LoginHistory />}
+    </div>
+  )
+}
+
+/* «پنل پیامکی» ---------------------------------------------------------------------------- */
+
+const SMS_TEMPLATE_MAX_LENGTH = 1000
+// Offered by every template when the server has a product name configured.
+const SMS_PRODUCT_NAME_PLACEHOLDER = 'ProductName'
+const SMS_PLACEHOLDER = /\{([A-Za-z][A-Za-z0-9_]*)\}/g
+
+/** The Core's SMS settings in the shape the panel edits; secrets always start empty (write-only). */
+function normalizeSmsSettings(sms) {
+  const toProvider = (item, fallbackId) => ({
+    id: item?.id || fallbackId,
+    name: item?.name || (item?.provider === 'kavenegar' ? 'کاوه‌نگار' : 'سرویس‌دهنده پیامک'),
+    provider: item?.provider || 'kavenegar',
+    enabled: !!item?.enabled,
+    apiUrl: item?.apiUrl || '',
+    apiKey: '',
+    lineNumber: item?.lineNumber || '',
+    username: '',
+    password: '',
+    apiKeyConfigured: !!item?.apiKeyConfigured,
+    usernameConfigured: !!item?.usernameConfigured,
+    passwordConfigured: !!item?.passwordConfigured,
+  })
+  // Settings saved before the provider list existed hold one provider at the top level; it is
+  // shown as that provider (by default an unconfigured «کاوه‌نگار»).
+  const providers = Array.isArray(sms?.providers)
+    ? sms.providers.map((item, index) => toProvider(item, `provider-${index}`))
+    : [toProvider(sms, '00000000-0000-0000-0000-000000000001')]
+  return { provider: sms?.provider || 'kavenegar', providers }
+}
+
+/** The body for PUT /notification-channels: the list, with the active provider mirrored on top. */
+function smsSettingsBody(settings, providers) {
+  const active = providers.find((item) => item.enabled)
+  const clean = (value) => (value || '').trim() || null
+  return {
+    enabled: !!active,
+    provider: active?.provider ?? settings.provider,
+    apiUrl: clean(active?.apiUrl),
+    apiKey: clean(active?.apiKey),
+    username: clean(active?.username),
+    password: active?.password || null,
+    lineNumber: clean(active?.lineNumber),
+    providers: providers.map((item) => ({
+      id: item.id,
+      name: item.name.trim(),
+      provider: item.provider,
+      enabled: item.enabled,
+      apiUrl: clean(item.apiUrl),
+      apiKey: clean(item.apiKey),
+      username: clean(item.username),
+      password: item.password || null,
+      lineNumber: clean(item.lineNumber),
+    })),
+  }
+}
+
+const usedSmsPlaceholders = (text) => Array.from(new Set(Array.from(String(text || '').matchAll(SMS_PLACEHOLDER), (m) => m[1])))
+
+/** The same rules the Core applies on save, in Persian; null when the text is fine. */
+function validateSmsTemplate(template) {
+  const title = template.title || template.key
+  const text = template.text ?? ''
+  if (!text.trim()) return `متن پیامک «${title}» نمی‌تواند خالی باشد.`
+  if (text.trim().length > SMS_TEMPLATE_MAX_LENGTH) return `متن پیامک «${title}» نباید بیشتر از ${SMS_TEMPLATE_MAX_LENGTH.toLocaleString('fa-IR')} کاراکتر باشد.`
+  const allowed = new Set([...(template.placeholders || []), SMS_PRODUCT_NAME_PLACEHOLDER].map((p) => p.toLowerCase()))
+  const unknown = usedSmsPlaceholders(text).filter((p) => !allowed.has(p.toLowerCase()))
+  if (unknown.length) return `متن پیامک «${title}» عبارت ناشناخته دارد: ${unknown.map((p) => `{${p}}`).join('، ')}`
+  const used = new Set(usedSmsPlaceholders(text).map((p) => p.toLowerCase()))
+  const missing = (template.requiredPlaceholders || []).filter((p) => !used.has(p.toLowerCase()))
+  if (missing.length) return `متن پیامک «${title}» باید ${missing.map((p) => `{${p}}`).join('، ')} را داشته باشد.`
+  return null
+}
+
+const errorText = (result, fallback) => (result?.error ? PersianMessages.error(result.error) : fallback)
+
+function SmsPanelTab() {
+  const { can } = useAuth()
+  const canUpdate = can('sms_settings.update')
+  const canTest = can('sms_settings.test')
+
+  const [providerOptions, setProviderOptions] = useState([])
+  const [settings, setSettings] = useState(null)
+  const [templates, setTemplates] = useState([])
+  const [editor, setEditor] = useState(null)
+  const [isNewProvider, setIsNewProvider] = useState(false)
+  const [testPhone, setTestPhone] = useState('')
+  const [testMessage, setTestMessage] = useState('')
+  const [busy, setBusy] = useState(null) // 'save' | 'test' | 'provider'
+  const [notice, setNotice] = useState(null)
+  const [loadError, setLoadError] = useState('')
+
+  useEffect(() => {
+    let alive = true
+    Promise.all([smsPanelApi.providers(), smsPanelApi.settings(), smsPanelApi.templates()]).then(([p, s, t]) => {
+      if (!alive) return
+      const failed = [p, s, t].find((result) => !result.isSuccess)
+      if (failed) { setLoadError(errorText(failed, 'دریافت تنظیمات پنل پیامکی ممکن نشد.')); return }
+      setProviderOptions(unwrap(p, []) || [])
+      setSettings(normalizeSmsSettings(unwrap(s)?.sms))
+      setTemplates(unwrap(t, []) || [])
+    })
+    return () => { alive = false }
+  }, [])
+
+  if (!settings) {
+    return (
+      <div className="profile-form sms-loading">
+        {loadError ? <p className="login-error" role="alert">{loadError}</p> : <><LoaderCircle size={20} className="spin" />در حال دریافت تنظیمات پنل پیامکی...</>}
+      </div>
+    )
+  }
+
+  const locked = !canUpdate || busy !== null
+  const selectedOption = providerOptions.find((item) => item.key === editor?.provider)
+  const updateEditor = (changes) => setEditor((current) => (current ? { ...current, ...changes } : current))
+
+  /** Stores the provider list; the screen then shows the settings exactly as the Core returns them. */
+  async function persistProviders(providers) {
+    const result = await smsPanelApi.saveSettings(smsSettingsBody(settings, providers))
+    if (!result.isSuccess) throw new Error(errorText(result, 'ذخیره تنظیمات انجام نشد.'))
+    const reloaded = await smsPanelApi.settings()
+    setSettings(reloaded.isSuccess ? normalizeSmsSettings(unwrap(reloaded)?.sms) : { ...settings, providers })
+  }
+
+  async function runProviderChange(change, successText) {
+    setBusy('provider'); setNotice(null)
+    try {
+      await change()
+      setNotice({ type: 'success', text: successText })
+      return true
+    } catch (err) {
+      setNotice({ type: 'error', text: err.message })
+      return false
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  function addProvider() {
+    setEditor({
+      id: crypto.randomUUID(), name: '', provider: providerOptions[0]?.key ?? 'kavenegar', enabled: false,
+      apiUrl: '', apiKey: '', lineNumber: '', username: '', password: '',
+      apiKeyConfigured: false, usernameConfigured: false, passwordConfigured: false,
+    })
+    setIsNewProvider(true)
+    setNotice(null)
+  }
+
+  async function saveProvider() {
+    if (!editor) return
+    if (!editor.name.trim()) { setNotice({ type: 'error', text: 'نام سرویس‌دهنده را وارد کنید.' }); return }
+    if (editor.enabled && !editor.apiKey.trim() && !editor.apiKeyConfigured) {
+      setNotice({ type: 'error', text: 'برای فعال‌کردن این سرویس‌دهنده، کلید API را وارد کنید.' })
+      return
+    }
+    const item = { ...editor, name: editor.name.trim() }
+    const list = isNewProvider ? [...settings.providers, item] : settings.providers.map((current) => (current.id === item.id ? item : current))
+    // Only one provider sends at a time: turning this one on turns the others off.
+    const providers = item.enabled ? list.map((current) => ({ ...current, enabled: current.id === item.id })) : list
+    const ok = await runProviderChange(() => persistProviders(providers), isNewProvider ? 'سرویس‌دهنده اضافه شد.' : 'تغییرات سرویس‌دهنده ذخیره شد.')
+    if (ok) setEditor(null)
+  }
+
+  async function deleteProvider(item) {
+    if (!window.confirm(`سرویس‌دهنده «${item.name}» حذف شود؟`)) return
+    const ok = await runProviderChange(() => persistProviders(settings.providers.filter((current) => current.id !== item.id)), 'سرویس‌دهنده حذف شد.')
+    if (ok && editor?.id === item.id) setEditor(null)
+  }
+
+  async function setProviderActive(item, enabled) {
+    if (enabled && !item.apiKeyConfigured && !item.apiKey.trim()) {
+      setNotice({ type: 'error', text: 'برای فعال‌کردن سرویس‌دهنده، ابتدا کلید API آن را در بخش ویرایش ثبت کنید.' })
+      return
+    }
+    await runProviderChange(
+      () => persistProviders(settings.providers.map((current) => ({ ...current, enabled: enabled && current.id === item.id }))),
+      enabled ? 'سرویس‌دهنده فعال شد.' : 'سرویس‌دهنده غیرفعال شد.',
+    )
+  }
+
+  /** Saves the texts (and the provider list as it stands); false when something stopped it. */
+  async function saveAll() {
+    const active = settings.providers.find((item) => item.enabled)
+    const hasKey = active?.apiKeyConfigured || active?.apiKey.trim()
+    const hasLogin = (active?.usernameConfigured || active?.username.trim()) && (active?.passwordConfigured || active?.password)
+    if (active && !hasKey && !hasLogin) {
+      setNotice({ type: 'error', text: 'برای فعال کردن پنل پیامکی، کلید API یا نام کاربری و رمز عبور را وارد کنید.' })
+      return false
+    }
+    const invalid = templates.map(validateSmsTemplate).find(Boolean)
+    if (invalid) { setNotice({ type: 'error', text: invalid }); return false }
+    await persistProviders(settings.providers)
+    const saved = await smsPanelApi.saveTemplates(templates.map((t) => ({ key: t.key, text: t.text })))
+    if (!saved.isSuccess) throw new Error(errorText(saved, 'ذخیره متن پیامک‌ها انجام نشد.'))
+    setTemplates(unwrap(saved, templates) || templates)
+    return true
+  }
+
+  async function handleSave() {
+    setBusy('save'); setNotice(null)
+    try {
+      if (await saveAll()) setNotice({ type: 'success', text: 'تنظیمات و متن پیامک‌ها ذخیره شد.' })
+    } catch (err) {
+      setNotice({ type: 'error', text: err.message || 'ذخیره تنظیمات انجام نشد.' })
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  async function handleSaveAndTest() {
+    if (!testPhone.trim()) { setNotice({ type: 'error', text: 'شماره موبایل آزمایشی را وارد کنید.' }); return }
+    setBusy('test'); setNotice(null)
+    try {
+      if (canUpdate && !(await saveAll())) return
+      const result = await smsPanelApi.test(testPhone.trim(), testMessage.trim())
+      const value = unwrap(result)
+      if (!result.isSuccess) setNotice({ type: 'error', text: errorText(result, 'ارسال پیامک آزمایشی انجام نشد.') })
+      else setNotice({ type: value?.success === false ? 'error' : 'success', text: value?.message ? PersianMessages.error(value.message) : 'پیامک آزمایشی ارسال شد.' })
+    } catch (err) {
+      setNotice({ type: 'error', text: err.message || 'ارسال پیامک آزمایشی انجام نشد.' })
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  return (
+    <div className="sms-panel">
+      {notice && (
+        <div className={`team-notice ${notice.type}`} role={notice.type === 'error' ? 'alert' : 'status'}>
+          <span>{notice.type === 'success' ? <CheckCircle2 size={16} /> : <CircleAlert size={16} />}{notice.text}</span>
+          <button type="button" onClick={() => setNotice(null)} title="بستن"><X size={14} /></button>
+        </div>
+      )}
+
+      <section className="profile-form sms-card">
+        <div className="sms-card-head">
+          <div>
+            <h3>سرویس‌دهنده پیامک</h3>
+            <p>پیامک‌های سامانه از طریق این سرویس و توسط سرور ارسال می‌شوند.</p>
+          </div>
+          {canUpdate && <button type="button" className="sms-primary" onClick={addProvider} disabled={busy !== null}><Plus size={16} />افزودن سرویس</button>}
+        </div>
+
+        <div className="sms-providers">
+          {settings.providers.length === 0 && <p className="sms-empty">هنوز سرویس‌دهنده‌ای ثبت نشده است.</p>}
+          {settings.providers.map((item) => (
+            <div key={item.id} className="sms-provider">
+              <div>
+                <strong>{item.name || 'سرویس‌دهنده پیامک'}</strong>
+                <small className={item.enabled ? 'on' : ''}>{item.enabled ? 'فعال و در حال استفاده' : 'غیرفعال'}</small>
+              </div>
+              {canUpdate && (
+                <div className="sms-provider-actions">
+                  <button type="button" className={item.enabled ? 'sms-off' : 'sms-on'} onClick={() => setProviderActive(item, !item.enabled)} disabled={busy !== null}>{item.enabled ? 'غیرفعال‌کردن' : 'فعال‌کردن'}</button>
+                  <button type="button" className="sms-edit" onClick={() => { setEditor({ ...item }); setIsNewProvider(false); setNotice(null) }} disabled={busy !== null}><Pencil size={14} />ویرایش</button>
+                  <button type="button" className="sms-delete" onClick={() => deleteProvider(item)} disabled={busy !== null}><Trash2 size={14} />حذف</button>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+
+        {editor && (
+          <div className="sms-editor">
+            <div className="sms-editor-head">
+              <h4>{isNewProvider ? 'افزودن سرویس‌دهنده' : `ویرایش ${editor.name}`}</h4>
+              <button type="button" className="team-icon-button" onClick={() => setEditor(null)} disabled={busy !== null} aria-label="بستن فرم سرویس‌دهنده"><X size={16} /></button>
+            </div>
+            <label className="sms-switch">
+              <input type="checkbox" checked={editor.enabled} onChange={(e) => updateEditor({ enabled: e.target.checked })} disabled={locked} />
+              <span className="sms-switch-track" aria-hidden="true" />
+              <span><strong>فعال بودن این سرویس‌دهنده</strong><small>فقط یک سرویس‌دهنده می‌تواند هم‌زمان برای ارسال پیامک فعال باشد.</small></span>
+            </label>
+            <div className="sms-fields">
+              <label>سرویس‌دهنده (Service Provider) *
+                <input value={editor.name} onChange={(e) => updateEditor({ name: e.target.value })} disabled={locked} placeholder="مثلاً پنل پیامکی شرکت ..." />
+                <small>نامی که برای تشخیص این پنل در سامانه نمایش داده می‌شود</small>
+              </label>
+              {providerOptions.length > 1 && (
+                <label>نوع پنل
+                  <select value={editor.provider} onChange={(e) => updateEditor({ provider: e.target.value })} disabled={locked}>
+                    {providerOptions.map((option) => <option key={option.key} value={option.key}>{option.displayName}</option>)}
+                  </select>
+                </label>
+              )}
+              <label>آدرس سرویس (Base URL)
+                <input value={editor.apiUrl} onChange={(e) => updateEditor({ apiUrl: e.target.value })} disabled={locked} placeholder={selectedOption?.defaultBaseUrl} dir="ltr" />
+                {selectedOption && <small>خالی = آدرس رسمی: {selectedOption.defaultBaseUrl}</small>}
+              </label>
+              <label>کلید API (API Key)
+                <input type="password" value={editor.apiKey} onChange={(e) => updateEditor({ apiKey: e.target.value })} disabled={locked} autoComplete="new-password" placeholder={editor.apiKeyConfigured ? '••••••••••••' : ''} dir="ltr" />
+                <small>{editor.apiKeyConfigured ? 'کلید فعلی نمایش داده نمی‌شود؛ برای تغییر، کلید جدید را وارد کنید.' : 'برای کاوه‌نگار الزامی است.'}</small>
+              </label>
+              <label>نام کاربری پنل (اختیاری)
+                <input value={editor.username} onChange={(e) => updateEditor({ username: e.target.value })} disabled={locked} autoComplete="off" placeholder={editor.usernameConfigured ? '••••••••' : ''} dir="ltr" />
+                <small>{editor.usernameConfigured ? 'نام کاربری فعلی نمایش داده نمی‌شود؛ برای تغییر، مقدار جدید را وارد کنید.' : 'کاوه‌نگار به این مورد نیاز ندارد.'}</small>
+              </label>
+              <label>رمز عبور پنل (اختیاری)
+                <input type="password" value={editor.password} onChange={(e) => updateEditor({ password: e.target.value })} disabled={locked} autoComplete="new-password" placeholder={editor.passwordConfigured ? '••••••••••••' : ''} dir="ltr" />
+                <small>{editor.passwordConfigured ? 'رمز فعلی نمایش داده نمی‌شود؛ برای تغییر، رمز جدید را وارد کنید.' : 'کاوه‌نگار به این مورد نیاز ندارد.'}</small>
+              </label>
+              <label>شماره فرستنده (اختیاری)
+                <input value={editor.lineNumber} onChange={(e) => updateEditor({ lineNumber: toLatinDigits(e.target.value).replace(/\D/g, '') })} disabled={locked} inputMode="numeric" dir="ltr" />
+                <small>خالی = خط پیش‌فرض حساب</small>
+              </label>
+            </div>
+            <div className="sms-actions">
+              <button type="button" className="sms-secondary" onClick={() => setEditor(null)} disabled={busy !== null}>انصراف</button>
+              <button type="button" className="profile-save" onClick={saveProvider} disabled={busy !== null}>{busy === 'provider' ? <LoaderCircle size={16} className="spin" /> : <Save size={16} />}{isNewProvider ? 'ثبت سرویس‌دهنده' : 'ذخیره تغییرات'}</button>
+            </div>
+          </div>
+        )}
+      </section>
+
+      <section className="profile-form sms-card">
+        <h3><MessageSquareText size={18} />متن پیامک‌ها</h3>
+        <p className="sms-hint">عبارت‌های داخل آکولاد هنگام ارسال با مقدار واقعی جایگزین می‌شوند. عبارت‌های ستاره‌دار باید در متن بمانند.</p>
+        {templates.length === 0 && <p className="sms-hint">متنی برای ویرایش وجود ندارد.</p>}
+        <div className="sms-templates">
+          {templates.map((template, index) => {
+            const error = validateSmsTemplate(template)
+            const required = new Set((template.requiredPlaceholders || []).map((p) => p.toLowerCase()))
+            const update = (text) => setTemplates((list) => list.map((t, i) => (i === index ? { ...t, text } : t)))
+            return (
+              <div key={template.key} className="sms-template">
+                <div className="sms-template-head">
+                  <div>
+                    <strong>{template.title}</strong>
+                    <small dir="ltr">{template.key}</small>
+                  </div>
+                  {template.defaultText && template.text !== template.defaultText && canUpdate && (
+                    <button type="button" className="sms-reset" onClick={() => update(template.defaultText)}><RotateCcw size={12} />متن پیش‌فرض</button>
+                  )}
+                </div>
+                {/* Always rendered (empty when there is none) so each row of the grid lines up. */}
+                <p className="sms-hint">{template.description || ''}</p>
+                <textarea value={template.text} maxLength={SMS_TEMPLATE_MAX_LENGTH} disabled={!canUpdate} aria-label={template.title} aria-invalid={error ? true : undefined} onChange={(e) => update(e.target.value)} />
+                <span className="sms-placeholders">
+                  {(template.placeholders || []).map((placeholder) => (
+                    <button key={placeholder} type="button" disabled={!canUpdate} title={required.has(placeholder.toLowerCase()) ? 'الزامی' : 'افزودن به متن'} onClick={() => update(`${template.text}{${placeholder}}`)} dir="ltr">
+                      {`{${placeholder}}`}{required.has(placeholder.toLowerCase()) && <em>*</em>}
+                    </button>
+                  ))}
+                </span>
+                <p className="sms-error" role={error ? 'alert' : undefined}>{error || ''}</p>
+              </div>
+            )
+          })}
+        </div>
+      </section>
+
+      <section className="profile-form sms-card">
+        <h3><Send size={18} />ارسال آزمایشی</h3>
+        <div className="sms-test-fields">
+          <label>شماره موبایل آزمایشی
+            <input value={testPhone} onChange={(e) => setTestPhone(toLatinDigits(e.target.value))} inputMode="tel" placeholder="09121234567" dir="ltr" />
+          </label>
+          <label>متن آزمایشی
+            <input value={testMessage} onChange={(e) => setTestMessage(e.target.value)} maxLength={500} placeholder="پیامک آزمایشی سامانه" />
+          </label>
+        </div>
+        <div className="sms-actions">
+          {canUpdate && <button type="button" className="sms-secondary" onClick={handleSave} disabled={busy !== null}>{busy === 'save' ? <LoaderCircle size={16} className="spin" /> : <Save size={16} />}ذخیره تنظیمات</button>}
+          {canTest && <button type="button" className="profile-save" onClick={handleSaveAndTest} disabled={busy !== null}>{busy === 'test' ? <LoaderCircle size={16} className="spin" /> : <Send size={16} />}{canUpdate ? 'ذخیره و ارسال تست' : 'ارسال تست'}</button>}
+        </div>
+      </section>
+    </div>
+  )
+}
+
+/* «ظاهر سامانه»: per-user accent palette and background pattern, stored on the user
+   (PUT /auth/me/preferences: colorPalette and theme) so they follow the user to any device. */
+const COLOR_PALETTES = [
+  { id: 'navy', name: 'سرمه‌ای روزت (پیش‌فرض)', preview: 'linear-gradient(110deg, #071944, #0f477d 70%, #1d766f)' },
+  { id: 'indigo', name: 'نیلی / بنفش', preview: 'linear-gradient(110deg, #4f46e5, #7c3aed)' },
+  { id: 'emerald', name: 'زمردی / سبز', preview: 'linear-gradient(110deg, #059669, #0d9488)' },
+  { id: 'rose', name: 'سرخ / گلبهی', preview: 'linear-gradient(110deg, #e11d48, #db2777)' },
+  { id: 'amber', name: 'طلایی / کهربایی', preview: 'linear-gradient(110deg, #d97706, #ea580c)' },
+  { id: 'cyan', name: 'فیروزه‌ای / آبی', preview: 'linear-gradient(110deg, #0891b2, #2563eb)' },
+  { id: 'slate', name: 'زغالی / تیره', preview: 'linear-gradient(110deg, #334155, #0f172a)' },
+]
+const BACKGROUND_PATTERNS = [
+  { id: 'default', name: 'ساده و مدرن', description: 'زمینه خنثی' },
+  { id: 'checkerboard', name: 'طرح شطرنجی', description: 'مربع‌های ریز' },
+  { id: 'diagonal', name: 'خطوط مورب', description: 'خطوط اریب' },
+  { id: 'grid', name: 'طرح شبکه‌ای', description: 'جدول هندسی' },
+  { id: 'dots', name: 'طرح نقطه‌ای', description: 'نقطه‌چین ظریف' },
+  { id: 'cross', name: 'چهارخانه', description: 'متقاطع ریز' },
+  { id: 'waves', name: 'طرح موجی', description: 'قوس‌های دایره‌ای' },
+]
+
+const THEME_MODES = [
+  { id: 'light', name: 'طرح روشن (روز)', icon: Sun },
+  { id: 'dark', name: 'طرح تیره (شب)', icon: Moon },
+]
+
+/** The user's saved mode/palette/pattern ids, or the defaults for missing or unknown values. */
+function appearanceOf(user) {
+  return {
+    mode: user?.themeMode === 'dark' ? 'dark' : 'light',
+    palette: COLOR_PALETTES.some((p) => p.id === user?.colorPalette) ? user.colorPalette : 'navy',
+    pattern: BACKGROUND_PATTERNS.some((p) => p.id === user?.theme) ? user.theme : 'default',
+  }
+}
+
+function AppearanceTab() {
+  const { user, can, refreshMe } = useAuth()
+  const { mode, palette, pattern } = appearanceOf(user)
+  const [pending, setPending] = useState('') // the option being saved
+  const [notice, setNotice] = useState(null)
+
+  async function save(change, key) {
+    if (pending) return
+    setPending(key); setNotice(null)
+    const next = { mode, palette, pattern, ...change }
+    const result = await accountApi.updatePreferences({
+      colorPalette: next.palette === 'navy' ? null : next.palette,
+      theme: next.pattern === 'default' ? null : next.pattern,
+      themeMode: next.mode,
+    })
+    if (result.isSuccess) await refreshMe()
+    else setNotice({ type: 'error', text: PersianMessages.error(result.error) })
+    setPending('')
+  }
+
+  return (
+    <>
+      {notice && (
+        <div className={`team-notice ${notice.type} appearance-notice`} role="alert">
+          <span><CircleAlert size={16} />{notice.text}</span>
+          <button type="button" onClick={() => setNotice(null)} title="بستن"><X size={14} /></button>
+        </div>
+      )}
+
+      {can('settings.update') && <UploadLimitCard />}
+
+      <CollapsibleCard icon={Sun} title="حالت روز / شب (طرح روشن و تیره)">
+        <div className="appearance-grid modes">
+          {THEME_MODES.map(({ id, name, icon: Icon }) => (
+            <button key={id} type="button" className={`appearance-option mode-option${mode === id ? ' active' : ''}`} onClick={() => save({ mode: id }, `mode:${id}`)} disabled={!!pending} aria-pressed={mode === id}>
+              <span><Icon size={20} className={`mode-icon ${id}`} /><strong>{name}</strong></span>
+              {pending === `mode:${id}` ? <LoaderCircle size={16} className="spin" /> : mode === id && <Check size={16} className="mode-check" />}
+            </button>
+          ))}
+        </div>
+      </CollapsibleCard>
+
+      <CollapsibleCard icon={Palette} title="پالت رنگی اصلی سامانه">
+        <p className="appearance-hint">رنگ دکمه‌ها، منوی فعال، بنر و حاشیه‌ها هم‌زمان تغییر می‌کند و برای حساب شما ذخیره می‌شود.</p>
+        <div className="appearance-grid palettes">
+          {COLOR_PALETTES.map((option) => (
+            <button key={option.id} type="button" className={`appearance-option${palette === option.id ? ' active' : ''}`} onClick={() => save({ palette: option.id }, `palette:${option.id}`)} disabled={!!pending} aria-pressed={palette === option.id}>
+              <span className="appearance-swatch" style={{ background: option.preview }}>
+                {pending === `palette:${option.id}` ? <LoaderCircle size={14} className="spin" /> : palette === option.id && <Check size={13} />}
+              </span>
+              <strong>{option.name}</strong>
+            </button>
+          ))}
+        </div>
+      </CollapsibleCard>
+
+      <CollapsibleCard icon={Grid3x3} title="طرح بافت زمینه (پترن گرافیکی)">
+        <p className="appearance-hint">الگوی زمینه‌ی صفحه‌ها؛ با رنگ پالت انتخابی کشیده می‌شود و برای حساب شما ذخیره می‌شود.</p>
+        <div className="appearance-grid patterns">
+          {BACKGROUND_PATTERNS.map((option) => (
+            <button key={option.id} type="button" className={`appearance-option${pattern === option.id ? ' active' : ''}`} onClick={() => save({ pattern: option.id }, `pattern:${option.id}`)} disabled={!!pending} aria-pressed={pattern === option.id}>
+              <span className={`appearance-swatch pattern-preview pattern-${option.id}`}>
+                {pending === `pattern:${option.id}` ? <LoaderCircle size={14} className="spin" /> : pattern === option.id && <Check size={13} />}
+              </span>
+              <strong>{option.name}</strong>
+              <small>{option.description}</small>
+            </button>
+          ))}
+        </div>
+      </CollapsibleCard>
+    </>
+  )
+}
+
+/** Admin only (settings.update): the system-wide maximum upload size, in KB. */
+function UploadLimitCard() {
+  const [valueKb, setValueKb] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [notice, setNotice] = useState(null)
+
+  useEffect(() => {
+    let alive = true
+    uploadPolicyApi.get().then((result) => {
+      if (!alive) return
+      setValueKb(String(unwrap(result)?.maxFileSizeKb ?? 200))
+      setLoading(false)
+    })
+    return () => { alive = false }
+  }, [])
+
+  async function submit(event) {
+    event.preventDefault()
+    const kb = Number(valueKb)
+    if (!Number.isFinite(kb) || kb <= 0) { setNotice({ type: 'error', text: 'مقدار واردشده معتبر نیست.' }); return }
+    setSaving(true); setNotice(null)
+    const result = await uploadPolicyApi.setMaxFileSizeKb(Math.max(1, Math.round(kb)))
+    setSaving(false)
+    setNotice(result.isSuccess
+      ? { type: 'success', text: 'حداکثر حجم فایل آپلودی ذخیره شد.' }
+      : { type: 'error', text: PersianMessages.error(result.error) })
+  }
+
+  return (
+    <CollapsibleCard icon={CloudUpload} title="محدودیت حجم فایل آپلودی">
+      {notice && (
+        <div className={`team-notice ${notice.type}`} role={notice.type === 'error' ? 'alert' : 'status'}>
+          <span>{notice.type === 'success' ? <CheckCircle2 size={16} /> : <CircleAlert size={16} />}{notice.text}</span>
+          <button type="button" onClick={() => setNotice(null)} title="بستن"><X size={14} /></button>
+        </div>
+      )}
+      <form className="upload-limit-form" onSubmit={submit}>
+        <label>حداکثر حجم مجاز (کیلوبایت)
+          <input type="number" min={1} value={valueKb} onChange={(e) => setValueKb(e.target.value)} disabled={loading} dir="ltr" />
+          <small>پیش‌فرض: ۲۰۰ کیلوبایت</small>
+        </label>
+        <button type="submit" className="profile-save" disabled={saving || loading}>{saving ? <LoaderCircle size={16} className="spin" /> : <Save size={16} />}ذخیره</button>
+      </form>
+      <p className="appearance-hint">این مقدار برای بارگذاری فایل در کل سامانه اعمال می‌شود.</p>
+    </CollapsibleCard>
+  )
+}
+
+const TEAM_MANAGER_ROLE = 'مدیر تیم'
+const TEAM_MEMBER_ROLE = 'عضو تیم'
+
+/** Every user of the tenant (the Core pages /users at 100 at most). */
+async function loadAllTenantUsers(tenantId) {
+  const users = []
+  for (let page = 1; page <= 50; page += 1) {
+    const result = await usersApi.list({ tenantId, pageNumber: page, pageSize: 100 })
+    if (!result.isSuccess) return { users, error: result.error }
+    const value = unwrap(result) || {}
+    users.push(...(value.items || []))
+    if (!value.items?.length || users.length >= (value.totalCount ?? 0) || page >= (value.totalPages ?? page)) break
+  }
+  return { users, error: null }
+}
+
+/**
+ * «تیم کاری من»: the teams the user belongs to (their own and others'). With groups.manage_own
+ * they build teams and choose the members of the ones they own; the rest is read only. Every
+ * change goes to the server first and the screen then shows the teams exactly as it returns them.
+ */
+function MyWorkTeams() {
+  const { user, can } = useAuth()
+  const tenantId = user?.tenantId || DEFAULT_TENANT_ID
+  const canBuildTeams = can('groups.manage_own')
+
+  const [teams, setTeams] = useState([])
+  const [activeTeamId, setActiveTeamId] = useState('')
+  const [allUsers, setAllUsers] = useState([])
+  const [memberScope, setMemberScope] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [notice, setNotice] = useState(null) // { type: 'success' | 'error', text }
+  const [creating, setCreating] = useState(false)
+  const [newTeamName, setNewTeamName] = useState('')
+  const [searchTerm, setSearchTerm] = useState('')
+
+  async function fetchTeams() {
+    const result = await myTeamsApi.list()
+    if (!result.isSuccess) throw new Error(PersianMessages.error(result.error))
+    return (unwrap(result, []) || []).filter((team) => team.isActive)
+  }
+
+  useEffect(() => {
+    let alive = true
+      ; (async () => {
+        setLoading(true)
+        try {
+          const list = await fetchTeams()
+          if (!alive) return
+          setTeams(list)
+          setActiveTeamId(list[0]?.id || '')
+          // The people to add are only needed by a team builder (groups.manage_own brings users.view).
+          if (canBuildTeams) {
+            const [{ users }, scopeResult] = await Promise.all([loadAllTenantUsers(tenantId), myTeamsApi.memberScope()])
+            if (!alive) return
+            setAllUsers(users)
+            // Without an organization structure (or if the call fails) nobody is filtered out
+            // here - the server still refuses whoever it does not allow.
+            setMemberScope(unwrap(scopeResult))
+          }
+        } catch (err) {
+          if (alive) setNotice({ type: 'error', text: err.message })
+        } finally {
+          if (alive) setLoading(false)
+        }
+      })()
+    return () => { alive = false }
+  }, [user?.id, tenantId, canBuildTeams])
+
+  const activeTeam = teams.find((team) => team.id === activeTeamId) || teams[0] || null
+  const canManageActiveTeam = canBuildTeams && !!activeTeam && activeTeam.ownerUserId === user?.id
+  const usersById = useMemo(() => new Map(allUsers.map((u) => [u.id, u])), [allUsers])
+
+  /** Sends one change, then reloads the teams from the server. False when it failed. */
+  async function applyChange(send, successText, nextActiveId) {
+    if (saving) return false
+    setSaving(true)
+    try {
+      const result = await send()
+      if (!result.isSuccess) throw new Error(PersianMessages.error(result.error))
+      const list = await fetchTeams()
+      setTeams(list)
+      const preferred = nextActiveId === undefined ? unwrap(result)?.id : nextActiveId
+      setActiveTeamId(list.some((team) => team.id === preferred) ? preferred : list[0]?.id || '')
+      setNotice({ type: 'success', text: successText })
+      return true
+    } catch (err) {
+      setNotice({ type: 'error', text: err.message || 'تغییر تیم کاری ذخیره نشد. لطفاً دوباره تلاش کنید.' })
+      return false
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function createTeam(event) {
+    event.preventDefault()
+    const name = newTeamName.trim()
+    if (!name) return
+    if (await applyChange(() => myTeamsApi.create(name), `تیم کاری جدید «${name}» با موفقیت ایجاد شد.`)) {
+      setNewTeamName('')
+      setCreating(false)
+    }
+  }
+
+  const memberIds = (team) => (team?.members || []).map((member) => member.userId)
+
+  function addMember(candidate) {
+    if (!canManageActiveTeam) return
+    if (memberIds(activeTeam).includes(candidate.id)) {
+      setNotice({ type: 'error', text: 'این کاربر قبلاً در تیم قرار دارد.' })
+      return
+    }
+    applyChange(
+      () => myTeamsApi.setMembers(activeTeam.id, [...memberIds(activeTeam), candidate.id]),
+      `«${candidate.displayName || candidate.username}» به تیم ${activeTeam.name} اضافه شد.`,
+    )
+  }
+
+  function removeMember(memberUserId) {
+    if (!canManageActiveTeam) return
+    if (memberUserId === user?.id) {
+      setNotice({ type: 'error', text: 'امکان حذف سازنده تیم وجود ندارد.' })
+      return
+    }
+    applyChange(
+      () => myTeamsApi.setMembers(activeTeam.id, memberIds(activeTeam).filter((id) => id !== memberUserId)),
+      'عضو موردنظر از تیم حذف شد.',
+    )
+  }
+
+  function deleteTeam() {
+    if (!canManageActiveTeam) return
+    if (!window.confirm(`آیا از حذف تیم کاری «${activeTeam.name}» اطمینان دارید؟`)) return
+    applyChange(() => myTeamsApi.remove(activeTeam.id), 'تیم کاری حذف شد.', null)
+  }
+
+  // Search results: active colleagues the server would accept; members already in the active
+  // team stay listed, marked as such.
+  const allowedIds = memberScope?.limited ? new Set(memberScope.allowedUserIds || []) : null
+  const query = searchTerm.trim().toLowerCase()
+  const candidates = query
+    ? allUsers.filter((u) =>
+      u.id !== user?.id
+      && u.isActive !== false
+      && (!allowedIds || allowedIds.has(u.id))
+      && [u.displayName, u.username, u.email].some((value) => (value || '').toLowerCase().includes(query)))
+    : []
+
+  const avatarOf = (person, fallbackName) => {
+    const url = person?.avatarUrl
+    return url ? <img src={url} alt="" /> : <span>{initialsOf(fallbackName || person?.displayName || person?.username)}</span>
+  }
+
+  return (
+    <div className="work-teams">
+      {notice && (
+        <div className={`team-notice ${notice.type}`} role={notice.type === 'error' ? 'alert' : 'status'}>
+          <span>{notice.type === 'success' ? <CheckCircle2 size={16} /> : <CircleAlert size={16} />}{notice.text}</span>
+          <button type="button" onClick={() => setNotice(null)} title="بستن"><X size={14} /></button>
+        </div>
+      )}
+
+      <div className="team-bar">
+        <div className="team-chips">
+          {teams.length === 0 ? (
+            <span className="team-empty">شما هنوز عضو هیچ تیم کاری نیستید.</span>
+          ) : teams.map((team) => (
+            <button key={team.id} type="button" className={activeTeam?.id === team.id ? 'active' : ''} onClick={() => setActiveTeamId(team.id)}>
+              <Users size={14} />{team.name}<small>({(team.members || []).length})</small>
+            </button>
+          ))}
+        </div>
+        {canBuildTeams && (
+          <button type="button" className="team-create-toggle" onClick={() => setCreating((value) => !value)}>
+            <Plus size={16} />ساخت تیم کاری جدید
+          </button>
+        )}
+      </div>
+
+      {canBuildTeams && creating && (
+        <form className="team-create-form" onSubmit={createTeam}>
+          <input value={newTeamName} onChange={(e) => setNewTeamName(e.target.value)} placeholder="نام تیم کاری (مثلاً: تیم پروژه طراحی UI)" maxLength={128} required autoFocus />
+          <button type="submit" disabled={saving || !newTeamName.trim()}>{saving && <LoaderCircle size={14} className="spin" />}ایجاد تیم</button>
+          <button type="button" className="team-icon-button" onClick={() => setCreating(false)} title="انصراف"><X size={16} /></button>
+        </form>
+      )}
+
+      {loading ? (
+        <div className="team-loading"><LoaderCircle size={20} className="spin" />در حال بارگذاری اعضا و تیم‌های کاری...</div>
+      ) : activeTeam ? (
+        <>
+          <div className="team-panel">
+            <div className="team-panel-head">
+              <div>
+                <h4><Users size={16} />تیم کاری: {activeTeam.name}</h4>
+                <small>تعداد اعضا: {(activeTeam.members || []).length} نفر</small>
+              </div>
+              {canManageActiveTeam && (
+                <button type="button" className="team-danger" onClick={deleteTeam} disabled={saving}><Trash2 size={14} />حذف تیم</button>
+              )}
+            </div>
+
+            {!canManageActiveTeam && (
+              <p className="team-readonly">شما عضو این تیم هستید؛ اعضا را می‌توانید ببینید و در گفتگوی داخلی با آن‌ها صحبت کنید. مدیریت اعضا فقط با مدیر تیم است.</p>
+            )}
+
+            {canManageActiveTeam && (
+              <div className="team-search">
+                <label htmlFor="team-member-search">جستجو و اضافه کردن کاربر به {activeTeam.name}:</label>
+                {memberScope?.limited && (
+                  <p className="team-scope-hint">
+                    {memberScope.scopeName ? `فقط همکاران معاونت «${memberScope.scopeName}» را می‌توانید به تیم اضافه کنید.` : 'فقط همکاران معاونت خودتان را می‌توانید به تیم اضافه کنید.'}
+                  </p>
+                )}
+                <div className="team-search-input">
+                  <Search size={16} />
+                  <input id="team-member-search" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} placeholder="نام یا نام کاربری همکار خود را جستجو کنید..." />
+                </div>
+                {query && (
+                  <div className="team-results">
+                    {candidates.length === 0 ? (
+                      <p className="team-results-empty">کاربری با این مشخصات پیدا نشد.</p>
+                    ) : candidates.map((candidate) => {
+                      const inTeam = memberIds(activeTeam).includes(candidate.id)
+                      return (
+                        <div key={candidate.id} className="team-person">
+                          <div className="team-person-info">
+                            <span className="team-avatar">{avatarOf(candidate)}</span>
+                            <div>
+                              <strong>{candidate.displayName || candidate.username}</strong>
+                              <small dir="ltr">{candidate.username}{candidate.email ? ` (${candidate.email})` : ''}</small>
+                            </div>
+                          </div>
+                          <button type="button" className="team-add" disabled={inTeam || saving} onClick={() => addMember(candidate)}>
+                            <UserPlus size={14} />{inTeam ? 'عضو تیم' : 'افزودن به تیم'}
+                          </button>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          <div className="team-members">
+            <h5><span>لیست اعضای فعلی {activeTeam.name}:</span><small>{(activeTeam.members || []).length} عضو</small></h5>
+            {(activeTeam.members || []).map((member) => {
+              const isOwner = member.userId === activeTeam.ownerUserId
+              const person = usersById.get(member.userId)
+              return (
+                <div key={member.userId} className="team-person">
+                  <div className="team-person-info">
+                    <span className="team-avatar">{avatarOf(person, member.displayName)}</span>
+                    <div>
+                      <strong>{member.displayName}<em className={isOwner ? 'owner' : ''}>{isOwner ? TEAM_MANAGER_ROLE : TEAM_MEMBER_ROLE}</em></strong>
+                      {(person?.username || member.email) && <small dir="ltr">{person?.username || member.email}</small>}
+                    </div>
+                  </div>
+                  {canManageActiveTeam && member.userId !== user?.id && (
+                    <button type="button" className="team-danger" onClick={() => removeMember(member.userId)} disabled={saving} title="حذف از تیم"><Trash2 size={14} />حذف</button>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        </>
+      ) : null}
+    </div>
+  )
+}
+
+function ProfileTab() {
   const { user } = useAuth()
   const fields = [
     ['نام کاربر', user?.displayName || 'ثبت نشده'],
@@ -5607,10 +6661,7 @@ function UserProfile() {
   ]
 
   return (
-    <section className="profile-page">
-      <div className="task-page-header">
-        <div><span>حساب کاربری</span><h1>پروفایل کاربر</h1><p>مشخصات نشست فعلی و نقش‌های اختصاص داده شده</p></div>
-      </div>
+    <>
       <div className="profile-hero">
         <span className="avatar">{initialsOf(user?.displayName || user?.email)}</span>
         <div>
@@ -5627,7 +6678,163 @@ function UserProfile() {
           </article>
         ))}
       </div>
-    </section>
+      <ProfileEditCard />
+      <ChangePasswordCard />
+    </>
+  )
+}
+
+/** Avatar, mobile number and SMS notifications - the fields the self-service endpoint allows. */
+function ProfileEditCard() {
+  const { user, refreshMe } = useAuth()
+  const [avatarUrl, setAvatarUrl] = useState(user?.avatarUrl || '')
+  const [phoneNumber, setPhoneNumber] = useState(user?.phoneNumber || '')
+  const [notifySms, setNotifySms] = useState(user?.notifySms ?? true)
+  const [busy, setBusy] = useState(false)
+  const [message, setMessage] = useState('')
+  const [error, setError] = useState('')
+  const [avatarError, setAvatarError] = useState('')
+  const fileRef = useRef(null)
+
+  // Re-sync only when the signed-in user actually changes, not on every background /me refresh -
+  // otherwise a pending edit would be wiped out from under the person typing it.
+  useEffect(() => {
+    setAvatarUrl(user?.avatarUrl || '')
+    setPhoneNumber(user?.phoneNumber || '')
+    setNotifySms(user?.notifySms ?? true)
+  }, [user?.id])
+
+  async function onPickAvatar(event) {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file) return
+    if (!file.type.startsWith('image/')) { setAvatarError('یک فایل تصویری انتخاب کنید.'); return }
+    setAvatarError('')
+    try {
+      let dataUrl = await compressImageToDataUrl(file, 220, 0.8)
+      if (dataUrl.length * 0.75 > AVATAR_MAX_BYTES) dataUrl = await compressImageToDataUrl(file, 160, 0.65)
+      setAvatarUrl(dataUrl)
+      setMessage('')
+    } catch {
+      setAvatarError('بارگذاری تصویر انجام نشد.')
+    }
+  }
+
+  async function save() {
+    setBusy(true); setError(''); setAvatarError(''); setMessage('')
+    const result = await accountApi.updateProfile({
+      displayName: user?.displayName || '',
+      avatarUrl: avatarUrl || null,
+      phoneNumber: phoneNumber.trim() || null,
+      notifySms,
+    })
+    setBusy(false)
+    if (!result.isSuccess) { setError(PersianMessages.error(result.error)); return }
+    await refreshMe()
+    setMessage('تغییرات ذخیره شد.')
+  }
+
+  return (
+    <CollapsibleCard icon={UserRound} title="پروفایل و آواتار کاربری">
+      {avatarError && <p className="login-error" role="alert">{avatarError}</p>}
+      <div className="avatar-panel">
+        <div className="avatar-picker">
+          {avatarUrl ? <img src={avatarUrl} alt="آواتار" /> : <span className="avatar">{initialsOf(user?.displayName)}</span>}
+          <button type="button" onClick={() => fileRef.current?.click()} title="بارگذاری تصویر شخصی"><Camera size={15} /></button>
+          <input ref={fileRef} type="file" accept="image/*" hidden onChange={onPickAvatar} />
+        </div>
+        <div className="avatar-panel-body">
+          <h4>تصویر آواتار کاربر</h4>
+          <p>می‌توانید از آلبوم آواتارهای پیش‌فرض انتخاب کنید یا تصویر دلخواه خود را بارگذاری نمایید.</p>
+          <div className="avatar-notice">
+            <strong><i />حجم قابل قبول: حداکثر ۲۰۰ کیلوبایت (200 KB)</strong>
+            <small>فرمت‌های مجاز: JPG, PNG, WEBP, GIF (تصاویر بزرگ‌تر به‌صورت خودکار فشرده‌سازی می‌شوند).</small>
+          </div>
+          <button type="button" className="avatar-upload" onClick={() => fileRef.current?.click()}><Upload size={16} />بارگذاری تصویر شخصی (حداکثر ۲۰۰ KB)</button>
+        </div>
+      </div>
+
+      <span className="profile-field-label">انتخاب از آلبوم آواتارهای پیش‌فرض:</span>
+      <div className="avatar-album">
+        {PRESET_AVATARS.map((avatar) => (
+          <button key={avatar.id} type="button" title={avatar.name} className={avatarUrl === avatar.url ? 'active' : ''} onClick={() => { setAvatarUrl(avatar.url); setMessage('') }}>
+            <img src={avatar.url} alt={avatar.name} />
+          </button>
+        ))}
+      </div>
+
+      {/* Identity fields are shown for reference; changing them needs an administrator. */}
+      <div className="profile-identity">
+        <label>نام و نام خانوادگی *<input value={user?.displayName || ''} readOnly title="نام ثبت‌شده در پروفایل شخصی قابل تغییر نیست." /></label>
+        <label>نام کاربری (ورود به سیستم)<input value={user?.username || ''} readOnly dir="ltr" title="نام کاربری فقط توسط مدیر سامانه قابل تغییر است." /></label>
+      </div>
+      <p className="avatar-hint">نام، نام خانوادگی و شناسهٔ ورود از این صفحه قابل ویرایش نیستند. برای اصلاح اطلاعات هویتی با مدیر سامانه تماس بگیرید.</p>
+
+      <span className="profile-field-label profile-section-title"><Bell size={16} />اطلاع‌رسانی پیامکی</span>
+      <div className="profile-sms-grid">
+        <label><span className="profile-label-icon"><Smartphone size={15} />شماره تلفن همراه (ورود و پیامک):</span><input value={phoneNumber} onChange={(e) => { setPhoneNumber(e.target.value); setMessage('') }} placeholder="09121234567" dir="ltr" inputMode="tel" autoComplete="tel" /></label>
+        <span />
+        <label className={`profile-sms-toggle${notifySms ? ' active' : ''}`}>
+          <span><MessageCircle size={16} />اطلاع‌رسانی با پیامک (SMS)</span>
+          <input type="checkbox" checked={notifySms} onChange={(e) => { setNotifySms(e.target.checked); setMessage('') }} />
+        </label>
+      </div>
+
+      {/* Next to the save button, so the outcome is seen without scrolling back up. */}
+      {error && <p className="login-error" role="alert">{error}</p>}
+      {message && <p className="profile-success">{message}</p>}
+      <div className="profile-actions">
+        <button className="profile-save" onClick={save} disabled={busy}><Check size={16} />{busy ? 'در حال ذخیره...' : 'ذخیره آواتار و تنظیمات پیامک'}</button>
+      </div>
+    </CollapsibleCard>
+  )
+}
+
+/** A settings card whose body folds away under its title; starts closed. */
+function CollapsibleCard({ icon: Icon, title, children }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className={`profile-form collapsible-card${open ? ' open' : ''}`}>
+      <button type="button" className="collapsible-head" onClick={() => setOpen((value) => !value)} aria-expanded={open}>
+        <span><Icon size={18} />{title}</span>
+        <ChevronDown size={18} />
+      </button>
+      {open && <div className="collapsible-body">{children}</div>}
+    </div>
+  )
+}
+
+function ChangePasswordCard() {
+  const [currentPassword, setCurrentPassword] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [confirm, setConfirm] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [message, setMessage] = useState('')
+  const [error, setError] = useState('')
+
+  async function save() {
+    setError(''); setMessage('')
+    if (newPassword.length < 8) { setError('رمز عبور جدید باید حداقل ۸ کاراکتر باشد.'); return }
+    if (newPassword !== confirm) { setError('تکرار رمز عبور با رمز جدید یکسان نیست.'); return }
+    setBusy(true)
+    const result = await accountApi.changePassword(currentPassword, newPassword)
+    setBusy(false)
+    if (!result.isSuccess) { setError(PersianMessages.error(result.error)); return }
+    setCurrentPassword(''); setNewPassword(''); setConfirm('')
+    setMessage('رمز عبور شما تغییر کرد.')
+  }
+
+  return (
+    <CollapsibleCard icon={LockKeyhole} title="تغییر رمز عبور">
+      <label>رمز عبور فعلی<input type="password" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} autoComplete="current-password" /></label>
+      <label>رمز عبور جدید (حداقل ۸ کاراکتر)<input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} autoComplete="new-password" /></label>
+      <label>تکرار رمز عبور جدید<input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} autoComplete="new-password" /></label>
+      {error && <p className="login-error" role="alert">{error}</p>}
+      {message && <p className="profile-success">{message}</p>}
+      <div className="profile-actions">
+        <button className="profile-save" onClick={save} disabled={busy}><KeyRound size={16} />{busy ? 'در حال ذخیره...' : 'تغییر رمز عبور'}</button>
+      </div>
+    </CollapsibleCard>
   )
 }
 
@@ -5702,26 +6909,26 @@ function DashboardHome({ onOpenProjects }) {
 
   const cards = summary
     ? [
-        { label: 'کل پروژه‌ها', value: summary.projectCount, unit: 'پروژه', note: 'همه پروژه‌های سازمان', icon: FolderOpen, tone: 'gold' },
-        { label: 'پروژه‌های در جریان', value: summary.runningProjectCount, unit: 'پروژه', note: mine ? `از این تعداد ${Number(mine.myRunningProjectCount).toLocaleString('fa-IR')} پروژه با شما است` : 'فعال یا متوقف', icon: TrendingUp, tone: 'blue' },
-        { label: 'کل اقدام‌ها', value: summary.actionCount, unit: 'اقدام', note: 'همه اقدام‌های سازمان', icon: ListTodo, tone: 'cyan' },
-        { label: 'اقدام‌های در جریان', value: summary.runningActionCount, unit: 'اقدام', note: mine ? `از این تعداد ${Number(mine.myRunningActionCount).toLocaleString('fa-IR')} اقدام با شما است` : 'باز یا در حال انجام', icon: CheckCircle2, tone: 'violet' },
-      ]
+      { label: 'کل پروژه‌ها', value: summary.projectCount, unit: 'پروژه', note: 'همه پروژه‌های سازمان', icon: FolderOpen, tone: 'gold' },
+      { label: 'پروژه‌های در جریان', value: summary.runningProjectCount, unit: 'پروژه', note: mine ? `از این تعداد ${Number(mine.myRunningProjectCount).toLocaleString('fa-IR')} پروژه با شما است` : 'فعال یا متوقف', icon: TrendingUp, tone: 'blue' },
+      { label: 'کل اقدام‌ها', value: summary.actionCount, unit: 'اقدام', note: 'همه اقدام‌های سازمان', icon: ListTodo, tone: 'cyan' },
+      { label: 'اقدام‌های در جریان', value: summary.runningActionCount, unit: 'اقدام', note: mine ? `از این تعداد ${Number(mine.myRunningActionCount).toLocaleString('fa-IR')} اقدام با شما است` : 'باز یا در حال انجام', icon: CheckCircle2, tone: 'violet' },
+    ]
     : mine
       ? [
-          { label: 'پروژه‌های در جریان من', value: mine.myRunningProjectCount, unit: 'پروژه', note: 'پروژه‌هایی که مالک یا مدیر آن هستید', icon: TrendingUp, tone: 'blue' },
-          { label: 'اقدام‌های در جریان من', value: mine.myRunningActionCount, unit: 'اقدام', note: 'اقدام‌هایی که مسئول یا مالک آن هستید', icon: CheckCircle2, tone: 'violet' },
-        ]
+        { label: 'پروژه‌های در جریان من', value: mine.myRunningProjectCount, unit: 'پروژه', note: 'پروژه‌هایی که مالک یا مدیر آن هستید', icon: TrendingUp, tone: 'blue' },
+        { label: 'اقدام‌های در جریان من', value: mine.myRunningActionCount, unit: 'اقدام', note: 'اقدام‌هایی که مسئول یا مالک آن هستید', icon: CheckCircle2, tone: 'violet' },
+      ]
       : []
 
   // Organisation-wide counts when the caller may see them, otherwise what their own list contains.
   const byStatus = summary
     ? summary.projectsByStatus.map(({ key, count }) => [key, count])
     : Object.entries(projects.reduce((map, project) => {
-        const key = statusKey(project.status)
-        map[key] = (map[key] || 0) + 1
-        return map
-      }, {}))
+      const key = statusKey(project.status)
+      map[key] = (map[key] || 0) + 1
+      return map
+    }, {}))
   const bars = CHART_STATUS_ORDER
     .map((key) => [key, byStatus.find(([k]) => k === key)?.[1] || 0])
     .filter(([key, count]) => count > 0 || key !== 'Archived')
@@ -5799,9 +7006,26 @@ function Dashboard() {
   const [active, setActive] = useState(dashboardLabel)
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const projectData = useProjectManagementData()
+  const { mode, palette, pattern } = appearanceOf(user)
+
+  // Palette and mode live on <html> so everything (menus, modals, dropdowns) picks them up;
+  // they are removed again on sign-out so the login page keeps Rozet's own light colors.
+  useEffect(() => {
+    const root = document.documentElement
+    if (palette === 'navy') root.removeAttribute('data-palette')
+    else root.setAttribute('data-palette', palette)
+    return () => root.removeAttribute('data-palette')
+  }, [palette])
+
+  useEffect(() => {
+    const root = document.documentElement
+    if (mode === 'dark') root.setAttribute('data-mode', 'dark')
+    else root.removeAttribute('data-mode')
+    return () => root.removeAttribute('data-mode')
+  }, [mode])
 
   return (
-    <div className="app-shell" dir="rtl">
+    <div className={`app-shell pattern-${pattern}`} dir="rtl">
       <Sidebar active={active} onSelect={setActive} open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
       <div className="app-main">
         <header className="topbar">
@@ -5830,7 +7054,7 @@ function Dashboard() {
           ) : active === 'مدیریت کاربران' ? (
             <UserManagement />
           ) : active === userProfileLabel ? (
-            <UserProfile />
+            <SystemSettings />
           ) : submenuLabels.includes(active) ? (
             <section className="empty-page">
               <div><Boxes size={38} /></div><h1>{active}</h1><p>ساخت محتوای این بخش در مرحله بعدی انجام می‌شود.</p><button onClick={() => setActive(dashboardLabel)}>بازگشت به داشبورد</button>
