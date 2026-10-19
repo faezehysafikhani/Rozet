@@ -72,6 +72,7 @@ import { useNotifications } from './hooks/useNotifications'
 import DocumentsPage from './features/project-management/documents/DocumentsPage'
 import CalendarPage from './features/project-management/calendar/CalendarPage'
 import ProjectsSection from './features/project-management/projects/ProjectsSection'
+import ProgressPage from './features/project-management/progress/ProgressPage'
 import PlanToolsPanel from './features/project-management/baselines/PlanToolsPanel'
 import SchedulePanel from './features/project-management/schedule/SchedulePanel'
 import { useDashboard } from './hooks/useDashboard'
@@ -1111,33 +1112,6 @@ function ProjectPlanning({ data }) {
   )
 }
 
-function ProjectProgress({ data }) {
-  const latest = [...data.progressUpdates].sort((a, b) => String(b.registerDate).localeCompare(String(a.registerDate)))[0]
-  return (
-    <>
-      <TaskPageHeader title="کنترل پیشرفت پروژه" description="گزارش‌های پیشرفت ثبت‌شده در Core" actionNode={<CreateButton kind="progress" data={data} label="ثبت گزارش پیشرفت" />}>
-        <ProjectSelector data={data} />
-      </TaskPageHeader>
-      <DataState loading={data.loading || data.loadingDetails} error={data.error} empty={!data.selectedProject}>
-        <div className="task-kpis">
-          <article><span className="task-kpi-icon navy"><TrendingUp size={21} /></span><div><small>پیشرفت برنامه‌ای</small><strong>{Number(latest?.plannedProgress || 0).toLocaleString('fa-IR')}٪</strong><p>آخرین گزارش</p></div></article>
-          <article><span className="task-kpi-icon green"><CheckCircle2 size={21} /></span><div><small>پیشرفت واقعی</small><strong>{Number(latest?.actualProgress || 0).toLocaleString('fa-IR')}٪</strong><p>{enumLabel(latest?.performanceClassification, performanceLabels)}</p></div></article>
-          <article><span className="task-kpi-icon red"><TriangleAlert size={21} /></span><div><small>انحراف</small><strong>{Number(latest?.deviation || 0).toLocaleString('fa-IR')}٪</strong><p>Actual - Planned</p></div></article>
-          <article><span className="task-kpi-icon blue"><FileText size={21} /></span><div><small>تعداد گزارش‌ها</small><strong>{data.progressUpdates.length.toLocaleString('fa-IR')}</strong><p>Progress Updates</p></div></article>
-        </div>
-        <section className="task-panel task-table-panel">
-          <div className="task-panel-title"><div><h3>تاریخچه گزارش پیشرفت</h3><p>داده‌های ثبت‌شده برای پروژه منتخب</p></div></div>
-          <DataState loading={data.loadingDetails} empty={!data.progressUpdates.length}>
-            <div className="table-scroll"><table><thead><tr><th>تاریخ</th><th>شرح وضعیت</th><th>برنامه‌ای</th><th>واقعی</th><th>انحراف</th><th>طبقه‌بندی</th><th>دلایل تأخیر</th></tr></thead><tbody>
-              {data.progressUpdates.map((item) => <tr key={item.id}><td>{formatDateOnly(item.registerDate)}</td><td><strong>{item.statusDescription || '—'}</strong></td><td>{Number(item.plannedProgress || 0).toLocaleString('fa-IR')}٪</td><td>{Number(item.actualProgress || 0).toLocaleString('fa-IR')}٪</td><td>{Number(item.deviation || 0).toLocaleString('fa-IR')}٪</td><td>{enumLabel(item.performanceClassification, performanceLabels)}</td><td>{item.delayReasons || '—'}</td></tr>)}
-            </tbody></table></div>
-          </DataState>
-        </section>
-      </DataState>
-    </>
-  )
-}
-
 function ProjectStrategic({ data }) {
   return (
     <>
@@ -1217,7 +1191,7 @@ function ProjectManagement({ active, data }) {
   if (active === 'برنامه‌ریزی پروژه') return <ProjectPlanning data={data} />
   if (active === 'تقویم پروژه') return <CalendarPage data={data} />
   if (active === 'مدیریت مستندات') return <DocumentsPage data={data} />
-  if (active === 'کنترل پیشرفت پروژه') return <ProjectProgress data={data} />
+  if (active === 'کنترل پیشرفت پروژه') return <ProgressPage data={data} />
   if (active === 'مدیریت استراتژیک پروژه‌ها') return <ProjectStrategic data={data} />
   return <ProjectPlanning data={data} />
 }

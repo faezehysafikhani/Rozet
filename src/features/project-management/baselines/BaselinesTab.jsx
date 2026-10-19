@@ -4,7 +4,7 @@ import { formatJalali } from '../../../utils/jalali'
 import { Field, Footer, Shell } from '../DialogParts'
 import { pmApi } from '../pmApi'
 import { BASELINE_KINDS, explainBaselineError, fmt, kindOf, varianceOf, varianceText, varianceTone, VARIANCE_STATUSES } from './baselineModel'
-import { useLoader } from './useLoader'
+import { useLoader } from '../useLoader'
 
 const localDate = (instant) => {
   const date = new Date(instant)
@@ -47,8 +47,8 @@ function CreateBaselineDialog({ project, data, onClose, onDone }) {
 /** One saved copy: how today's plan differs from it, and what it contained. */
 function BaselineDetailDialog({ baseline, data, onClose }) {
   const [tab, setTab] = useState('variance')
-  const variance = useLoader(() => pmApi.waterfall.baselines.variance(baseline.id), baseline.id)
-  const detail = useLoader(() => pmApi.waterfall.baselines.get(baseline.id), baseline.id, tab === 'content')
+  const variance = useLoader(() => pmApi.waterfall.baselines.variance(baseline.id), baseline.id, true, { explain: explainBaselineError })
+  const detail = useLoader(() => pmApi.waterfall.baselines.get(baseline.id), baseline.id, tab === 'content', { explain: explainBaselineError })
   const v = variance.value
   const [filter, setFilter] = useState('')
   const rows = useMemo(() => (v?.activities || []).filter((row) => !filter || varianceOf(row.status).key === filter), [v, filter])
@@ -123,7 +123,7 @@ function BaselineDetailDialog({ baseline, data, onClose }) {
 }
 
 export default function BaselinesTab({ project, data, canView, canManage, confirm, say }) {
-  const list = useLoader(() => pmApi.waterfall.baselines.list(project.id), project.id, canView, { list: true })
+  const list = useLoader(() => pmApi.waterfall.baselines.list(project.id), project.id, canView, { list: true, explain: explainBaselineError })
   const [dialog, setDialog] = useState(null) // { kind: 'create' } | { kind: 'detail', baseline }
   const baselines = [...list.value].sort((a, b) => b.number - a.number)
 

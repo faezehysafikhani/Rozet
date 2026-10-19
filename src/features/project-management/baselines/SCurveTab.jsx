@@ -5,7 +5,7 @@ import { formatJalali, todayIso } from '../../../utils/jalali'
 import { Field, Footer, Shell } from '../DialogParts'
 import { pmApi } from '../pmApi'
 import { buildChart, explainBaselineError, fmt } from './baselineModel'
-import { useLoader } from './useLoader'
+import { useLoader } from '../useLoader'
 
 const STEPS = [
   { value: 1, label: 'روزانه' }, { value: 7, label: 'هفتگی' }, { value: 14, label: 'دو هفته' }, { value: 30, label: 'ماهانه' },
@@ -74,8 +74,8 @@ function Chart({ curve }) {
 
 export default function SCurveTab({ project, data, canView, canManage, confirm, say }) {
   const [step, setStep] = useState(7)
-  const curve = useLoader(() => pmApi.waterfall.sCurve(project.id, step), `${project.id}:${step}`, canView)
-  const snapshots = useLoader(() => pmApi.waterfall.progressSnapshots.list(project.id), project.id, canView, { list: true })
+  const curve = useLoader(() => pmApi.waterfall.sCurve(project.id, step), `${project.id}:${step}`, canView, { explain: explainBaselineError })
+  const snapshots = useLoader(() => pmApi.waterfall.progressSnapshots.list(project.id), project.id, canView, { list: true, explain: explainBaselineError })
   const [dialog, setDialog] = useState(false)
   const c = curve.value
   const reloadAll = () => { curve.reload(); snapshots.reload() }

@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { unwrap } from '../../../services/api'
-import { listOf } from '../pmApi'
-import { explainBaselineError } from './baselineModel'
+import { unwrap } from '../../services/api'
+import { listOf } from './pmApi'
+import { explainPmError } from './pmErrors'
 
 /**
  * Loads one resource: `load()` returns an API result; `list` says whether the answer is a list.
+ * `explain` turns a failed result into the message shown (default: explainPmError).
  * Reloads when `key` changes or `reload()` is called; an answer that arrives after a newer request started is ignored.
  */
-export function useLoader(load, key, enabled = true, { list = false } = {}) {
+export function useLoader(load, key, enabled = true, { list = false, explain = explainPmError } = {}) {
   const [state, setState] = useState({ value: list ? [] : null, loading: Boolean(enabled), error: '' })
   const [reloadKey, setReloadKey] = useState(0)
   const ticket = useRef(0)
@@ -20,7 +21,7 @@ export function useLoader(load, key, enabled = true, { list = false } = {}) {
     setState((current) => ({ ...current, loading: true, error: '' }))
     loadRef.current().then((result) => {
       if (mine !== ticket.current) return
-      if (!result.isSuccess) { setState({ value: list ? [] : null, loading: false, error: explainBaselineError(result) }); return }
+      if (!result.isSuccess) { setState({ value: list ? [] : null, loading: false, error: explain(result) }); return }
       setState({ value: list ? listOf(result) : unwrap(result), loading: false, error: '' })
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
