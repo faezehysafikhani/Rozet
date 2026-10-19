@@ -42,6 +42,7 @@ export const PersianMessages = {
     if (text.includes('only a draft change request can be deleted')) return 'فقط درخواستِ پیش‌نویس حذف می‌شود؛ بقیه را لغو کنید.'
     if (text.includes('only an approved change request can be marked as implemented')) return 'فقط درخواستِ تأییدشده اجراشده ثبت می‌شود.'
     if (text.includes('this change request cannot be cancelled now')) return 'این درخواست در وضعیت فعلی لغو نمی‌شود.'
+    if (text.includes('the change request must be an approved one of this project')) return 'فقط درخواست تغییرِ تأییدشده‌ی همین پروژه را می‌شود انتخاب کرد.'
     if (text.includes('change request not found')) return 'درخواست تغییر پیدا نشد.'
     if (text.includes('the contract is not one of this project')) return 'این قرارداد مال همین پروژه نیست.'
     // Suppliers, evaluations, links, milestones and obligations.
@@ -471,6 +472,8 @@ export const contractsApi = {
 const changeRequestsBase = '/api/project-management/change-requests'
 export const changeRequestsApi = {
   list: (projectId) => api.get(`${changeRequestsBase}?${projectQuery({ projectId })}`),
+  // Counts, approved impact against the project's budget and duration, pending decisions, and addenda made without an approved change.
+  dashboard: (projectId) => api.get(`${changeRequestsBase}/dashboard?${projectQuery({ projectId })}`),
   create: (payload) => api.post(changeRequestsBase, payload),
   update: (id, payload) => api.put(`${changeRequestsBase}/${id}`, payload),
   remove: (id) => api.delete(`${changeRequestsBase}/${id}`),

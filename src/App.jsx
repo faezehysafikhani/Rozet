@@ -3071,11 +3071,23 @@ function AddendumFormDialog({ contract, contracts, tenantId, item, onClose, onSa
   const [form, setForm] = useState({
     title: item?.title || '', description: item?.description || '', addendumDate: item?.addendumDate || '',
     amountChange: item ? String(Math.round(item.amountChange)) : '', extensionDays: item ? String(item.extensionDays) : '',
-    startDate: item?.startDate || '', endDate: item?.endDate || '',
+    startDate: item?.startDate || '', endDate: item?.endDate || '', changeRequestId: item?.changeRequestId || '',
   })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  const [approvedChanges, setApprovedChanges] = useState([])
   const set = (key) => (event) => setForm((current) => ({ ...current, [key]: event.target.value }))
+  const projectId = (contract || (contracts || []).find((c) => c.id === contractId))?.projectId
+
+  // The approved (or carried out) change requests of the contract's project - what an addendum may carry out.
+  useEffect(() => {
+    let cancelled = false
+    if (!projectId) { setApprovedChanges([]); return undefined }
+    changeRequestsApi.list(projectId).then((result) => {
+      if (!cancelled) setApprovedChanges((result.isSuccess ? arrayPayload(result) : []).filter((change) => change.status === 2 || change.status === 4))
+    })
+    return () => { cancelled = true }
+  }, [projectId])
 
   async function submit(event) {
     event.preventDefault()
@@ -3086,6 +3098,8 @@ function AddendumFormDialog({ contract, contracts, tenantId, item, onClose, onSa
     if (!amount && !days) { setError('الحاقیه باید مبلغ یا مدت (یا هر دو) را تغییر دهد.'); return }
     setSaving(true); setError('')
     const fields = { title: form.title.trim(), description: emptyToNull(form.description.trim()), addendumDate: emptyToNull(form.addendumDate), amountChange: amount, extensionDays: days, startDate: emptyToNull(form.startDate), endDate: emptyToNull(form.endDate) }
+    // An edit that clears the change request sends the empty id (null would keep the stored one).
+    fields.changeRequestId = form.changeRequestId || (item?.changeRequestId ? '00000000-0000-0000-0000-000000000000' : null)
     const result = item ? await contractsApi.updateAddendum(contractId, item.id, fields) : await contractsApi.createAddendum(contractId, { tenantId, ...fields })
     setSaving(false)
     if (!result.isSuccess) { setError(PersianMessages.error(result.error)); return }
@@ -3106,6 +3120,12 @@ function AddendumFormDialog({ contract, contracts, tenantId, item, onClose, onSa
         <div className="ue-card"><div className="ue-grid">
           {!contract && <CtlField label="قرارداد" required wide><select value={contractId} onChange={(e) => setContractId(e.target.value)}>{(contracts || []).map((c) => <option key={c.id} value={c.id}>{c.title} — {c.counterparty}</option>)}</select></CtlField>}
           <CtlField label="عنوان" required wide><input value={form.title} onChange={set('title')} maxLength={300} autoFocus /></CtlField>
+          <CtlField label="مصوبه (درخواست تغییر)" wide hint={form.changeRequestId ? 'این الحاقیه اجرای همین تغییرِ مصوب است' : 'بدون مصوبه، در داشبورد تغییرات «تغییر بدون مصوبه» هشدار داده می‌شود'}>
+            <select value={form.changeRequestId} onChange={set('changeRequestId')}>
+              <option value="">— بدون مصوبه —</option>
+              {approvedChanges.map((change) => <option key={change.id} value={change.id}>{change.code} · {change.title}</option>)}
+            </select>
+          </CtlField>
           <CtlField label="تغییر مبلغ (ریال)" hint={form.amountChange && form.amountChange !== '-' ? `${tomansHint(form.amountChange)} · منفی یعنی کاهش` : 'منفی یعنی کاهش مبلغ'}><AmountInput allowNegative value={form.amountChange} onChange={(value) => setForm((current) => ({ ...current, amountChange: value }))} /></CtlField>
           <CtlField label="تمدید (روز)"><input className="ltr-input" inputMode="numeric" value={form.extensionDays} onChange={(e) => setForm((current) => ({ ...current, extensionDays: toLatinDigits(e.target.value).replace(/\D/g, '') }))} /></CtlField>
           <CtlField label="تاریخ الحاقیه"><input type="date" value={form.addendumDate} onChange={set('addendumDate')} /></CtlField>
@@ -3760,6 +3780,7 @@ function ChangesPage({ data }) {
             <nav className="settings-subtabs ctl-subtabs">
               <button type="button" className={tab === 'requests' ? 'active' : ''} onClick={() => setTab('requests')}><RefreshCw size={16} />درخواست‌های تغییر</button>
               <button type="button" className={tab === 'addenda' ? 'active' : ''} onClick={() => setTab('addenda')}><FileText size={16} />الحاقیه‌های قرارداد</button>
+              <button type="button" className={tab === 'dashboard' ? 'active' : ''} onClick={() => setTab('dashboard')}><LayoutDashboard size={16} />داشبورد تغییرات</button>
             </nav>
             {tab === 'requests' && (
               <ChangeRequestsPanel
@@ -3767,7 +3788,8 @@ function ChangesPage({ data }) {
                 setNotice={setNotice} onEdit={(item) => setChangeForm({ item })}
               />
             )}
-            {tab === 'addenda' && <ContractAddendaPanel data={data} contracts={contracts} />}
+            {tab === 'addenda' && <ContractAddendaPanel data={data} contracts={contracts} changes={changes.items || []} />}
+            {tab === 'dashboard' && <ChangeDashboardPanel data={data} reloadKey={`${changes.items?.length}:${contracts.items?.length}`} />}
             {changeForm && (
               <ChangeRequestFormDialog
                 data={data} item={changeForm.item} contracts={items.map(({ contract }) => contract)}
@@ -4028,8 +4050,81 @@ function ChangeRequestFormDialog({ data, item, contracts, onClose, onSaved }) {
   )
 }
 
+/** One project's changes at a glance: decisions waiting, the approved impact against the baseline, and changes made without approval. */
+function ChangeDashboardPanel({ data, reloadKey }) {
+  const [dashboard, setDashboard] = useState(null)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    let cancelled = false
+    if (!data.selectedProjectId) { setDashboard(null); return undefined }
+    changeRequestsApi.dashboard(data.selectedProjectId).then((result) => {
+      if (cancelled) return
+      setError(result.isSuccess ? '' : PersianMessages.error(result.error))
+      setDashboard(result.isSuccess ? unwrap(result) : null)
+    })
+    return () => { cancelled = true }
+  }, [data.selectedProjectId, reloadKey])
+
+  if (error) return <div className="users-notice error ctl-notice" role="alert"><CircleAlert size={16} /><span>{error}</span></div>
+  if (!dashboard) return <p className="data-state">در حال بارگذاری...</p>
+  const d = dashboard
+  const percent = (value) => (value === null || value === undefined ? null : `${toPersianDigits(Number(value).toFixed(2).replace(/\.?0+$/, ''))}٪`)
+
+  return (
+    <>
+      <ControlKpis items={[
+        { icon: RefreshCw, tone: 'navy', label: 'درخواست تغییر', value: toPersianDigits(d.total), note: `${toPersianDigits(d.approved + d.implemented)} مصوب · ${toPersianDigits(d.rejected)} رد · ${toPersianDigits(d.cancelled)} لغو` },
+        { icon: CircleAlert, tone: 'red', label: 'در انتظار تصمیم', value: toPersianDigits(d.pending), note: `${toPersianDigits(d.drafts)} پیش‌نویس هنوز ارسال نشده` },
+        { icon: CircleDollarSign, tone: 'blue', label: 'اثر هزینه‌ی مصوب', value: signedRials(moneyRials(d.approvedCostImpact)), note: d.budget ? `${percent(d.costImpactPercent)} از بودجه‌ی ${rialsText(moneyRials(d.budget))} ریال` : 'ریال · بودجه‌ی پروژه ثبت نشده' },
+        { icon: Clock3, tone: 'green', label: 'اثر زمانی مصوب', value: signedDays(d.approvedScheduleImpactDays), note: d.plannedDurationDays ? `${percent(d.scheduleImpactPercent)} از ${toPersianDigits(d.plannedDurationDays)} روز · پایان ${d.plannedEndDateFa} ← ${d.impactedEndDateFa}` : 'تاریخ‌های پروژه ثبت نشده' },
+      ]} />
+
+      <section className="task-panel task-table-panel ctl-panel ctl-block">
+        <div className="task-panel-title"><div><h3>تغییرات بدون مصوبه</h3><p>الحاقیه‌های تأییدشده یا در انتظار تأیید که درخواست تغییرِ مصوبی پشتشان نیست. فقط هشدار است؛ چیزی رد نمی‌شود.</p></div></div>
+        {!d.unapprovedAddenda.length ? <p className="ue-note">همه‌ی الحاقیه‌های اعمال‌شده مصوبه دارند.</p> : (
+          <>
+            <p className="ue-note neg"><TriangleAlert size={14} /> {toPersianDigits(d.unapprovedAddenda.length)} الحاقیه بدون مصوبه: {signedRials(moneyRials(d.unapprovedAmount))} ریال و {signedDays(d.unapprovedExtensionDays)}</p>
+            <div className="table-scroll"><table>
+              <thead><tr><th>قرارداد</th><th>الحاقیه</th><th>تغییر مبلغ (ریال)</th><th>تمدید</th><th>تأیید الحاقیه</th><th>دلیل هشدار</th></tr></thead>
+              <tbody>{d.unapprovedAddenda.map((row) => (
+                <tr key={row.addendumId}>
+                  <td className="ctl-main"><strong>{row.contractTitle}</strong><small>شماره {row.contractNumberFa}</small></td>
+                  <td>{toPersianDigits(row.number)}. {row.title}</td>
+                  <td className={moneyRials(row.amountChange) < 0 ? 'neg' : ''}>{signedRials(moneyRials(row.amountChange))}</td>
+                  <td>{signedDays(row.extensionDays)}</td>
+                  <td><ApprovalBadge status={row.approvalStatus} /></td>
+                  <td><span className="ctl-chip">{row.reason === 'NoChangeRequest' ? 'بدون درخواست تغییر' : 'درخواستش مصوب نیست'}</span></td>
+                </tr>
+              ))}</tbody>
+            </table></div>
+          </>
+        )}
+      </section>
+
+      <section className="task-panel task-table-panel ctl-panel ctl-block">
+        <div className="task-panel-title"><div><h3>در انتظار تصمیم</h3><p>به ترتیب زمان ارسال؛ قدیمی‌ترین بالا.</p></div></div>
+        {!d.pendingChanges.length ? <p className="ue-note">درخواستی منتظر تصمیم نیست.</p> : (
+          <div className="table-scroll"><table>
+            <thead><tr><th>درخواست</th><th>انتظار</th><th>اثر بر زمان</th><th>اثر بر هزینه (ریال)</th></tr></thead>
+            <tbody>{d.pendingChanges.map((row) => (
+              <tr key={row.id}>
+                <td className="ctl-main"><strong>{row.code} · {row.title}</strong></td>
+                <td className={row.waitingDays > 7 ? 'neg' : ''}>{toPersianDigits(row.waitingDays)} روز</td>
+                <td>{signedDays(row.scheduleImpactDays)}</td>
+                <td>{signedRials(moneyRials(row.costImpact))}</td>
+              </tr>
+            ))}</tbody>
+          </table></div>
+        )}
+      </section>
+    </>
+  )
+}
+
 /** The addenda of the project's contracts: a change to a contract's amount or duration. */
-function ContractAddendaPanel({ data, contracts }) {
+function ContractAddendaPanel({ data, contracts, changes }) {
+  const changeOf = (id) => changes.find((change) => change.id === id)
   const items = contracts.items || []
   const rows = items.flatMap(({ contract, addenda }) => addenda.map((addendum) => ({ contract, addendum })))
     .sort((a, b) => String(b.addendum.addendumDate || '').localeCompare(String(a.addendum.addendumDate || '')))
@@ -4039,8 +4134,8 @@ function ContractAddendaPanel({ data, contracts }) {
   const pending = rows.filter((row) => row.addendum.approvalStatus === 1).length
 
   const exportChanges = () => downloadCsv(`contract-changes-${data.selectedProject?.code || 'project'}.csv`,
-    ['قرارداد', 'طرف قرارداد', 'شماره', 'عنوان', 'تاریخ', 'تغییر مبلغ (ریال)', 'تمدید (روز)', 'تأیید'],
-    rows.map(({ contract, addendum }) => [contract.contractNumber, contract.counterparty, addendum.number, addendum.title, addendum.addendumDateFa || '', addendum.amountChange, addendum.extensionDays, enumLabel(addendum.approvalStatus, approvalLabels)]))
+    ['قرارداد', 'طرف قرارداد', 'شماره', 'عنوان', 'تاریخ', 'تغییر مبلغ (ریال)', 'تمدید (روز)', 'تأیید', 'مصوبه'],
+    rows.map(({ contract, addendum }) => [contract.contractNumber, contract.counterparty, addendum.number, addendum.title, addendum.addendumDateFa || '', addendum.amountChange, addendum.extensionDays, enumLabel(addendum.approvalStatus, approvalLabels), changeOf(addendum.changeRequestId)?.code || '']))
 
   return (
     <>
@@ -4055,7 +4150,7 @@ function ContractAddendaPanel({ data, contracts }) {
         <div className="task-panel-title"><div><h3>الحاقیه‌های قراردادها</h3><p>الحاقیه فقط بعد از تأیید روی مبلغ و تاریخ پایان قرارداد اثر می‌گذارد.</p></div><button type="button" className="ctl-link" onClick={exportChanges} disabled={!rows.length}><Download size={14} /> خروجی Excel</button></div>
         <DataState loading={contracts.items === null} empty={!rows.length}>
           <div className="table-scroll"><table>
-            <thead><tr><th>قرارداد</th><th>الحاقیه</th><th>تاریخ</th><th>تغییر مبلغ (ریال)</th><th>تمدید</th><th>تأیید</th></tr></thead>
+            <thead><tr><th>قرارداد</th><th>الحاقیه</th><th>تاریخ</th><th>تغییر مبلغ (ریال)</th><th>تمدید</th><th>تأیید</th><th>مصوبه</th></tr></thead>
             <tbody>{rows.map(({ contract, addendum }) => (
               <tr key={addendum.id}>
                 <td className="ctl-main"><strong>{contract.title}</strong><small>{contract.counterparty}</small></td>
@@ -4064,6 +4159,12 @@ function ContractAddendaPanel({ data, contracts }) {
                 <td className={addendum.amountChange < 0 ? 'neg' : ''}>{addendum.amountChange > 0 ? '+' : ''}{rialsText(addendum.amountChange)}</td>
                 <td>{addendum.extensionDays ? `${toPersianDigits(addendum.extensionDays)} روز` : '—'}</td>
                 <td><ApprovalBadge status={addendum.approvalStatus} /></td>
+                <td>{(() => {
+                  const change = changeOf(addendum.changeRequestId)
+                  if (change && (change.status === 2 || change.status === 4)) return <span title={change.title}>{change.code}</span>
+                  if (addendum.approvalStatus === 0 || addendum.approvalStatus === 3) return <small className="ctl-sp">{change ? change.code : '—'}</small>
+                  return <span className="ctl-chip neg" title={change ? `${change.code} ${enumLabel(change.status, changeStatusLabels)} است` : 'هیچ درخواست تغییرِ تأییدشده‌ای پشت این الحاقیه نیست'}><TriangleAlert size={12} /> {change ? `${change.code} مصوب نیست` : 'بدون مصوبه'}</span>
+                })()}</td>
               </tr>
             ))}</tbody>
           </table></div>
