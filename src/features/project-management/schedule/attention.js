@@ -6,6 +6,7 @@ export const ATTENTION_KINDS = [
   { key: 'behind', label: 'عقب از برنامه', severity: 'high' },
   { key: 'notStarted', label: 'شروع نشده', severity: 'medium' },
   { key: 'noOwner', label: 'بدون مسئول', severity: 'medium' },
+  { key: 'actions', label: 'اقدام معوق', severity: 'medium' },
   { key: 'weights', label: 'وزن‌ها', severity: 'medium' },
   { key: 'critical', label: 'روی مسیر بحرانی', severity: 'info' },
   { key: 'assumed', label: 'مدت فرضی', severity: 'info' },
@@ -25,10 +26,11 @@ export const daysBetween = (from, to) => Math.round(dayNumber(to) - dayNumber(fr
  *  - noOwner: unfinished and nobody is responsible;
  *  - critical: unfinished and on the critical path, so any delay moves the project finish;
  *  - assumed: no duration or dates were entered, so the Core assumed one day;
+ *  - actions: unfinished actions raised from the activity whose end date has passed;
  *  - weights: with manual weighting the weights of the activities do not add up to 100 (the project cannot be sent for approval).
  * An activity that is overdue or not started is not also listed as behind. Groups (summary rows) are skipped: their figures roll up.
  */
-export function buildAttention(rows, settings, today) {
+export function buildAttention(rows, settings, today, actionsByActivity = {}) {
   const items = []
   const add = (kind, row, text, extra = {}) => items.push({ kind, severity: KIND[kind].severity, row, text, ...extra })
 
@@ -42,6 +44,8 @@ export function buildAttention(rows, settings, today) {
       const gap = Number(row.planned) - Number(row.actual)
       if (gap >= 5) add('behind', row, `پیشرفت واقعی ${fmt(row.actual, 0)}٪ در برابر ${fmt(row.planned, 0)}٪ برنامه‌ای (${fmt(gap, 0)} واحد درصد عقب‌تر).`, { severity: gap >= 15 ? 'high' : 'medium' })
     }
+    const lateActions = (actionsByActivity[row.id] || []).filter((action) => ![2, 3].includes(action.status) && action.endDate && action.endDate < today)
+    if (lateActions.length) add('actions', row, `${lateActions.length.toLocaleString('fa-IR')} اقدام مرتبط با این فعالیت موعدش گذشته و تمام نشده است.`)
     if (!done && !row.responsibleUserId) add('noOwner', row, 'مسئولی برای این فعالیت تعیین نشده است.')
     if (!done && row.isCritical && !late) add('critical', row, 'روی مسیر بحرانی است؛ هر تأخیری پایان پروژه را عقب می‌اندازد.')
     if (row.usedDefaultDuration) add('assumed', row, 'مدت یا تاریخی ثبت نشده و یک روز فرض شده است.')

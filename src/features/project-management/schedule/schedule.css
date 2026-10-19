@@ -49,3 +49,21 @@ button.sch-toggle:hover { background: #e9edf3; }
 .att-panel li > button { width: 30px; height: 30px; display: grid; place-items: center; border: 1px solid #dfe3ea; border-radius: 8px; color: #607087; background: #fff; cursor: pointer; }
 .att-wbs { color: #8b92a2; font-weight: 400; }
 .att-ok { display: flex; align-items: center; gap: 8px; margin: 0 0 14px; padding: 9px 14px; border-radius: 10px; color: #2f5c43; background: #e6f3eb; }
+
+.sch-links { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border: 1px solid #e4e7ed; border-radius: 10px; background: #fafbfd; }
+.sch-links-head { display: flex; align-items: center; justify-content: space-between; color: #26304a; }
+.sch-links-head button { display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; border: 1px solid #dfe3ea; border-radius: 8px; color: #333d51; background: #fff; font: inherit; font-size: .875rem; cursor: pointer; }
+.sch-links small { color: #8b92a2; }
+.sch-link-row { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1.2fr) 150px 34px; gap: 8px; align-items: center; }
+.sch-link-row select, .sch-link-row input { height: 38px; padding: 0 10px; border: 1px solid #dfe3ea; border-radius: 8px; background: #fff; font: inherit; min-width: 0; }
+.sch-lag { display: flex; align-items: center; gap: 6px; color: #626c7e; font-size: .8125rem; }
+.sch-lag input { width: 70px; }
+.sch-link-row > button { width: 34px; height: 34px; display: grid; place-items: center; border: 1px solid #f1cdcb; border-radius: 8px; color: #ac4d49; background: #fff; cursor: pointer; }
+@media (max-width: 760px) { .sch-link-row { grid-template-columns: 1fr 34px; } .sch-link-row select:nth-child(2), .sch-lag { grid-column: 1 / -1; } }
+
+.act-status { height: 34px; padding: 0 8px; border: 1px solid #dfe3ea; border-radius: 8px; background: #fff; font: inherit; }
+.act-send { margin-inline-start: 6px; width: 28px; height: 28px; display: inline-grid; place-items: center; border: 1px solid #dfe3ea; border-radius: 8px; color: #607087; background: #fff; cursor: pointer; vertical-align: middle; }
+.act-form { margin-top: 6px; }
+.sch-act-count { position: relative; }
+.sch-act-count b { position: absolute; top: -6px; inset-inline-end: -6px; min-width: 16px; height: 16px; padding: 0 3px; border-radius: 8px; color: #fff; background: #607087; font-size: .6875rem; line-height: 16px; text-align: center; }
+.sch-act-count b.late { background: #ac4d49; }

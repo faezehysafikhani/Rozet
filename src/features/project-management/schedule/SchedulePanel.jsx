@@ -1,12 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { CalendarClock, CheckCircle2, ChevronDown, ChevronLeft, CircleAlert, Flag, Gauge, ListPlus, Pencil, Plus, Send, Settings2, Trash2, TrendingUp, X } from 'lucide-react'
+import { CalendarClock, CheckCircle2, ListChecks, ChevronDown, ChevronLeft, CircleAlert, Flag, Gauge, ListPlus, Pencil, Plus, Send, Settings2, Trash2, TrendingUp, X } from 'lucide-react'
 import { useAuth } from '../../../services/AuthContext'
 import { useConfirm } from '../../../components/ConfirmDialog'
 import { formatJalali, todayIso } from '../../../utils/jalali'
 import { pmApi } from '../pmApi'
 import { toOutcome } from '../pmErrors'
 import { approvalOf } from '../documents/documentUtils'
+import ActivityActionsDialog from './ActivityActionsDialog'
 import AttentionList from './AttentionList'
+import { isOverdue, linkedByActivity } from './actionsModel'
+import { useLoader } from '../useLoader'
 import { buildAttention } from './attention'
 import { ActivityFormDialog, ActualProgressDialog, ScheduleSettingsDialog } from './ScheduleDialogs'
 import { DEPENDENCY_TYPES, PLANNED_MODES, WEIGHTING_MODES, dependencyValue, descendantsOf, explainScheduleError, explainWarning, fmt, plannedValue, rowById, visibleRows, weightingValue } from './scheduleModel'
@@ -29,7 +32,11 @@ export default function SchedulePanel({ data, externalReloadKey = 0 }) {
   const canSubmit = can('WaterfallActivities.Submit')
   const canManage = can('WaterfallSchedule.Manage')
 
+  const canViewActions = can('Actions.View')
+  const actionPerms = { createActions: can('Actions.Create'), editActions: can('Actions.Edit'), submitActions: can('Actions.Submit') }
   const { plan, rows, loading, error, reload } = useSchedulePlan(project?.id, canView)
+  const actions = useLoader(() => pmApi.actions.list(project.id), project?.id, Boolean(project) && canView && canViewActions, { list: true })
+  const actionsByActivity = useMemo(() => linkedByActivity(actions.value), [actions.value])
   const { confirm, dialog: confirmDialog } = useConfirm()
   const [collapsed, setCollapsed] = useState(() => new Set())
   const [dialog, setDialog] = useState(null) // { kind: 'create' | 'edit' | 'progress' | 'settings', id?, parentId? }
@@ -39,14 +46,14 @@ export default function SchedulePanel({ data, externalReloadKey = 0 }) {
   const seenKey = useRef(externalReloadKey)
   useEffect(() => { if (seenKey.current !== externalReloadKey) { seenKey.current = externalReloadKey; reload() } }, [externalReloadKey, reload])
 
-  const attention = useMemo(() => buildAttention(rows, plan?.settings, todayIso()), [rows, plan])
+  const attention = useMemo(() => buildAttention(rows, plan?.settings, todayIso(), actionsByActivity), [rows, plan, actionsByActivity])
   const byId = useMemo(() => rowById(rows), [rows])
   const shown = useMemo(() => visibleRows(rows, collapsed), [rows, collapsed])
   const dialogRow = dialog?.id ? byId[dialog.id] : null
   const schedule = plan?.schedule
   const settings = plan?.settings
   const say = (type, text) => setNotice({ type, text })
-  const refresh = () => { reload(); data.refresh() }
+  const refresh = () => { reload(); actions.reload(); data.refresh() }
   const summaries = rows.filter((row) => row.isSummary)
   const allCollapsed = summaries.length > 0 && summaries.every((row) => collapsed.has(row.id))
   const toggle = (id) => setCollapsed((current) => { const next = new Set(current); next.has(id) ? next.delete(id) : next.add(id); return next })
@@ -181,6 +188,11 @@ export default function SchedulePanel({ data, externalReloadKey = 0 }) {
                         <td>
                           <div className="row-actions">
                             {canCreate && !row.isMilestone && <button type="button" title="افزودن زیرفعالیت" aria-label="افزودن زیرفعالیت" onClick={() => setDialog({ kind: 'create', parentId: row.id })}><ListPlus size={15} /></button>}
+                            {canViewActions && !row.isSummary && (() => {
+                              const mine = actionsByActivity[row.id] || []
+                              const late = mine.some((action) => isOverdue(action, todayIso()))
+                              return <button type="button" className="sch-act-count" title="اقدام‌های این فعالیت" aria-label="اقدام‌های این فعالیت" onClick={() => setDialog({ kind: 'actions', id: row.id })}><ListChecks size={15} />{mine.length > 0 && <b className={late ? 'late' : ''}>{mine.length.toLocaleString('fa-IR')}</b>}</button>
+                            })()}
                             {canEdit && <button type="button" title="ویرایش" aria-label="ویرایش" onClick={() => setDialog({ kind: 'edit', id: row.id })}><Pencil size={15} /></button>}
                             {canEdit && !row.isSummary && <button type="button" title="ثبت پیشرفت واقعی" aria-label="ثبت پیشرفت واقعی" onClick={() => setDialog({ kind: 'progress', id: row.id })}><TrendingUp size={15} /></button>}
                             {canSubmit && !row.isSummary && (approval.key === 'NotSubmitted' || approval.key === 'Rejected') && <button type="button" title="ارسال برای تأیید" aria-label="ارسال برای تأیید" onClick={() => askSubmit(row)}><Send size={15} /></button>}
@@ -198,6 +210,7 @@ export default function SchedulePanel({ data, externalReloadKey = 0 }) {
 
       {dialog?.kind === 'create' && plan && <ActivityFormDialog project={project} rows={rows} activity={null} presetParentId={dialog.parentId} data={data} settings={settings} canManageSchedule={canManage} onClose={() => setDialog(null)} onDone={done} />}
       {dialog?.kind === 'edit' && dialogRow && <ActivityFormDialog project={project} rows={rows} activity={dialogRow} data={data} settings={settings} canManageSchedule={canManage} onClose={() => setDialog(null)} onDone={done} />}
+      {dialog?.kind === 'actions' && dialogRow && <ActivityActionsDialog project={project} activity={dialogRow} actions={actionsByActivity[dialogRow.id] || []} data={data} perms={actionPerms} onClose={() => setDialog(null)} onChanged={() => { actions.reload() }} />}
       {dialog?.kind === 'progress' && dialogRow && <ActualProgressDialog activity={dialogRow} onClose={() => setDialog(null)} onDone={done} />}
       {dialog?.kind === 'settings' && plan && <ScheduleSettingsDialog project={project} settings={settings} data={data} onClose={() => setDialog(null)} onDone={done} />}
       {confirmDialog}

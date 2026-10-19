@@ -172,6 +172,11 @@ export const pmApi = {
   /** Actions of the tenant, or of one project. */
   actions: {
     list: (projectId) => api.get(`/api/actions${query({ projectId })}`),
+    /** Needs Actions.Create; SourceType / SourceId say what the action was raised from. */
+    create: (payload) => api.post('/api/actions', payload),
+    /** Direct status change (Actions.Edit). */
+    setStatus: (id, status) => api.put(`/api/actions/${id}/status`, { status }),
+    submitForApproval: (id) => api.post(`/api/actions/${id}/submit-for-approval`),
   },
 
   risks: {

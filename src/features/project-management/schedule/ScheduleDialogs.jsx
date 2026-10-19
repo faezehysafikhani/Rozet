@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Plus, Trash2 } from 'lucide-react'
 import JalaliDateInput from '../../../components/JalaliDateInput'
 import { listOf, pmApi } from '../pmApi'
 import { Field, Footer, Shell } from '../DialogParts'
@@ -7,11 +8,11 @@ import { DEPENDENCY_TYPES, LEVELS, PLANNED_MODES, WEIGHTING_MODES, dependencyVal
 const toNumberOrNull = (value) => (value === '' || value === undefined || value === null ? null : Number(value))
 const orNull = (value) => (value === '' || value === undefined ? null : value)
 
-/** Create or edit one activity: its place in the tree, people, dates, estimates and its single predecessor. */
+/** Create or edit one activity: its place in the tree, people, dates, estimates and its predecessors (any number, each with a type and a lag). */
 export function ActivityFormDialog({ project, rows, activity, presetParentId, data, settings, canManageSchedule, onClose, onDone }) {
   const creating = !activity
   const manual = weightingValue(settings?.weighting) === 0
-  const firstLink = activity?.predecessors?.[0]
+  const originalLinks = activity?.predecessors || []
   const [form, setForm] = useState(() => ({
     name: activity?.name || '', description: activity?.description || '',
     parentActivityId: activity ? activity.parentActivityId || '' : presetParentId || '',
@@ -22,13 +23,14 @@ export function ActivityFormDialog({ project, rows, activity, presetParentId, da
     weight: activity ? activity.storedWeight : '', cost: activity?.cost ?? '',
     importance: levelValue(activity?.importance ?? 1), complexity: levelValue(activity?.complexity ?? 1),
     isMilestone: Boolean(activity?.isMilestone),
-    predecessorId: firstLink?.predecessorActivityId || '',
-    dependencyType: dependencyValue(firstLink?.type ?? 0), lagDays: firstLink?.lagDays ?? 0,
   }))
+  const [links, setLinks] = useState(() => originalLinks.map((link) => ({ key: link.id, id: link.id, predecessorId: link.predecessorActivityId, type: dependencyValue(link.type), lag: link.lagDays ?? 0 })))
   const [deliverables, setDeliverables] = useState([])
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const set = (key, value) => { setForm((current) => ({ ...current, [key]: value })); setError('') }
+  const setLink = (key, patch) => { setLinks((current) => current.map((link) => (link.key === key ? { ...link, ...patch } : link))); setError('') }
+  const addLink = () => { setLinks((current) => [...current, { key: `new-${Date.now()}-${current.length}`, id: null, predecessorId: '', type: 0, lag: 0 }]); setError('') }
 
   useEffect(() => {
     let cancelled = false
@@ -46,6 +48,11 @@ export function ActivityFormDialog({ project, rows, activity, presetParentId, da
     event.preventDefault()
     if (!form.name.trim()) { setError('نام فعالیت را وارد کنید.'); return }
     if (form.startDate && form.endDate && form.endDate < form.startDate) { setError('تاریخ پایان نباید قبل از تاریخ شروع باشد.'); return }
+    if (showPredecessor) {
+      if (links.some((link) => !link.predecessorId)) { setError('برای هر ردیف پیش‌نیاز، فعالیت را انتخاب کنید یا ردیف را حذف کنید.'); return }
+      if (new Set(links.map((link) => link.predecessorId)).size !== links.length) { setError('یک فعالیت را نمی‌توان دو بار پیش‌نیاز قرار داد.'); return }
+      if (links.some((link) => !Number.isInteger(Number(link.lag)) || Math.abs(Number(link.lag)) > 365)) { setError('تأخیر باید عددی صحیح بین ۳۶۵- و ۳۶۵ روز باشد.'); return }
+    }
     const weight = manual ? Number(form.weight || 0) : (activity?.storedWeight ?? 0)
     if (weight < 0 || weight > 100) { setError('وزن باید بین ۰ و ۱۰۰ باشد.'); return }
     if (form.durationDays !== '' && Number(form.durationDays) < 0) { setError('مدت فعالیت نمی‌تواند منفی باشد.'); return }
@@ -64,16 +71,35 @@ export function ActivityFormDialog({ project, rows, activity, presetParentId, da
       : await pmApi.waterfall.activities.update(activity.id, payload)
     if (!result.isSuccess) { setBusy(false); setError(explainScheduleError(result)); return }
 
-    // The predecessor is a separate call; only when it changed.
+    // The predecessors are separate calls: remove what was taken out, update what changed, then add the new ones.
     const savedId = result.value?.id || activity?.id
-    const changed = (form.predecessorId || '') !== (firstLink?.predecessorActivityId || '')
-      || (form.predecessorId && (Number(form.dependencyType) !== dependencyValue(firstLink?.type ?? 0) || Number(form.lagDays || 0) !== Number(firstLink?.lagDays ?? 0)))
-    if (showPredecessor && savedId && changed) {
-      const link = await pmApi.waterfall.dependencies.setPredecessor({
-        tenantId: data.tenantId, projectId: project.id, successorActivityId: savedId,
-        predecessorActivityId: orNull(form.predecessorId), type: Number(form.dependencyType), lagDays: Number(form.lagDays || 0),
+    if (showPredecessor && savedId) {
+      const kept = new Map(links.filter((link) => link.id).map((link) => [link.id, link]))
+      const steps = []
+      originalLinks.forEach((old) => {
+        const now = kept.get(old.id)
+        if (!now || now.predecessorId !== old.predecessorActivityId) steps.push(() => pmApi.waterfall.dependencies.remove(old.id))
       })
-      if (!link.isSuccess) { setBusy(false); onDone(`فعالیت ذخیره شد، اما ثبت پیش‌نیاز ناموفق بود: ${explainScheduleError(link)}`, 'error'); return }
+      links.forEach((link) => {
+        const old = originalLinks.find((entry) => entry.id === link.id)
+        if (old && old.predecessorActivityId === link.predecessorId && (Number(link.type) !== dependencyValue(old.type) || Number(link.lag || 0) !== Number(old.lagDays ?? 0))) {
+          steps.push(() => pmApi.waterfall.dependencies.update(link.id, { type: Number(link.type), lagDays: Number(link.lag || 0) }))
+        }
+      })
+      links.forEach((link) => {
+        const old = originalLinks.find((entry) => entry.id === link.id)
+        if (!old || old.predecessorActivityId !== link.predecessorId) {
+          steps.push(() => pmApi.waterfall.dependencies.create({ tenantId: data.tenantId, projectId: project.id, predecessorActivityId: link.predecessorId, successorActivityId: savedId, type: Number(link.type), lagDays: Number(link.lag || 0) }))
+        }
+      })
+      for (let index = 0; index < steps.length; index += 1) {
+        const step = await steps[index]()
+        if (!step.isSuccess) {
+          setBusy(false)
+          onDone(`فعالیت ذخیره شد، اما ثبت پیش‌نیازها ناموفق بود (${index.toLocaleString('fa-IR')} از ${steps.length.toLocaleString('fa-IR')} تغییر انجام شد): ${explainScheduleError(step)}`, 'error')
+          return
+        }
+      }
     }
     setBusy(false)
     onDone(creating ? `فعالیت «${payload.name}» افزوده شد.` : 'تغییرات فعالیت ذخیره شد.')
@@ -119,15 +145,22 @@ export function ActivityFormDialog({ project, rows, activity, presetParentId, da
             نقطه‌عطف (milestone؛ فعالیتی بدون مدت که زیرفعالیت ندارد)
           </label>
           {showPredecessor && (
-            <>
-              <Field label="پیش‌نیاز" hint={activity?.predecessors?.length > 1 ? 'این فعالیت چند پیش‌نیاز دارد؛ ذخیره‌ی این بخش همه را با یک پیش‌نیاز جایگزین می‌کند.' : 'خالی = بدون پیش‌نیاز'}>
-                <select value={form.predecessorId} onChange={(e) => set('predecessorId', e.target.value)}>
-                  <option value="">بدون پیش‌نیاز</option>{predecessorOptions.map((row) => <option key={row.id} value={row.id}>{label(row)}</option>)}
-                </select>
-              </Field>
-              <Field label="نوع وابستگی"><select value={form.dependencyType} onChange={(e) => set('dependencyType', e.target.value)} disabled={!form.predecessorId}>{DEPENDENCY_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}</select></Field>
-              <Field label="تأخیر / پیش‌افتادگی (روز)" hint="عدد منفی یعنی همپوشانی"><input type="number" min="-365" max="365" value={form.lagDays} onChange={(e) => set('lagDays', e.target.value)} disabled={!form.predecessorId} /></Field>
-            </>
+            <div className="sch-links" style={{ gridColumn: '1 / -1' }}>
+              <div className="sch-links-head"><strong>پیش‌نیازها</strong><button type="button" onClick={addLink}><Plus size={14} />افزودن پیش‌نیاز</button></div>
+              {!links.length && <small>بدون پیش‌نیاز؛ با «افزودن پیش‌نیاز» فعالیت‌هایی را که باید پیش از این تمام یا شروع شوند اضافه کنید.</small>}
+              {links.map((link) => (
+                <div className="sch-link-row" key={link.key}>
+                  <select aria-label="فعالیت پیش‌نیاز" value={link.predecessorId} onChange={(e) => setLink(link.key, { predecessorId: e.target.value })}>
+                    <option value="">انتخاب فعالیت...</option>
+                    {predecessorOptions.map((row) => <option key={row.id} value={row.id} disabled={row.id !== link.predecessorId && links.some((other) => other.predecessorId === row.id)}>{label(row)}</option>)}
+                  </select>
+                  <select aria-label="نوع وابستگی" value={link.type} onChange={(e) => setLink(link.key, { type: Number(e.target.value) })}>{DEPENDENCY_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}</select>
+                  <label className="sch-lag">تأخیر (روز)<input type="number" min="-365" max="365" step="1" aria-label="تأخیر یا پیش‌افتادگی (روز)" value={link.lag} onChange={(e) => setLink(link.key, { lag: e.target.value })} /></label>
+                  <button type="button" className="danger" title="حذف پیش‌نیاز" aria-label="حذف پیش‌نیاز" onClick={() => { setLinks((current) => current.filter((entry) => entry.key !== link.key)); setError('') }}><Trash2 size={15} /></button>
+                </div>
+              ))}
+              {links.length > 0 && <small>عدد منفی برای تأخیر یعنی همپوشانی (پیش‌افتادگی).</small>}
+            </div>
           )}
           <Field label="توضیحات" wide><textarea rows="2" value={form.description} onChange={(e) => set('description', e.target.value)} /></Field>
         </div></div>
