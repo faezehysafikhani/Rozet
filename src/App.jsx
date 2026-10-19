@@ -72,6 +72,7 @@ import { useNotifications } from './hooks/useNotifications'
 import DocumentsPage from './features/project-management/documents/DocumentsPage'
 import CalendarPage from './features/project-management/calendar/CalendarPage'
 import ProjectsSection from './features/project-management/projects/ProjectsSection'
+import SchedulePanel from './features/project-management/schedule/SchedulePanel'
 import { useDashboard } from './hooks/useDashboard'
 
 // A sidebar entry is a container for several sections, so it is shown when ANY of the
@@ -1099,20 +1100,10 @@ function KanbanBoard({ data }) {
 }
 
 function ProjectPlanning({ data }) {
-  const project = data.selectedProject
   return (
     <>
       <ProjectsSection data={data} />
-      {project && (
-        <section className="task-panel task-table-panel">
-          <div className="task-panel-title"><div><h3>فعالیت‌های برنامه — {projectDisplayName(project)}</h3><p>داده‌های Waterfall Activities برای پروژه منتخب (روی ردیف پروژه کلیک کنید)</p></div><CreateButton kind="activity" data={data} label="افزودن فعالیت" /></div>
-          <DataState loading={data.loadingDetails} empty={!data.activities.length}>
-            <div className="table-scroll"><table><thead><tr><th>فعالیت</th><th>مسئول</th><th>شروع</th><th>پایان</th><th>مدت</th><th>پیشرفت برنامه‌ای</th><th>پیشرفت واقعی</th></tr></thead><tbody>
-              {data.activities.map((item) => <tr key={item.id}><td><strong>{item.name}</strong></td><td>{data.userName(item.responsibleUserId)}</td><td>{formatDateOnly(item.startDate)}</td><td>{formatDateOnly(item.endDate)}</td><td>{item.durationDays || '—'}</td><td>{Number(item.plannedProgress || 0).toLocaleString('fa-IR')}٪</td><td>{Number(item.actualProgress || 0).toLocaleString('fa-IR')}٪</td></tr>)}
-            </tbody></table></div>
-          </DataState>
-        </section>
-      )}
+      <SchedulePanel data={data} />
     </>
   )
 }

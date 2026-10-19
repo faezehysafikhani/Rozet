@@ -65,7 +65,8 @@ export const pmApi = {
       /** The whole plan in one call: WBS code, level, effective weight, float, rolled-up cost. */
       plan: (projectId) => api.get(`${BASE}/waterfall/schedule/plan${query({ projectId })}`),
       plans: (payload) => api.post(`${BASE}/waterfall/schedule/plans`, payload),
-      apply: (payload) => api.post(`${BASE}/waterfall/schedule/apply`, payload),
+      /** Writes the calculated dates back to the activities (needs WaterfallSchedule.Manage). */
+      apply: (projectId) => api.post(`${BASE}/waterfall/schedule/apply${query({ projectId })}`),
     },
     baselines: {
       list: (projectId) => api.get(`${BASE}/waterfall/baselines${query({ projectId })}`),
