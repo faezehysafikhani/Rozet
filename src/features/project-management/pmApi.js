@@ -114,6 +114,7 @@ export const pmApi = {
 
   delayReasons: {
     list: (projectId) => api.get(`${BASE}/delay-reasons${query({ projectId })}`),
+    forProjects: (projectIds) => api.post(`${BASE}/delay-reasons/for-projects`, { projectIds }),
     get: (id) => api.get(`${BASE}/delay-reasons/${id}`),
     create: (payload) => api.post(`${BASE}/delay-reasons`, payload),
     update: (id, payload) => api.put(`${BASE}/delay-reasons/${id}`, payload),
@@ -168,8 +169,18 @@ export const pmApi = {
     /** Agile tasks of several projects in one call. */
     forProjects: (projectIds) => api.post(`${BASE}/agile/tasks/for-projects`, { projectIds }),
   },
+  /** Actions of the tenant, or of one project. */
   actions: {
     list: (projectId) => api.get(`/api/actions${query({ projectId })}`),
+  },
+
+  risks: {
+    forProjects: (projectIds) => api.post(`${BASE}/risks/for-projects`, { projectIds }),
+  },
+
+  /** Earned-value and health figures. Needs Reporting.View and Reporting.ViewAll; progress comes from the schedule in Rozet.Api. */
+  reporting: {
+    projectPerformance: (projectId) => api.get(`/api/reporting/projects/${projectId}/performance`),
   },
   units: {
     /** Active organisation units (organization_units.view); creating one needs organization_units.create. */

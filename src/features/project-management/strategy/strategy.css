@@ -31,3 +31,11 @@
 .str-level { height: 34px; padding: 0 10px; border: 1px solid #dfe3ea; border-radius: 8px; background: #fff; font: inherit; }
 .str-current td { background: #f2f6fc; }
 .bl-button.sch-primary { border-color: transparent; color: #fff; background: linear-gradient(100deg, #071a45, #103a7b); }
+
+.pf-cards { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+.pf-health.done { background: #e6f3eb; } .pf-health.review { background: #fbf1dd; } .pf-health.rejected { background: #fbeae9; }
+.pf-nums { direction: ltr; text-align: right; white-space: nowrap; }
+.pf-late { display: inline-flex; align-items: center; gap: 3px; margin-inline-start: 6px; color: #ac4d49; background: #fbeae9; }
+.pf-table td small.bl-note { max-width: 220px; }
+.users-table.pf-table td:first-child { display: block; }
+.users-table.pf-table td:first-child small { display: block; }

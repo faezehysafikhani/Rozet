@@ -2,10 +2,12 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { CalendarClock, CheckCircle2, ChevronDown, ChevronLeft, CircleAlert, Flag, Gauge, ListPlus, Pencil, Plus, Send, Settings2, Trash2, TrendingUp, X } from 'lucide-react'
 import { useAuth } from '../../../services/AuthContext'
 import { useConfirm } from '../../../components/ConfirmDialog'
-import { formatJalali } from '../../../utils/jalali'
+import { formatJalali, todayIso } from '../../../utils/jalali'
 import { pmApi } from '../pmApi'
 import { toOutcome } from '../pmErrors'
 import { approvalOf } from '../documents/documentUtils'
+import AttentionList from './AttentionList'
+import { buildAttention } from './attention'
 import { ActivityFormDialog, ActualProgressDialog, ScheduleSettingsDialog } from './ScheduleDialogs'
 import { DEPENDENCY_TYPES, PLANNED_MODES, WEIGHTING_MODES, dependencyValue, descendantsOf, explainScheduleError, explainWarning, fmt, plannedValue, rowById, visibleRows, weightingValue } from './scheduleModel'
 import { useSchedulePlan } from './useSchedulePlan'
@@ -37,6 +39,7 @@ export default function SchedulePanel({ data, externalReloadKey = 0 }) {
   const seenKey = useRef(externalReloadKey)
   useEffect(() => { if (seenKey.current !== externalReloadKey) { seenKey.current = externalReloadKey; reload() } }, [externalReloadKey, reload])
 
+  const attention = useMemo(() => buildAttention(rows, plan?.settings, todayIso()), [rows, plan])
   const byId = useMemo(() => rowById(rows), [rows])
   const shown = useMemo(() => visibleRows(rows, collapsed), [rows, collapsed])
   const dialogRow = dialog?.id ? byId[dialog.id] : null
@@ -137,6 +140,8 @@ export default function SchedulePanel({ data, externalReloadKey = 0 }) {
             {schedule.warnings.length > 0 && (
               <ul className="sch-warnings">{schedule.warnings.slice(0, 5).map((text) => <li key={text}><CircleAlert size={14} />{explainWarning(text)}</li>)}{schedule.warnings.length > 5 && <li>و {(schedule.warnings.length - 5).toLocaleString('fa-IR')} هشدار دیگر</li>}</ul>
             )}
+
+            {rows.length > 0 && <AttentionList items={attention} canEdit={canEdit} onEdit={(row) => setDialog({ kind: 'edit', id: row.id })} />}
 
             {!rows.length ? <p className="data-state">برای این پروژه هنوز فعالیتی ثبت نشده است.{canCreate ? ' با «افزودن فعالیت» شروع کنید.' : ''}</p> : (
               <div className="table-scroll"><table className="users-table sch-table" style={{ minWidth: 1320 }}>

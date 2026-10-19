@@ -7,6 +7,7 @@ import { formatJalali } from '../../../utils/jalali'
 import { pmApi } from '../pmApi'
 import { useLoader } from '../useLoader'
 import DelayReasonsTab from './DelayReasonsTab'
+import PerformanceTab from './PerformanceTab'
 import SubmissionsTab from './SubmissionsTab'
 import UpdatesTab from './UpdatesTab'
 import { classificationOf, deviationText, explainProgressError, fmt } from './progressModel'
@@ -14,6 +15,7 @@ import '../baselines/baselines.css'
 import './progress.css'
 
 const TABS = [
+  { key: 'performance', label: 'سلامت و عملکرد' },
   { key: 'updates', label: 'گزارش‌های وضعیت' },
   { key: 'delays', label: 'دلایل تأخیر' },
   { key: 'submissions', label: 'گزارش پیشرفت فعالیت‌ها' },
@@ -29,10 +31,11 @@ export default function ProgressPage({ data }) {
   const perms = {
     view: can('ProjectProgress.View'), create: can('ProjectProgress.Create'), edit: can('ProjectProgress.Edit'), delete: can('ProjectProgress.Delete'), submit: can('ProjectProgress.Submit'),
     viewDelays: can('DelayReasons.View'), createDelays: can('DelayReasons.Create'), editDelays: can('DelayReasons.Edit'), deleteDelays: can('DelayReasons.Delete'), submitDelays: can('DelayReasons.Submit'),
+    viewReporting: can('Reporting.View') && can('Reporting.ViewAll'),
     viewActivities: can('WaterfallActivities.View'), editActivities: can('WaterfallActivities.Edit'), submitProgress: can('WaterfallProgress.Submit'),
   }
   const { confirm, dialog } = useConfirm()
-  const [tab, setTab] = useState('updates')
+  const [tab, setTab] = useState('performance')
   const [notice, setNotice] = useState(null)
   const [reloadKey, setReloadKey] = useState(0)
   const say = (type, text) => setNotice({ type, text })
@@ -82,6 +85,7 @@ export default function ProgressPage({ data }) {
               <div className="bl-tabs" role="tablist">
                 {TABS.map(({ key, label }) => <button key={key} type="button" role="tab" aria-selected={tab === key} className={tab === key ? 'active' : ''} onClick={() => { setTab(key); setNotice(null) }}>{label}</button>)}
               </div>
+              {tab === 'performance' && <PerformanceTab key={project.id} project={project} canView={perms.viewReporting} reloadKey={reloadKey} />}
               {tab === 'updates' && <UpdatesTab project={project} data={data} perms={perms} confirm={confirm} say={say} list={reports} onChanged={refreshAll} />}
               {tab === 'delays' && <DelayReasonsTab key={project.id} project={project} data={data} perms={{ view: perms.viewDelays, create: perms.createDelays, edit: perms.editDelays, delete: perms.deleteDelays, submit: perms.submitDelays }} confirm={confirm} say={say} />}
               {tab === 'submissions' && <SubmissionsTab key={project.id} project={project} data={data} perms={perms} say={say} reloadKey={reloadKey} onChanged={refreshAll} />}

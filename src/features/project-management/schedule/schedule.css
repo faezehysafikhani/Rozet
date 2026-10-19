@@ -38,3 +38,14 @@ button.sch-toggle:hover { background: #e9edf3; }
 .sch-table th:last-child, .sch-table td:last-child { position: sticky; left: 0; background: #fff; box-shadow: 1px 0 0 #e4e7ed; }
 .sch-table th:last-child { background: #f7f8fa; }
 .sch-summary-row td:last-child { background: #f7f8fa; }
+
+.att-panel { margin-bottom: 14px; padding: 12px 14px; border: 1px solid #f0dfb8; border-radius: 10px; background: #fffaf0; }
+.att-panel header { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
+.att-panel header strong { display: inline-flex; align-items: center; gap: 6px; color: #7a5a14; }
+.att-panel ul { display: flex; flex-direction: column; gap: 6px; margin: 0 0 6px; padding: 0; list-style: none; }
+.att-panel li { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 8px; background: #fff; }
+.att-panel li > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.att-panel li small { color: #626c7e; }
+.att-panel li > button { width: 30px; height: 30px; display: grid; place-items: center; border: 1px solid #dfe3ea; border-radius: 8px; color: #607087; background: #fff; cursor: pointer; }
+.att-wbs { color: #8b92a2; font-weight: 400; }
+.att-ok { display: flex; align-items: center; gap: 8px; margin: 0 0 14px; padding: 9px 14px; border-radius: 10px; color: #2f5c43; background: #e6f3eb; }
