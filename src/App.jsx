@@ -74,6 +74,7 @@ import ProjectsSection from './features/project-management/projects/ProjectsSect
 import BoardPage from './features/task-management/board/BoardPage'
 import AllTasksPage from './features/task-management/AllTasksPage'
 import TaskDashboardPage from './features/task-management/TaskDashboardPage'
+import MeetingsPage from './features/meetings/MeetingsPage'
 import RaciPage from './features/task-management/RaciPage'
 import WorkflowPage from './features/workflow/WorkflowPage'
 import StrategyPage from './features/project-management/strategy/StrategyPage'
@@ -999,15 +1000,6 @@ function ProjectPlanning({ data }) {
   )
 }
 
-function Meetings() {
-  const meetings = [
-    ['جلسه هفتگی کنترل پروژه', 'پروژه توسعه مرکز تجاری', 'امروز، ساعت ۱۴:۰۰', 'اتاق جلسات شماره ۲', 'در پیش رو'],
-    ['بررسی نقشه‌های فاز اجرایی', 'برج اداری روزت', 'دوشنبه، ساعت ۱۰:۳۰', 'جلسه آنلاین', 'در پیش رو'],
-    ['هماهنگی پیمانکاران تأسیسات', 'مجتمع مسکونی آفتاب', '۲۸ مرداد ۱۴۰۵', 'دفتر کارگاه', 'برگزار شده'],
-  ]
-  return <><TaskPageHeader title="جلسات و صورت‌جلسات" description="برنامه‌ریزی جلسات، ثبت صورت‌جلسه و تخصیص بندهای اجرایی" action={null} /><div className="meeting-summary"><article><CalendarDays size={22} /><div><strong>۵</strong><span>جلسه پیش رو</span></div></article><article><FileText size={22} /><div><strong>۱۲</strong><span>بند اجرایی باز</span></div></article><article><CheckCircle2 size={22} /><div><strong>۸</strong><span>صورت‌جلسه نهایی‌شده</span></div></article></div><section className="task-panel meetings-list"><div className="task-panel-title"><div><h3>جلسات اخیر و پیش رو</h3><p>فهرست جلسات مرتبط با پروژه‌های شما</p></div><div className="view-switch"><button className="active">همه</button><button>پیش رو</button><button>گذشته</button></div></div>{meetings.map(([title, project, time, location, status]) => <article key={title}><span className="meeting-date"><b>{time.split(' ')[0]}</b><small>{time.replace(time.split(' ')[0], '')}</small></span><div className="meeting-info"><h4>{title}</h4><p>{project}</p><span>{location === 'جلسه آنلاین' ? <Video size={14} /> : <Users2 size={14} />}{location}</span></div><div className="meeting-meta"><StatusPill status={status === 'برگزار شده' ? 'تکمیل شده' : 'در حال انجام'} /><button>{status === 'برگزار شده' ? 'مشاهده صورت‌جلسه' : 'ورود به جلسه'}</button></div></article>)}</section></>
-}
-
 function RisksPage({ data }) {
   return <><TaskPageHeader title="مدیریت ریسک" description="ریسک‌های پروژه از Risks API" actionNode={<CreateButton kind="risk" data={data} label="ثبت ریسک" />}><ProjectSelector data={data} /></TaskPageHeader><section className="task-panel task-table-panel"><DataState loading={data.loading || data.loadingDetails} error={data.error} empty={!data.risks.length}><div className="table-scroll"><table><thead><tr><th>ریسک</th><th>احتمال</th><th>شدت</th><th>اثر</th><th>RPN</th><th>مالک</th><th>برنامه پاسخ</th></tr></thead><tbody>{data.risks.map((risk) => <tr key={risk.id}><td><strong>{risk.description}</strong></td><td>{risk.probabilityScore}</td><td>{risk.severityScore}</td><td>{risk.impactScore}</td><td>{risk.rpn}</td><td>{data.userName(risk.riskOwnerUserId)}</td><td>{risk.responsePlan || '—'}</td></tr>)}</tbody></table></div></DataState></section></>
 }
@@ -1031,7 +1023,7 @@ function UnsupportedProjectArea({ title, message }) {
 function TaskManagement({ active, data }) {
   if (active === 'همه وظایف') return <AllTasksPage data={data} />
   if (active === 'برد کانبان') return <BoardPage data={data} />
-  if (active === 'جلسات و صورت‌جلسات') return <Meetings />
+  if (active === 'جلسات و صورت‌جلسات') return <MeetingsPage data={data} />
   if (active === 'گردش کار و الگوها') return <WorkflowPage data={data} />
   if (active === 'ماتریس مسئولیت‌ها (RACI)') return <RaciPage data={data} />
   return <TaskDashboardPage data={data} />

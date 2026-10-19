@@ -67,3 +67,5 @@
 .tk-chart-box figcaption { display: flex; flex-wrap: wrap; justify-content: center; gap: 18px; padding-top: 6px; color: #626c7e; font-size: .875rem; direction: rtl; }
 .tk-chart-box figcaption span { display: inline-flex; align-items: center; gap: 6px; }
 .tk-chart-box figcaption i { width: 18px; height: 4px; border-radius: 2px; }
+.tk-filters label.docs-search { flex: 1 1 260px; flex-direction: row; align-items: center; gap: 8px; height: 38px; padding: 0 12px; border: 1px solid #dfe3ea; border-radius: 9px; background: #fff; color: #8b92a2; font-size: 1rem; }
+.tk-filters label.docs-search input { flex: 1; min-width: 0; border: 0; outline: 0; font: inherit; color: #333d51; background: none; }

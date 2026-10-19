@@ -262,6 +262,20 @@ export const pmApi = {
     create: (payload) => api.post('/api/integrations/project-strategy-alignment', payload),
     update: (id, payload) => api.put(`/api/integrations/project-strategy-alignment/${id}`, payload),
   },
+  /** Project meetings with their participants, attendance and minutes (Meetings.*). */
+  meetings: {
+    list: (projectId, status) => api.get(`${BASE}/meetings${query({ projectId, status })}`),
+    forProjects: (projectIds) => api.post(`${BASE}/meetings/for-projects`, { projectIds }),
+    get: (id) => api.get(`${BASE}/meetings/${id}`),
+    create: (payload) => api.post(`${BASE}/meetings`, payload),
+    update: (id, payload) => api.put(`${BASE}/meetings/${id}`, payload),
+    setStatus: (id, status) => api.put(`${BASE}/meetings/${id}/status`, { status }),
+    /** participants: [{ userId, isRequired }] - the whole invited set. */
+    setParticipants: (id, participants) => api.put(`${BASE}/meetings/${id}/participants`, { participants }),
+    setAttendance: (id, userId, attendance) => api.put(`${BASE}/meetings/${id}/participants/${userId}/attendance`, { attendance }),
+    setMinutes: (id, minutes) => api.put(`${BASE}/meetings/${id}/minutes`, { minutes }),
+    remove: (id) => api.delete(`${BASE}/meetings/${id}`),
+  },
   /** Approvals: the approval center (what waits for me), delegation of approvals, and the approval chain each kind of item follows. */
   workflow: {
     /** Pending approvals whose current step is mine (or that I stand in for). Needs Workflow.View. */

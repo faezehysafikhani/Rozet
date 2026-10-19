@@ -1,0 +1,21 @@
+.users-table.mt-table td:first-child { display: table-cell; }
+.status-pill.mt-pending { color: #8a5a00; background: #fff4dc; }
+.status-pill.mt-success { color: #1d6b3f; background: #e3f5ea; }
+.status-pill.mt-muted { color: #5d6678; background: #eef0f4; }
+.mt-statusbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 22px 0; }
+.mt-statusbar-actions { display: inline-flex; flex-wrap: wrap; gap: 8px; }
+.mt-statusbar .bl-button { height: 34px; }
+.mt-tabs { margin: 10px 22px 0; }
+.mt-notice { color: #1d6b3f; font-size: .9rem; }
+.mt-form-actions { display: flex; align-items: center; gap: 12px; margin-top: 14px; }
+.mt-form-actions .ue-save { min-width: 140px; }
+.mt-participants, .mt-minutes { display: flex; flex-direction: column; gap: 12px; }
+.mt-add { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.mt-add select { flex: 1 1 220px; height: 38px; padding: 0 10px; border: 1px solid #dfe3ea; border-radius: 10px; font: inherit; background: #fff; }
+.mt-people td:first-child { display: table-cell; }
+.mt-icon { display: inline-grid; place-items: center; width: 30px; height: 30px; border: 1px solid #dfe3ea; border-radius: 8px; color: #4c5568; background: #fff; cursor: pointer; }
+.mt-icon.danger { color: #a32b2b; }
+.mt-minutes textarea { width: 100%; min-height: 220px; resize: vertical; }
+div.meeting-summary { grid-template-columns: repeat(4, 1fr); }
+@media (max-width: 900px) { div.meeting-summary { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 520px) { div.meeting-summary { grid-template-columns: 1fr; } }
