@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { apiBlobRequest, knowledgeApi, reportingApi } from './services/api'
 import {
@@ -88,7 +88,8 @@ import {
 import { AuthProvider, Can, useAuth } from './services/AuthContext'
 import { PersianMessages, actionsApi, changeRequestsApi, contractsApi, costReportApi, groupsApi, identityApi, labelForModule, labelForPermission, orgChartApi, permissionsApi, platformApi, projectManagementApi, rolesApi, suppliersApi, unwrap, usersApi, workflowApi, accountApi, myTeamsApi, smsPanelApi, uploadPolicyApi } from './services/api'
 import { DEFAULT_TENANT_ID } from './services/config'
-import { useChat } from './hooks/useChat'
+import ChatPage from './features/chat/ChatPage'
+import { parseInstant } from './features/chat/chatModel'
 import { useNotifications } from './hooks/useNotifications'
 import DocumentsPage from './features/project-management/documents/DocumentsPage'
 import CalendarPage from './features/project-management/calendar/CalendarPage'
@@ -109,14 +110,7 @@ import { PRESET_AVATARS } from './utils/avatars'
 // A sidebar entry is a container for several sections, so it is shown when ANY of the
 // permissions below was granted - not just one hard-coded permission. Entries not listed
 // here are always visible. Backend authorization is enforced independently of this map.
-const menuPermissions = {
-  'مدیریت کاربران': [
-    'users.view', 'users.create', 'users.update', 'users.assign_roles', 'users.assign_permissions',
-    'roles.view', 'roles.create', 'roles.update', 'roles.assign_permissions',
-    'groups.view', 'groups.create', 'groups.update', 'groups.assign_permissions', 'groups.manage_members',
-    'permissions.view', 'audit_logs.view', 'org_chart.view',
-  ],
-}
+const menuPermissions = {}
 
 // Which granted permissions surface each section of the user-management screen.
 const sectionPermissions = {
@@ -254,7 +248,6 @@ const governanceSubmenus = [
 
 const systemSubmenus = [
   { label: 'چت و گفت‌وگوی آنلاین', icon: MessagesSquare },
-  { label: 'مدیریت کاربران', icon: UsersRound },
   { label: 'تنظیمات', icon: Settings },
 ]
 
@@ -5136,329 +5129,6 @@ function ControlManagement({ active, data }) {
 }
 
 /* ------------------------------------------------------------------ *
- * Chat - direct conversations only.                                   *
- * Uses its own `rz-chat` class namespace so the layout does not depend *
- * on the original mock's fixed-row grid, which could not scroll.       *
- * ------------------------------------------------------------------ */
-
-const CHAT_TONES = 5
-
-function chatDayLabel(value) {
-  if (!value) return ''
-  const normalized = typeof value === 'string' && !/[Zz]|[+-]\d{2}:?\d{2}$/.test(value) ? `${value}Z` : value
-  const date = new Date(normalized)
-  if (Number.isNaN(date.getTime())) return ''
-  const today = new Date()
-  const yesterday = new Date(today)
-  yesterday.setDate(today.getDate() - 1)
-  const sameDay = (a, b) => a.toDateString() === b.toDateString()
-  if (sameDay(date, today)) return 'امروز'
-  if (sameDay(date, yesterday)) return 'دیروز'
-  try {
-    return date.toLocaleDateString('fa-IR', { day: 'numeric', month: 'long', year: 'numeric' })
-  } catch {
-    return date.toISOString().slice(0, 10)
-  }
-}
-
-function ChatPage() {
-  const {
-    conversations, directory, directoryError,
-    activeId, setActiveId, messages,
-    connection, loadingConversations, loadingMessages, sending,
-    error, setError, sendMessage, startDirect, refresh,
-  } = useChat(true)
-
-  const { user } = useAuth()
-  const [draft, setDraft] = useState('')
-  const [listSearch, setListSearch] = useState('')
-  const [messageSearch, setMessageSearch] = useState('')
-  const [searchOpen, setSearchOpen] = useState(false)
-  const [pickerOpen, setPickerOpen] = useState(false)
-  const [pickerSearch, setPickerSearch] = useState('')
-  const [mobilePane, setMobilePane] = useState('list')
-  const scrollRef = useRef(null)
-  const inputRef = useRef(null)
-
-  const nameOf = useMemo(() => {
-    const map = new Map(directory.map((u) => [u.id, u.displayName]))
-    return (id) => map.get(id) || 'کاربر'
-  }, [directory])
-
-  // A direct conversation carries no Title; its label is the other participant.
-  const decorated = useMemo(() => conversations.map((c) => {
-    const counterpartId = (c.participantIds || []).find((id) => id !== user?.id)
-    return {
-      ...c,
-      counterpartId,
-      displayTitle: c.title || (counterpartId ? nameOf(counterpartId) : 'گفت‌وگوی مستقیم'),
-    }
-  }), [conversations, nameOf, user?.id])
-
-  const visible = useMemo(
-    () => decorated.filter((c) => !listSearch || c.displayTitle.includes(listSearch)),
-    [decorated, listSearch],
-  )
-
-  const selected = decorated.find((c) => c.id === activeId) || null
-
-  const shown = useMemo(
-    () => (messageSearch ? messages.filter((m) => m.text?.includes(messageSearch)) : messages),
-    [messages, messageSearch],
-  )
-
-  // Insert a day separator whenever the calendar day changes.
-  const timeline = useMemo(() => {
-    const rows = []
-    let lastDay = null
-    for (const message of shown) {
-      const day = chatDayLabel(message.sentAt)
-      if (day && day !== lastDay) {
-        rows.push({ kind: 'day', id: `day-${day}-${message.id}`, label: day })
-        lastDay = day
-      }
-      rows.push({ kind: 'message', id: message.id, message })
-    }
-    return rows
-  }, [shown])
-
-  const availableContacts = useMemo(() => directory
-    .filter((u) => u.id !== user?.id)
-    .filter((u) => !pickerSearch || u.displayName?.includes(pickerSearch) || u.email?.includes(pickerSearch)),
-    [directory, user?.id, pickerSearch])
-
-  const status = connection === 'connected'
-    ? { label: 'برخط', tone: 'online' }
-    : connection === 'reconnecting' || connection === 'connecting'
-      ? { label: 'در حال اتصال', tone: 'pending' }
-      : { label: 'اتصال بی‌درنگ برقرار نیست', tone: 'offline' }
-
-  // Stick to the newest message, unless the user is reading search results.
-  useEffect(() => {
-    if (messageSearch) return
-    const node = scrollRef.current
-    if (node) node.scrollTop = node.scrollHeight
-  }, [timeline.length, activeId, messageSearch])
-
-  function openConversation(id) {
-    setActiveId(id)
-    setMessageSearch('')
-    setSearchOpen(false)
-    setMobilePane('conversation')
-    setTimeout(() => inputRef.current?.focus(), 0)
-  }
-
-  async function handleSend(event) {
-    event?.preventDefault()
-    const text = draft
-    if (!text.trim() || sending) return
-    setDraft('')
-    const ok = await sendMessage(text)
-    if (!ok) setDraft(text)
-    inputRef.current?.focus()
-  }
-
-  function handleKeyDown(event) {
-    // Enter sends, Shift+Enter is reserved for a future multi-line composer.
-    if (event.key === 'Enter' && !event.shiftKey) {
-      event.preventDefault()
-      handleSend()
-    }
-  }
-
-  async function pickContact(contactId) {
-    const id = await startDirect(contactId)
-    setPickerOpen(false)
-    setPickerSearch('')
-    if (id) openConversation(id)
-  }
-
-  return (
-    <div className="rz-chat">
-      <header className="rz-chat__heading">
-        <div>
-          <span>ارتباطات سازمانی</span>
-          <h1>چت و گفت‌وگوی آنلاین</h1>
-          <p>گفت‌وگوی مستقیم و امن با همکاران</p>
-        </div>
-        <div className="rz-chat__heading-actions">
-          <span className={`rz-chat__status rz-chat__status--${status.tone}`}><i />{status.label}</span>
-          <button type="button" onClick={refresh} title="به‌روزرسانی"><RefreshCw size={16} />به‌روزرسانی</button>
-        </div>
-      </header>
-
-      <div className={`rz-chat__shell rz-chat__shell--${mobilePane}`}>
-        {/* ---------- conversation list ---------- */}
-        <aside className="rz-chat__sidebar">
-          <div className="rz-chat__sidebar-head">
-            <div>
-              <h3>گفت‌وگوها</h3>
-              <small>{visible.length} مورد</small>
-            </div>
-            <button
-              type="button"
-              className={`rz-chat__new ${pickerOpen ? 'is-open' : ''}`}
-              onClick={() => { setPickerOpen((v) => !v); setPickerSearch('') }}
-              title={pickerOpen ? 'بستن' : 'گفت‌وگوی جدید'}
-            >
-              {pickerOpen ? <X size={18} /> : <Plus size={18} />}
-            </button>
-          </div>
-
-          <label className="rz-chat__search">
-            <Search size={16} />
-            <input value={listSearch} onChange={(e) => setListSearch(e.target.value)} placeholder="جست‌وجوی گفت‌وگو..." />
-            {listSearch && <button type="button" onClick={() => setListSearch('')}><X size={14} /></button>}
-          </label>
-
-          {pickerOpen ? (
-            <div className="rz-chat__picker">
-              <label className="rz-chat__search rz-chat__search--inner">
-                <Search size={16} />
-                <input autoFocus value={pickerSearch} onChange={(e) => setPickerSearch(e.target.value)} placeholder="نام یا ایمیل همکار..." />
-              </label>
-              <div className="rz-chat__scroll">
-                {availableContacts.map((contact, index) => (
-                  <button type="button" key={contact.id} className="rz-chat__row" onClick={() => pickContact(contact.id)}>
-                    <span className={`rz-chat__avatar tone-${index % CHAT_TONES}`}>{initialsOf(contact.displayName)}</span>
-                    <span className="rz-chat__row-body">
-                      <strong>{contact.displayName}</strong>
-                      <small>{contact.email}</small>
-                    </span>
-                  </button>
-                ))}
-                {!availableContacts.length && (
-                  <p className="rz-chat__empty">{directoryError || 'همکاری برای شروع گفت‌وگو یافت نشد.'}</p>
-                )}
-              </div>
-            </div>
-          ) : (
-            <div className="rz-chat__scroll">
-              {loadingConversations && <p className="rz-chat__empty">در حال بارگذاری...</p>}
-              {!loadingConversations && visible.map((conversation, index) => (
-                <button
-                  type="button"
-                  key={conversation.id}
-                  className={`rz-chat__row ${activeId === conversation.id ? 'is-active' : ''}`}
-                  onClick={() => openConversation(conversation.id)}
-                >
-                  <span className={`rz-chat__avatar tone-${index % CHAT_TONES}`}>{initialsOf(conversation.displayTitle)}</span>
-                  <span className="rz-chat__row-body">
-                    <strong>{conversation.displayTitle}</strong>
-                    <small>{conversation.lastMessage || 'هنوز پیامی رد و بدل نشده'}</small>
-                  </span>
-                  <time>{formatTime(conversation.lastMessageAt)}</time>
-                </button>
-              ))}
-              {!loadingConversations && !visible.length && (
-                <div className="rz-chat__empty rz-chat__empty--cta">
-                  <MessageCircle size={30} />
-                  <p>{listSearch ? 'گفت‌وگویی با این نام پیدا نشد.' : 'هنوز گفت‌وگویی ندارید.'}</p>
-                  {!listSearch && <button type="button" onClick={() => setPickerOpen(true)}><Plus size={16} />شروع گفت‌وگوی جدید</button>}
-                </div>
-              )}
-            </div>
-          )}
-        </aside>
-
-        {/* ---------- conversation ---------- */}
-        <section className="rz-chat__main">
-          {selected ? (
-            <>
-              <header className="rz-chat__main-head">
-                <button type="button" className="rz-chat__back" onClick={() => setMobilePane('list')} title="بازگشت"><ChevronLeft size={20} /></button>
-                <span className="rz-chat__avatar tone-0">{initialsOf(selected.displayTitle)}</span>
-                <div className="rz-chat__main-title">
-                  <strong>{selected.displayTitle}</strong>
-                  <small>گفت‌وگوی مستقیم · {status.label}</small>
-                </div>
-                <button
-                  type="button"
-                  className={`rz-chat__icon ${searchOpen ? 'is-active' : ''}`}
-                  onClick={() => { setSearchOpen((v) => !v); if (searchOpen) setMessageSearch('') }}
-                  title="جست‌وجو در پیام‌ها"
-                >
-                  <Search size={18} />
-                </button>
-              </header>
-
-              {searchOpen && (
-                <div className="rz-chat__msg-search">
-                  <Search size={16} />
-                  <input autoFocus value={messageSearch} onChange={(e) => setMessageSearch(e.target.value)} placeholder="جست‌وجو در این گفت‌وگو..." />
-                  <small>{messageSearch ? `${shown.length} نتیجه` : `${messages.length} پیام`}</small>
-                  <button type="button" onClick={() => { setMessageSearch(''); setSearchOpen(false) }}><X size={16} /></button>
-                </div>
-              )}
-
-              <div className="rz-chat__messages" ref={scrollRef}>
-                {loadingMessages && <p className="rz-chat__empty">در حال بارگذاری پیام‌ها...</p>}
-
-                {!loadingMessages && timeline.map((row) => row.kind === 'day' ? (
-                  <span className="rz-chat__day" key={row.id}>{row.label}</span>
-                ) : (
-                  <article className={`rz-chat__bubble ${row.message.isOwnMessage ? 'is-mine' : ''}`} key={row.id}>
-                    {!row.message.isOwnMessage && (
-                      <span className="rz-chat__bubble-avatar">{initialsOf(nameOf(row.message.senderUserId)).slice(0, 1)}</span>
-                    )}
-                    <div className="rz-chat__bubble-body">
-                      {!row.message.isOwnMessage && <strong>{nameOf(row.message.senderUserId)}</strong>}
-                      <p>{row.message.text}</p>
-                      <time>{formatTime(row.message.sentAt)}{row.message.isOwnMessage && <CheckCheck size={13} />}</time>
-                    </div>
-                  </article>
-                ))}
-
-                {!loadingMessages && !messages.length && (
-                  <div className="rz-chat__empty rz-chat__empty--cta">
-                    <MessageCircle size={30} />
-                    <p>اولین پیام را بفرستید.</p>
-                  </div>
-                )}
-                {!loadingMessages && messages.length > 0 && messageSearch && !shown.length && (
-                  <p className="rz-chat__empty">پیامی با این عبارت یافت نشد.</p>
-                )}
-              </div>
-
-              {error && (
-                <p className="rz-chat__error" role="alert">
-                  <TriangleAlert size={15} />{error}
-                  <button type="button" onClick={() => setError('')}><X size={14} /></button>
-                </p>
-              )}
-
-              <form className="rz-chat__composer" onSubmit={handleSend}>
-                <button type="button" className="rz-chat__icon" title="پیوست (به‌زودی)" disabled><Paperclip size={18} /></button>
-                <button type="button" className="rz-chat__icon" title="ایموجی (به‌زودی)" disabled><Smile size={18} /></button>
-                <input
-                  ref={inputRef}
-                  value={draft}
-                  onChange={(e) => setDraft(e.target.value)}
-                  onKeyDown={handleKeyDown}
-                  placeholder={`پیام به ${selected.displayTitle}...`}
-                  aria-label="متن پیام"
-                />
-                <button type="submit" className="rz-chat__send" disabled={!draft.trim() || sending}>
-                  <Send size={17} />{sending ? 'در حال ارسال' : 'ارسال'}
-                </button>
-              </form>
-            </>
-          ) : (
-            <div className="rz-chat__placeholder">
-              <MessageCircle size={44} />
-              <h3>گفت‌وگویی انتخاب نشده است</h3>
-              <p>از فهرست کنار یک گفت‌وگو را باز کنید یا یک گفت‌وگوی تازه شروع کنید.</p>
-              <button type="button" onClick={() => { setPickerOpen(true); setMobilePane('list') }}><Plus size={16} />شروع گفت‌وگوی جدید</button>
-              {error && <p className="rz-chat__error" role="alert"><TriangleAlert size={15} />{error}</p>}
-            </div>
-          )}
-        </section>
-      </div>
-    </div>
-  )
-}
-
-/* ------------------------------------------------------------------ *
  * User management - all data comes from /api/identity/*                *
  * ------------------------------------------------------------------ */
 
@@ -6886,25 +6556,8 @@ function UserAccessPanel() {
   )
 }
 
-function UserManagement() {
-  const [tab, setTab] = useState('کاربران')
-  const { canReach } = useAuth()
-  const tabs = [
-    { label: 'کاربران', icon: UsersRound, permissions: sectionPermissions.users },
-    { label: 'تاریخچه ورود', icon: History, permissions: sectionPermissions.loginHistory },
-    { label: 'نقش‌ها و دسترسی‌ها', icon: KeyRound, permissions: sectionPermissions.access },
-    { label: 'چارت سازمانی', icon: Network, permissions: sectionPermissions.orgChart },
-  ].filter((item) => canReach(item.permissions))
-
-  // Land on a tab the user can actually open.
-  useEffect(() => {
-    if (tabs.length && !tabs.some((item) => item.label === tab)) setTab(tabs[0].label)
-  }, [tabs, tab])
-  return <div className="user-management"><div className="task-page-header"><div><span>تنظیمات سازمانی</span><h1>مدیریت کاربران</h1><p>مدیریت حساب‌ها، ساختار سازمانی و سطوح دسترسی</p></div></div><nav className="user-tabs">{tabs.map(({ label, icon: Icon }) => <button key={label} className={tab === label ? 'active' : ''} onClick={() => setTab(label)}><Icon size={17} />{label}</button>)}</nav>{tab === 'کاربران' && <UsersTable />}{tab === 'تاریخچه ورود' && <LoginHistory />}{tab === 'چارت سازمانی' && <OrgChart />}{tab === 'نقش‌ها و دسترسی‌ها' && <AccessControl />}</div>
-}
-
 // «تنظیمات»: a tabbed settings page (today just «پروفایل»; more tabs land here later,
-// each a sibling of ProfileTab, the same way UserManagement's own tabs are laid out).
+// each a sibling of ProfileTab).
 function SystemSettings() {
   const { canReach } = useAuth()
   const [tab, setTab] = useState('پروفایل')
@@ -6914,7 +6567,7 @@ function SystemSettings() {
     ...(canReach(['groups.view_own', 'groups.manage_own']) ? [{ label: 'مدیریت تیم کاری', icon: Users }] : []),
     { label: 'ظاهر سامانه', icon: Palette },
     ...(canReach('sms_settings.view') ? [{ label: 'پنل پیامکی', icon: MessageSquareText }] : []),
-    ...(canReach([...sectionPermissions.users, ...sectionPermissions.loginHistory]) ? [{ label: 'مدیریت کاربران', icon: UsersRound }] : []),
+    ...(canReach([...sectionPermissions.users, ...sectionPermissions.loginHistory, ...sectionPermissions.access, ...sectionPermissions.orgChart]) ? [{ label: 'مدیریت کاربران', icon: UsersRound }] : []),
   ]
   const current = tabs.some((item) => item.label === tab) ? tab : tabs[0].label
 
@@ -6934,8 +6587,9 @@ function SystemSettings() {
 }
 
 /**
- * Settings → «مدیریت کاربران»: the user list and the sign-in history, as sub-tabs. The same
- * panels as the «مدیریت کاربران» page of the side menu; LDAP and SSO are deliberately not here.
+ * Settings → «مدیریت کاربران»: the one place for user administration - the user list, the
+ * sign-in history, roles and access, and the org chart, each shown only to those who may open it.
+ * LDAP and SSO are deliberately not here.
  */
 function UsersSettingsTab() {
   const { canReach } = useAuth()
@@ -6943,6 +6597,8 @@ function UsersSettingsTab() {
   const tabs = [
     { label: 'مدیریت کاربران', icon: UsersRound, permissions: sectionPermissions.users },
     { label: 'تاریخچه ورود', icon: History, permissions: sectionPermissions.loginHistory },
+    { label: 'نقش‌ها و دسترسی‌ها', icon: KeyRound, permissions: sectionPermissions.access },
+    { label: 'چارت سازمانی', icon: Network, permissions: sectionPermissions.orgChart },
   ].filter((item) => canReach(item.permissions))
   const current = tabs.some((item) => item.label === tab) ? tab : tabs[0]?.label
 
@@ -6957,6 +6613,8 @@ function UsersSettingsTab() {
       </div>
       {current === 'مدیریت کاربران' && <UsersTable />}
       {current === 'تاریخچه ورود' && <LoginHistory />}
+      {current === 'نقش‌ها و دسترسی‌ها' && <AccessControl />}
+      {current === 'چارت سازمانی' && <OrgChart />}
     </div>
   )
 }
@@ -7969,21 +7627,44 @@ function TopbarUserMenu({ onProfile, onSignOut }) {
   )
 }
 
-/** Bell + dropdown, fed by /api/notifications and the notifications hub. */
+/** Bell + dropdown, fed by /api/notifications and the notifications hub (live toast on arrival). */
 function NotificationBell() {
-  const { items, unread, markAsRead, markAllAsRead, refresh } = useNotifications(true)
+  const [toast, setToast] = useState(null)
+  const toastTimer = useRef(null)
+  const onReceive = useCallback((notification) => {
+    setToast(notification)
+    clearTimeout(toastTimer.current)
+    toastTimer.current = setTimeout(() => setToast(null), 7000)
+  }, [])
+  useEffect(() => () => clearTimeout(toastTimer.current), [])
+
+  const { items, unread, loading, hasMore, live, markAsRead, markAllAsRead, refresh, loadMore } = useNotifications(true, { onReceive })
   const [open, setOpen] = useState(false)
+
+  const timeOf = (value) => {
+    const date = parseInstant(value)
+    return date ? date.toLocaleString('fa-IR', { dateStyle: 'short', timeStyle: 'short' }) : ''
+  }
 
   return (
     <div className="notification-bell">
-      <button className="icon-button" onClick={() => { setOpen((v) => !v); if (!open) refresh() }} aria-label="اعلان‌ها">
+      <button className="icon-button" onClick={() => { setOpen((v) => !v); setToast(null); if (!open) refresh() }} aria-label="اعلان‌ها">
         <Bell size={20} />
-        {unread > 0 && <i className="has-unread">{unread > 9 ? '۹+' : unread}</i>}
+        {unread > 0 && <i className="has-unread">{unread > 9 ? '۹+' : unread.toLocaleString('fa-IR')}</i>}
       </button>
+      {toast && !open && (
+        <button type="button" className="notification-toast" role="status" onClick={() => { setToast(null); setOpen(true); refresh() }}>
+          <Bell size={16} />
+          <span><strong>{toast.title}</strong><small>{toast.message}</small></span>
+        </button>
+      )}
       {open && (
         <div className="notification-popover">
           <header>
-            <h4>اعلان‌ها {unread > 0 && <span>({unread} خوانده‌نشده)</span>}</h4>
+            <h4>
+              اعلان‌ها {unread > 0 && <span>({unread.toLocaleString('fa-IR')} خوانده‌نشده)</span>}
+              <i className={`notification-live notification-live--${live}`} title={live === 'connected' ? 'دریافت بی‌درنگ فعال است' : 'دریافت بی‌درنگ برقرار نیست؛ با باز کردن این فهرست به‌روز می‌شود'} />
+            </h4>
             <div>
               {unread > 0 && <button onClick={markAllAsRead}><CheckCheck size={15} />همه خوانده شد</button>}
               <button onClick={() => setOpen(false)}><X size={16} /></button>
@@ -7995,11 +7676,12 @@ function NotificationBell() {
                 <button onClick={() => !notification.isRead && markAsRead(notification.id)}>
                   <strong>{notification.title}</strong>
                   <p>{notification.message}</p>
-                  <time>{formatDateTime(notification.createdAt)}</time>
+                  <time>{notification.actorName ? `${notification.actorName} · ` : ''}{timeOf(notification.createdAt)}</time>
                 </button>
               </li>
             ))}
-            {!items.length && <li className="empty">اعلانی وجود ندارد.</li>}
+            {!items.length && <li className="empty">{loading ? 'در حال بارگذاری...' : 'اعلانی وجود ندارد.'}</li>}
+            {hasMore && <li className="more"><button type="button" onClick={loadMore} disabled={loading}>{loading ? 'در حال بارگذاری...' : 'اعلان‌های قدیمی‌تر'}</button></li>}
           </ul>
         </div>
       )}
@@ -10536,8 +10218,6 @@ function Dashboard() {
             <KnowledgeManagement />
           ) : active === 'چت و گفت‌وگوی آنلاین' ? (
             <ChatPage />
-          ) : active === 'مدیریت کاربران' ? (
-            <UserManagement />
           ) : active === userProfileLabel ? (
             <SystemSettings />
           ) : submenuLabels.includes(active) ? (
