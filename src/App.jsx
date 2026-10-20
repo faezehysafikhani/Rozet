@@ -89,6 +89,7 @@ import { AuthProvider, Can, useAuth } from './services/AuthContext'
 import { PersianMessages, actionsApi, changeRequestsApi, contractsApi, costReportApi, groupsApi, identityApi, labelForModule, labelForPermission, orgChartApi, permissionsApi, platformApi, projectManagementApi, rolesApi, suppliersApi, unwrap, usersApi, workflowApi, accountApi, myTeamsApi, smsPanelApi, uploadPolicyApi } from './services/api'
 import { DEFAULT_TENANT_ID } from './services/config'
 import ChatPage from './features/chat/ChatPage'
+import DashboardHome from './features/dashboard/DashboardHome'
 import { parseInstant } from './features/chat/chatModel'
 import { useNotifications } from './hooks/useNotifications'
 import DocumentsPage from './features/project-management/documents/DocumentsPage'
@@ -104,7 +105,6 @@ import StrategyPage from './features/project-management/strategy/StrategyPage'
 import ProgressPage from './features/project-management/progress/ProgressPage'
 import PlanToolsPanel from './features/project-management/baselines/PlanToolsPanel'
 import SchedulePanel from './features/project-management/schedule/SchedulePanel'
-import { useDashboard } from './hooks/useDashboard'
 import { PRESET_AVATARS } from './utils/avatars'
 
 // A sidebar entry is a container for several sections, so it is shown when ANY of the
@@ -563,7 +563,6 @@ const sampleTasks = [
 
 const enumLabel = (value, labels, fallback = 'نامشخص') => labels[value] ?? labels[String(value)] ?? fallback
 const projectStatusLabels = { 0: 'پیش‌نویس', 1: 'فعال', 2: 'متوقف', 3: 'تکمیل شده', 4: 'آرشیو', Draft: 'پیش‌نویس', Active: 'فعال', OnHold: 'متوقف', Completed: 'تکمیل شده', Archived: 'آرشیو' }
-const projectTypeLabels = { 0: 'آبشاری', 1: 'چابک', Waterfall: 'آبشاری', Agile: 'چابک' }
 const agileStatusLabels = { 0: 'برای انجام', 1: 'در حال انجام', 2: 'تکمیل شده', ToDo: 'برای انجام', InProgress: 'در حال انجام', Done: 'تکمیل شده' }
 const agilePriorityLabels = { 0: 'کم', 1: 'متوسط', 2: 'بالا', 3: 'بحرانی', Low: 'کم', Medium: 'متوسط', High: 'بالا', Critical: 'بحرانی' }
 const stakeholderLevelLabels = { 0: 'کم', 1: 'متوسط', 2: 'زیاد', Low: 'کم', Medium: 'متوسط', High: 'زیاد' }
@@ -10056,114 +10055,6 @@ function ReportingExportPage() {
   )
 }
 
-const CHART_STATUS_ORDER = ['Draft', 'Active', 'OnHold', 'Completed', 'Archived']
-
-function statusKey(value) {
-  return typeof value === 'number' ? CHART_STATUS_ORDER[value] : value
-}
-
-/** Main dashboard: the caller's numbers and the organisation's, read from the Core. */
-function DashboardHome({ onOpenProjects }) {
-  const { user } = useAuth()
-  const { loading, error, mine, summary, projects, canMine, canAll, canProjects } = useDashboard()
-
-  const today = new Date().toLocaleDateString('fa-IR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
-  const name = user?.displayName || [user?.firstName, user?.lastName].filter(Boolean).join(' ')
-
-  const cards = summary
-    ? [
-      { label: 'کل پروژه‌ها', value: summary.projectCount, unit: 'پروژه', note: 'همه پروژه‌های سازمان', icon: FolderOpen, tone: 'gold' },
-      { label: 'پروژه‌های در جریان', value: summary.runningProjectCount, unit: 'پروژه', note: mine ? `از این تعداد ${Number(mine.myRunningProjectCount).toLocaleString('fa-IR')} پروژه با شما است` : 'فعال یا متوقف', icon: TrendingUp, tone: 'blue' },
-      { label: 'کل اقدام‌ها', value: summary.actionCount, unit: 'اقدام', note: 'همه اقدام‌های سازمان', icon: ListTodo, tone: 'cyan' },
-      { label: 'اقدام‌های در جریان', value: summary.runningActionCount, unit: 'اقدام', note: mine ? `از این تعداد ${Number(mine.myRunningActionCount).toLocaleString('fa-IR')} اقدام با شما است` : 'باز یا در حال انجام', icon: CheckCircle2, tone: 'violet' },
-    ]
-    : mine
-      ? [
-        { label: 'پروژه‌های در جریان من', value: mine.myRunningProjectCount, unit: 'پروژه', note: 'پروژه‌هایی که مالک یا مدیر آن هستید', icon: TrendingUp, tone: 'blue' },
-        { label: 'اقدام‌های در جریان من', value: mine.myRunningActionCount, unit: 'اقدام', note: 'اقدام‌هایی که مسئول یا مالک آن هستید', icon: CheckCircle2, tone: 'violet' },
-      ]
-      : []
-
-  // Organisation-wide counts when the caller may see them, otherwise what their own list contains.
-  const byStatus = summary
-    ? summary.projectsByStatus.map(({ key, count }) => [key, count])
-    : Object.entries(projects.reduce((map, project) => {
-      const key = statusKey(project.status)
-      map[key] = (map[key] || 0) + 1
-      return map
-    }, {}))
-  const bars = CHART_STATUS_ORDER
-    .map((key) => [key, byStatus.find(([k]) => k === key)?.[1] || 0])
-    .filter(([key, count]) => count > 0 || key !== 'Archived')
-  const max = Math.max(1, ...bars.map(([, count]) => count))
-  const ticks = [max, Math.round((max * 2) / 3), Math.round(max / 3), 0]
-
-  const recent = [...projects]
-    .sort((a, b) => String(b.createdAtUtc || '').localeCompare(String(a.createdAtUtc || '')))
-    .slice(0, 5)
-
-  const noAccess = !canMine && !canAll && !canProjects
-
-  return (
-    <>
-      <section className="welcome-banner">
-        <div><span>{today}</span><h1>سلام{name ? `، ${name}` : ''} 👋</h1><p>خلاصه‌ای از وضعیت پروژه‌ها و اقدام‌های مجموعه شما را آماده کرده‌ایم.</p></div>
-        <button><FileChartColumn size={19} /> مشاهده گزارش کامل</button>
-      </section>
-
-      {noAccess && <p className="data-state">برای مشاهده داشبورد به دسترسی «مشاهده داشبورد شخصی» یا «مشاهده فهرست پروژه‌ها» نیاز دارید.</p>}
-      {!noAccess && loading && <p className="data-state">در حال دریافت اطلاعات داشبورد...</p>}
-      {!noAccess && !loading && error && <p className="data-state data-state--error">{error}</p>}
-
-      {cards.length > 0 && (
-        <section className="stats-grid">
-          {cards.map(({ label, value, unit, note, icon: Icon, tone }) => (
-            <article className="stat-card" key={label}>
-              <div className={`stat-icon ${tone}`}><Icon size={24} /></div>
-              <span>{label}</span>
-              <div className="stat-value"><strong>{Number(value).toLocaleString('fa-IR')}</strong><small>{unit}</small></div>
-              <p>{note}</p>
-            </article>
-          ))}
-        </section>
-      )}
-
-      {(canProjects || canAll) && (
-        <section className="dashboard-grid">
-          <article className="panel sales-panel">
-            <div className="panel-header"><div><h3>وضعیت پروژه‌ها</h3><p>{summary ? 'تعداد پروژه‌های سازمان به تفکیک وضعیت' : 'تعداد پروژه‌های قابل مشاهده برای شما به تفکیک وضعیت'}</p></div></div>
-            <div className="chart-area">
-              <div className="chart-labels">{ticks.map((tick, index) => <span key={index}>{tick.toLocaleString('fa-IR')}</span>)}</div>
-              <div className="bars">
-                {bars.map(([key, count]) => (
-                  <div className="bar-column" key={key} title={`${enumLabel(key, projectStatusLabels)}: ${count.toLocaleString('fa-IR')}`}>
-                    <div style={{ height: `${(count / max) * 100}%` }} />
-                    <span>{enumLabel(key, projectStatusLabels)} ({count.toLocaleString('fa-IR')})</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </article>
-          <article className="panel activity-panel">
-            <div className="panel-header"><div><h3>پروژه‌های اخیر</h3><p>آخرین پروژه‌های ثبت‌شده</p></div><button onClick={onOpenProjects}>مشاهده همه</button></div>
-            {recent.length ? (
-              <ul>
-                {recent.map((project) => (
-                  <li key={project.id}>
-                    <span className="activity-icon blue"><FolderOpen size={17} /></span>
-                    <div><strong>{projectDisplayName(project)}</strong><p>{[project.code, enumLabel(project.type, projectTypeLabels)].filter(Boolean).join(' · ')}</p></div>
-                    <time>{formatDateOnly(project.createdAtUtc)}</time>
-                  </li>
-                ))}
-              </ul>
-            ) : !loading && <p className="data-state">هنوز پروژه‌ای ثبت نشده است.</p>}
-          </article>
-        </section>
-      )}
-    </>
-  )
-}
-
 function Dashboard() {
   const { user, signOut } = useAuth()
   const [active, setActive] = useState(dashboardLabel)
@@ -10205,7 +10096,7 @@ function Dashboard() {
 
         <main className="dashboard-content">
           {active === dashboardLabel ? (
-            <DashboardHome onOpenProjects={() => setActive(projectSubmenus[0].label)} />
+            <DashboardHome onOpenProjects={() => setActive(projectSubmenus[0].label)} onOpenActions={() => setActive(projectSubmenus[0].label)} />
           ) : taskSubmenus.some((item) => item.label === active) ? (
             <TaskManagement active={active} data={projectData} />
           ) : projectSubmenus.some((item) => item.label === active) ? (
