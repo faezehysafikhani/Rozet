@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { knowledgeApi } from './services/api'
 import {
   Bell,
   BookOpen,
@@ -607,6 +608,14 @@ function projectDisplayName(project) {
 
 
 const approvalLabels = { 0: 'ثبت اولیه', 1: 'در انتظار تأیید', 2: 'تأیید شده', 3: 'رد شده', NotSubmitted: 'ثبت اولیه', PendingApproval: 'در انتظار تأیید', Approved: 'تأیید شده', Rejected: 'رد شده' }
+
+function formatBytes(value) {
+  const size = Number(value || 0)
+  if (!size) return '—'
+  if (size < 1024) return `${size.toLocaleString('fa-IR')} بایت`
+  if (size < 1024 * 1024) return `${Math.round(size / 1024).toLocaleString('fa-IR')} کیلوبایت`
+  return `${(size / 1024 / 1024).toFixed(1).replace('.', '/')} مگابایت`
+}
 
 function todayInputValue() {
   return new Date().toISOString().slice(0, 10)
@@ -2159,6 +2168,511 @@ function CostPage({ data }) {
           </>
         )}
       </DataState>
+    </>
+  )
+}
+
+function knowledgeArrayFromResult(result) {
+  let value = result?.value
+
+  for (let i = 0; i < 4; i += 1) {
+    if (Array.isArray(value)) return value
+
+    if (!value || typeof value !== 'object') return []
+
+    if (Array.isArray(value.items)) return value.items
+    if (Array.isArray(value.data)) return value.data
+
+    if ('value' in value) {
+      value = value.value
+      continue
+    }
+
+    return []
+  }
+
+  return []
+}
+
+function knowledgeErrorMessage(result) {
+  const error = result?.error
+
+  if (typeof error === 'string') return error
+  if (error?.message) return error.message
+
+  return 'درخواست ناموفق بود. پاسخ سرور را بررسی کنید.'
+}
+
+function knowledgeDocumentTypeLabel(value) {
+  const labels = {
+    0: 'کتاب',
+    1: 'نرم‌افزار',
+    2: 'یادداشت',
+    3: 'سایر',
+    4: 'جزوه',
+    5: 'درس‌آموخته',
+    6: 'قالب',
+    7: 'تصمیم',
+    Book: 'کتاب',
+    Software: 'نرم‌افزار',
+    Notes: 'یادداشت',
+    Other: 'سایر',
+    Pamphlet: 'جزوه',
+    LessonLearned: 'درس‌آموخته',
+    Template: 'قالب',
+    Decision: 'تصمیم',
+  }
+
+  return labels[value] ?? value ?? '—'
+}
+
+function KnowledgeManagement() {
+  const [documents, setDocuments] = useState([])
+  const [linkedIds, setLinkedIds] = useState(new Set())
+
+  const [search, setSearch] = useState('')
+  const [typeFilter, setTypeFilter] = useState('')
+  const [appliedSearch, setAppliedSearch] = useState('')
+  const [appliedTypeFilter, setAppliedTypeFilter] = useState('')
+
+  const [subjectType, setSubjectType] = useState('Project')
+  const [subjectId, setSubjectId] = useState('')
+  const [activeSubject, setActiveSubject] = useState(null)
+
+  const [title, setTitle] = useState('')
+  const [description, setDescription] = useState('')
+  const [documentType, setDocumentType] = useState('2')
+  const [file, setFile] = useState(null)
+  const [fileInputKey, setFileInputKey] = useState(0)
+
+  const [loading, setLoading] = useState(true)
+  const [loadingLinks, setLoadingLinks] = useState(false)
+  const [busyAction, setBusyAction] = useState('')
+  const [error, setError] = useState('')
+  const [linkError, setLinkError] = useState('')
+  const [actionError, setActionError] = useState('')
+  const [notice, setNotice] = useState('')
+  const [reloadKey, setReloadKey] = useState(0)
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function load() {
+      setLoading(true)
+      setError('')
+      setLinkError('')
+      setLoadingLinks(Boolean(activeSubject))
+
+      const result = await knowledgeApi.list({
+        search: appliedSearch,
+        documentType: appliedTypeFilter,
+      })
+
+      if (cancelled) return
+
+      if (!result.isSuccess) {
+        setError(knowledgeErrorMessage(result))
+        setDocuments([])
+        setLinkedIds(new Set())
+        setLoading(false)
+        setLoadingLinks(false)
+        return
+      }
+
+      setDocuments(knowledgeArrayFromResult(result))
+
+      if (activeSubject) {
+        const linksResult = await knowledgeApi.list({
+          search: appliedSearch,
+          subjectType: activeSubject.subjectType,
+          subjectId: activeSubject.subjectId,
+        })
+
+        if (cancelled) return
+
+        if (linksResult.isSuccess) {
+          const ids = knowledgeArrayFromResult(linksResult)
+            .map((item) => item.id)
+            .filter(Boolean)
+
+          setLinkedIds(new Set(ids))
+        } else {
+          setLinkedIds(new Set())
+          setLinkError(knowledgeErrorMessage(linksResult))
+        }
+      } else {
+        setLinkedIds(new Set())
+      }
+
+      if (!cancelled) {
+        setLoading(false)
+        setLoadingLinks(false)
+      }
+    }
+
+    load()
+
+    return () => {
+      cancelled = true
+    }
+  }, [appliedSearch, appliedTypeFilter, activeSubject, reloadKey])
+
+  async function handleUpload(event) {
+    event.preventDefault()
+    setActionError('')
+    setNotice('')
+
+    if (!file) {
+      setActionError('ابتدا فایل سند را انتخاب کنید.')
+      return
+    }
+
+    setBusyAction('upload')
+
+    try {
+      const result = await knowledgeApi.upload({
+        file,
+        title,
+        description,
+        documentType,
+      })
+
+      if (!result.isSuccess) {
+        setActionError(knowledgeErrorMessage(result))
+        return
+      }
+
+      setNotice('سند با موفقیت ثبت شد.')
+      setTitle('')
+      setDescription('')
+      setFile(null)
+      setFileInputKey((key) => key + 1)
+      setReloadKey((key) => key + 1)
+    } catch {
+      setActionError('هنگام ثبت سند خطای غیرمنتظره‌ای رخ داد.')
+    } finally {
+      setBusyAction('')
+    }
+  }
+
+  function handleSubjectSubmit(event) {
+    event.preventDefault()
+    setActionError('')
+    setNotice('')
+
+    const id = subjectId.trim()
+    const guidPattern =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+    if (!subjectType.trim()) {
+      setActionError('نوع آیتم را وارد کنید.')
+      return
+    }
+
+    if (!guidPattern.test(id)) {
+      setActionError('شناسه آیتم باید یک GUID معتبر باشد.')
+      return
+    }
+
+    setActiveSubject({
+      subjectType: subjectType.trim(),
+      subjectId: id,
+    })
+    setNotice('آیتم انتخاب شد؛ اکنون می‌توانید اسناد را به آن متصل کنید.')
+  }
+
+  async function toggleDocumentLink(document) {
+    if (!activeSubject) {
+      setActionError('ابتدا یک آیتم معتبر انتخاب کنید.')
+      return
+    }
+
+    setActionError('')
+    setNotice('')
+
+    const isLinked = linkedIds.has(document.id)
+    setBusyAction(document.id)
+
+    try {
+      const result = isLinked
+        ? await knowledgeApi.removeLink(document.id, activeSubject)
+        : await knowledgeApi.addLink(document.id, {
+            subjectType: activeSubject.subjectType,
+            subjectId: activeSubject.subjectId,
+          })
+
+      if (!result.isSuccess) {
+        setActionError(knowledgeErrorMessage(result))
+        return
+      }
+
+      setNotice(
+        isLinked
+          ? 'ارتباط سند با آیتم حذف شد.'
+          : 'سند با موفقیت به آیتم متصل شد.',
+      )
+      setReloadKey((key) => key + 1)
+    } catch {
+      setActionError('هنگام تغییر ارتباط سند خطای غیرمنتظره‌ای رخ داد.')
+    } finally {
+      setBusyAction('')
+    }
+  }
+
+  function handleSearch(event) {
+    event.preventDefault()
+    setAppliedSearch(search.trim())
+    setAppliedTypeFilter(typeFilter)
+  }
+
+  return (
+    <>
+      <TaskPageHeader
+        title="مدیریت دانش"
+        description="مدیریت اسناد و اتصال آن‌ها به پروژه‌ها و سایر آیتم‌های سامانه"
+        action={null}
+      />
+
+      {actionError && (
+        <p className="knowledge-message knowledge-message--error">
+          {actionError}
+        </p>
+      )}
+
+      {linkError && (
+        <p className="knowledge-message knowledge-message--error">
+          دریافت وضعیت ارتباط‌ها ناموفق بود: {linkError}
+        </p>
+      )}
+
+      {notice && (
+        <p className="knowledge-message knowledge-message--success">
+          {notice}
+        </p>
+      )}
+
+      <div className="knowledge-layout">
+        <section className="task-panel">
+          <div className="task-panel-title">
+            <div>
+              <h3>ثبت سند جدید</h3>
+              <p>فایل را بارگذاری و مشخصات سند را ثبت کنید.</p>
+            </div>
+          </div>
+
+          <form className="knowledge-form" onSubmit={handleUpload}>
+            <FormField label="عنوان سند">
+              <input
+                required
+                maxLength={200}
+                value={title}
+                onChange={(event) => setTitle(event.target.value)}
+                placeholder="عنوان سند"
+              />
+            </FormField>
+
+            <FormField label="نوع سند">
+              <select
+                value={documentType}
+                onChange={(event) => setDocumentType(event.target.value)}
+              >
+                <option value="0">کتاب</option>
+                <option value="1">نرم‌افزار</option>
+                <option value="2">یادداشت</option>
+                <option value="3">سایر</option>
+                <option value="4">جزوه</option>
+              </select>
+            </FormField>
+
+            <FormField label="توضیحات" wide>
+              <textarea
+                rows={3}
+                value={description}
+                onChange={(event) => setDescription(event.target.value)}
+                placeholder="توضیحات اختیاری"
+              />
+            </FormField>
+
+            <FormField label="فایل سند" wide>
+              <input
+                key={fileInputKey}
+                type="file"
+                required
+                onChange={(event) =>
+                  setFile(event.target.files?.[0] || null)
+                }
+              />
+            </FormField>
+
+            <div className="knowledge-form-actions">
+              <button
+                className="knowledge-button"
+                type="submit"
+                disabled={busyAction === 'upload'}
+              >
+                {busyAction === 'upload' ? 'در حال بارگذاری...' : 'ثبت سند'}
+              </button>
+            </div>
+          </form>
+        </section>
+
+        <section className="task-panel">
+          <div className="task-panel-title">
+            <div>
+              <h3>انتخاب آیتم مرتبط</h3>
+              <p>شناسه آیتم را وارد کنید تا امکان اتصال و قطع ارتباط فعال شود.</p>
+            </div>
+          </div>
+
+          <form className="knowledge-form" onSubmit={handleSubjectSubmit}>
+            <FormField label="نوع آیتم">
+              <input
+                required
+                value={subjectType}
+                onChange={(event) => setSubjectType(event.target.value)}
+                placeholder="Project، Task یا Risk"
+              />
+            </FormField>
+
+            <FormField label="شناسه آیتم (GUID)">
+              <input
+                required
+                value={subjectId}
+                onChange={(event) => setSubjectId(event.target.value)}
+                placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+              />
+            </FormField>
+
+            <div className="knowledge-form-actions">
+              <button className="knowledge-button" type="submit">
+                انتخاب آیتم
+              </button>
+            </div>
+          </form>
+
+          {activeSubject && (
+            <div className="knowledge-active-subject">
+              <strong>آیتم فعال برای ارتباط:</strong>
+              <span>{activeSubject.subjectType}</span>
+              <code>{activeSubject.subjectId}</code>
+            </div>
+          )}
+        </section>
+      </div>
+
+      <section className="task-panel task-table-panel">
+        <div className="task-panel-title knowledge-list-heading">
+          <div>
+            <h3>فهرست اسناد</h3>
+            <p>
+              {documents.length.toLocaleString('fa-IR')} سند
+              {activeSubject ? ' — وضعیت ارتباط با آیتم فعال نمایش داده می‌شود.' : ''}
+            </p>
+          </div>
+
+          <form className="knowledge-searchbar" onSubmit={handleSearch}>
+            <input
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="جست‌وجو در عنوان و توضیحات"
+              aria-label="جست‌وجوی اسناد"
+            />
+
+            <select
+              value={typeFilter}
+              onChange={(event) => setTypeFilter(event.target.value)}
+              aria-label="فیلتر نوع سند"
+            >
+              <option value="">همه انواع</option>
+              <option value="0">کتاب</option>
+              <option value="1">نرم‌افزار</option>
+              <option value="2">یادداشت</option>
+              <option value="3">سایر</option>
+              <option value="4">جزوه</option>
+            </select>
+
+            <button className="knowledge-button" type="submit">
+              جست‌وجو
+            </button>
+          </form>
+        </div>
+
+        <DataState
+          loading={loading}
+          error={error}
+          empty={!documents.length}
+        >
+          <div className="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>عنوان سند</th>
+                  <th>نوع</th>
+                  <th>نام فایل</th>
+                  <th>حجم</th>
+                  <th>تاریخ ثبت</th>
+                  <th>وضعیت ارتباط</th>
+                  <th>عملیات</th>
+                </tr>
+              </thead>
+              <tbody>
+                {documents.map((document) => {
+                  const isLinked = linkedIds.has(document.id)
+                  const actionBusy = busyAction === document.id
+
+                  return (
+                    <tr key={document.id}>
+                      <td>
+                        <strong>{document.title || 'بدون عنوان'}</strong>
+                        {document.description && (
+                          <small className="knowledge-description">
+                            {document.description}
+                          </small>
+                        )}
+                      </td>
+                      <td>
+                        {knowledgeDocumentTypeLabel(document.documentType)}
+                      </td>
+                      <td>{document.fileName || '—'}</td>
+                      <td>{formatBytes(document.sizeBytes)}</td>
+                      <td>{formatDateTime(document.createdAtUtc)}</td>
+                      <td>
+                        {!activeSubject
+                          ? 'آیتمی انتخاب نشده'
+                          : loadingLinks
+                            ? 'در حال بررسی...'
+                            : isLinked
+                              ? 'مرتبط'
+                              : 'نامرتبط'}
+                      </td>
+                      <td>
+                        <button
+                          className={
+                            isLinked
+                              ? 'knowledge-button knowledge-button--danger'
+                              : 'knowledge-button knowledge-button--secondary'
+                          }
+                          type="button"
+                          disabled={
+                            !activeSubject || loadingLinks || actionBusy
+                          }
+                          onClick={() => toggleDocumentLink(document)}
+                        >
+                          {actionBusy
+                            ? 'در حال انجام...'
+                            : isLinked
+                              ? 'قطع ارتباط'
+                              : 'اتصال به آیتم'}
+                        </button>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        </DataState>
+      </section>
     </>
   )
 }
@@ -7049,6 +7563,8 @@ function Dashboard() {
             <ProjectManagement active={active} data={projectData} />
           ) : controlSubmenus.some((item) => item.label === active) ? (
             <ControlManagement active={active} data={projectData} />
+          ) : active === governanceSubmenus[1].label ? (
+            <KnowledgeManagement />
           ) : active === 'چت و گفت‌وگوی آنلاین' ? (
             <ChatPage />
           ) : active === 'مدیریت کاربران' ? (
