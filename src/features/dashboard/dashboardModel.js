@@ -1,4 +1,4 @@
-import { JALALI_MONTHS, isoToJalali } from '../../utils/jalali'
+import { JALALI_MONTHS, JALALI_WEEKDAYS, isoToJalali, jalaliWeekdayIndex } from '../../utils/jalali'
 
 export const PROJECT_STATUS_ORDER = ['Draft', 'Active', 'OnHold', 'Completed', 'Archived']
 const PROJECT_STATUS_BY_NUMBER = PROJECT_STATUS_ORDER
@@ -136,4 +136,11 @@ export function myOpenActions(actions, mine, userId, limit = 4) {
     .filter((action) => ['Open', 'InProgress', 'OnHold'].includes(actionStatusKey(action.status)))
     .sort((a, b) => String(a.endDate || '9999').localeCompare(String(b.endDate || '9999')))
     .slice(0, limit)
+}
+
+/** "سه‌شنبه ۲۸ مهر ۱۴۰۵" */
+export function longJalaliDate(iso) {
+  const parts = isoToJalali(iso)
+  if (!parts) return ''
+  return `${JALALI_WEEKDAYS[jalaliWeekdayIndex(iso)]} ${faNumber(parts.jd)} ${JALALI_MONTHS[parts.jm - 1]} ${Number(parts.jy).toLocaleString('fa-IR', { useGrouping: false })}`
 }

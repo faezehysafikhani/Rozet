@@ -4,10 +4,10 @@ import {
 } from 'lucide-react'
 import { useAuth } from '../../services/AuthContext'
 import { useDashboard } from '../../hooks/useDashboard'
-import { formatJalali, JALALI_MONTHS, JALALI_WEEKDAYS, isoToJalali, jalaliWeekdayIndex, todayIso } from '../../utils/jalali'
+import { formatJalali, todayIso } from '../../utils/jalali'
 import { useDashboardActions } from './useDashboardActions'
 import {
-  PRIORITY_LABELS, actionStatusKey, donutArcs, faNumber, monthlyActivity, myOpenActions, niceScale, priorityKey,
+  PRIORITY_LABELS, actionStatusKey, donutArcs, faNumber, longJalaliDate, monthlyActivity, myOpenActions, niceScale, priorityKey,
   registrationTrend, sharePercent, smoothPath, statusCounts,
 } from './dashboardModel'
 import './dashboard.css'
@@ -19,12 +19,6 @@ function projectName(project) {
   if (project.name && project.name !== 'string') return project.name
   if (project.code && project.code !== 'string') return `پروژه ${project.code}`
   return 'پروژه ثبت‌شده'
-}
-
-function longDate(iso) {
-  const parts = isoToJalali(iso)
-  if (!parts) return ''
-  return `${JALALI_WEEKDAYS[jalaliWeekdayIndex(iso)]} ${faNumber(parts.jd)} ${JALALI_MONTHS[parts.jm - 1]} ${Number(parts.jy).toLocaleString('fa-IR', { useGrouping: false })}`
 }
 
 function Trend({ trend }) {
@@ -264,7 +258,7 @@ export default function DashboardHome({ onOpenProjects, onOpenActions }) {
     <div className="dh">
       <div className="dh-main">
         <header className="dh-head">
-          <span>{longDate(today)}</span>
+          <span>{longJalaliDate(today)}</span>
           <h1>داشبورد اصلی</h1>
         </header>
 

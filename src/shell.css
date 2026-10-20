@@ -1,0 +1,93 @@
+/* Application shell (sidebar + top bar), restyled after the dashboard design.
+   Loaded after styles.css; selectors are prefixed with .app-shell to win over the older rules. */
+
+/* ---------- sidebar ---------- */
+.app-shell .sidebar { padding: 26px 16px 16px; background: #fff; border-left: 1px solid #eef0f5; box-shadow: none; backdrop-filter: none; }
+.app-shell .sidebar-top { flex-direction: column; gap: 14px; min-height: 0; margin: 0 0 30px; padding: 6px 0 0; border-bottom: 0; }
+.app-shell .sidebar .brand img { width: 128px; }
+.app-shell .sidebar-date { font-size: .92rem; color: #8f97aa; }
+
+.app-shell .side-nav { gap: 6px; padding: 0 2px 0 0; }
+.app-shell .side-nav button { min-height: 46px; padding: 0 14px; gap: 14px; border-radius: 12px; color: #6f7890; font-weight: 600; }
+.app-shell .side-nav button svg { color: #8a93a8; }
+.app-shell .side-nav button:hover { color: var(--accent-text); background: #f4f6fb; }
+.app-shell .side-nav button:hover svg { color: var(--accent-text); }
+.app-shell .side-nav button.active { color: var(--accent-text); background: var(--accent-soft); box-shadow: none; font-weight: 800; }
+.app-shell .side-nav button.active svg { color: var(--accent-text); }
+.app-shell .side-nav button.active::before { display: none; }
+.app-shell .side-nav .sub-nav { margin: 4px 14px 6px 0; padding-right: 14px; border-right: 1px solid #eceff5; }
+.app-shell .side-nav .sub-nav button { min-height: 38px; border-radius: 10px; font-weight: 600; }
+.app-shell .side-nav .sub-nav button.active { color: var(--accent-text); background: var(--accent-soft); }
+.app-shell .nav-arrow { color: #b3b9c8; }
+
+.sidebar-user-card {
+  flex: 0 0 auto; display: flex; align-items: center; gap: 12px; width: 100%; margin-top: 14px; padding: 14px 6px 0;
+  border: 0; border-top: 1px solid #eef0f5; background: transparent; text-align: start; font: inherit; color: inherit; cursor: pointer;
+}
+.sidebar-user-card > img, .sidebar-user-card > .avatar {
+  width: 46px; height: 46px; flex: 0 0 auto; border-radius: 50%; object-fit: cover;
+  box-shadow: 0 0 0 2px #fff, 0 0 0 4px #f0a53b;
+}
+.sidebar-user-card > span:not(.avatar) { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.sidebar-user-card strong { font-size: .95rem; font-weight: 800; color: #1d2845; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.sidebar-user-card small { font-size: .85rem; color: #8f97aa; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.sidebar-user-card > svg { flex: 0 0 auto; color: #9aa2b6; }
+.sidebar-user-card:hover strong { color: var(--accent-text); }
+
+/* ---------- top bar ---------- */
+.app-shell .topbar { height: 92px; padding: 0 34px; background: transparent; border-bottom: 0; backdrop-filter: none; justify-content: flex-end; }
+.app-shell .topbar-title { margin-inline-end: auto; }
+.app-shell .topbar-title strong { display: none; }
+.app-shell .topbar-actions { gap: 14px; }
+.app-shell .topbar .icon-button { width: 44px; height: 44px; border: 0; border-radius: 12px; color: #1f2a44; background: transparent; }
+.app-shell .topbar .icon-button:hover { background: #eef1f7; }
+.app-shell .topbar .icon-button i:not(.has-unread) { display: none; }
+
+.topbar-search { display: flex; align-items: center; gap: 4px; }
+.topbar-search input {
+  width: 260px; height: 42px; padding: 0 14px; border: 1px solid #e1e5ee; border-radius: 12px; outline: 0;
+  color: #30394f; background: #fff; font: inherit;
+}
+.topbar-search input:focus { border-color: var(--accent-border); box-shadow: 0 0 0 3px rgba(var(--accent-rgb), .1); }
+
+.app-shell .profile-menu { padding-block: 0; }
+.app-shell .profile-dropdown { top: calc(100% + 2px); width: 200px; }
+.profile-dropdown__who { display: flex; flex-direction: column; gap: 2px; margin-bottom: 6px; padding: 8px 10px 10px; border-bottom: 1px solid #eef0f5; }
+.profile-dropdown__who strong { font-size: .95rem; color: #1d2845; }
+.profile-dropdown__who small { font-size: .85rem; color: #8f97aa; }
+
+/* The page title now sits in the page itself; the top bar only keeps it on a phone, next to the menu button. */
+@media (max-width: 1000px) {
+  .app-shell .topbar { z-index: 12; height: 68px; padding: 0 16px; justify-content: space-between; }
+  .app-shell .topbar-title { margin-inline-end: 0; }
+  .app-shell .topbar-title strong { display: block; font-size: 1.1rem; color: #202941; }
+  .app-shell .topbar .icon-button { width: 40px; height: 40px; }
+  .topbar-search input { width: 150px; }
+}
+
+/* ---------- dark mode ---------- */
+:root[data-mode="dark"] .app-shell .sidebar { background: var(--d-surface); border-left-color: var(--d-border); }
+:root[data-mode="dark"] .app-shell .sidebar-date { color: var(--d-muted); }
+:root[data-mode="dark"] .app-shell .side-nav button { color: var(--d-text-2); }
+:root[data-mode="dark"] .app-shell .side-nav button svg { color: var(--d-muted); }
+:root[data-mode="dark"] .app-shell .side-nav button:hover { background: var(--d-hover); color: var(--accent-text); }
+:root[data-mode="dark"] .app-shell .side-nav button.active { color: var(--accent-text); background: var(--accent-soft); }
+:root[data-mode="dark"] .app-shell .side-nav .sub-nav { border-right-color: var(--d-border); }
+:root[data-mode="dark"] .sidebar-user-card { border-top-color: var(--d-border); }
+:root[data-mode="dark"] .sidebar-user-card > img, :root[data-mode="dark"] .sidebar-user-card > .avatar { box-shadow: 0 0 0 2px var(--d-surface), 0 0 0 4px #f0a53b; }
+:root[data-mode="dark"] .sidebar-user-card strong, :root[data-mode="dark"] .profile-dropdown__who strong { color: var(--d-text); }
+:root[data-mode="dark"] .sidebar-user-card small, :root[data-mode="dark"] .profile-dropdown__who small { color: var(--d-muted); }
+:root[data-mode="dark"] .app-shell .topbar { background: transparent; }
+:root[data-mode="dark"] .app-shell .topbar .icon-button { color: var(--d-text); background: transparent; }
+:root[data-mode="dark"] .app-shell .topbar .icon-button:hover { background: var(--d-hover); }
+:root[data-mode="dark"] .topbar-search input { border-color: var(--d-border); color: var(--d-text); background: var(--d-surface-2); }
+:root[data-mode="dark"] .profile-dropdown__who { border-bottom-color: var(--d-border); }
+:root[data-mode="dark"] .app-shell .topbar-title strong { color: var(--d-text); }
+
+/* The design's page is almost white; the chosen pattern from Settings → ظاهر سامانه still wins when it is not the default. */
+:root:not([data-mode="dark"]) .app-shell.pattern-default { background: #fbfcfe; }
+
+/* The off-canvas menu is parked beyond the right edge on a phone; keep it from widening the page. */
+@media (max-width: 1000px) {
+  html, body { overflow-x: hidden; }
+}

@@ -90,6 +90,8 @@ import { PersianMessages, actionsApi, changeRequestsApi, contractsApi, costRepor
 import { DEFAULT_TENANT_ID } from './services/config'
 import ChatPage from './features/chat/ChatPage'
 import DashboardHome from './features/dashboard/DashboardHome'
+import { longJalaliDate } from './features/dashboard/dashboardModel'
+import { todayIso } from './utils/jalali'
 import { parseInstant } from './features/chat/chatModel'
 import { useNotifications } from './hooks/useNotifications'
 import DocumentsPage from './features/project-management/documents/DocumentsPage'
@@ -509,13 +511,10 @@ function Sidebar({ active, onSelect, open, onClose }) {
     <>
       <button className={`sidebar-scrim ${open ? 'is-open' : ''}`} onClick={onClose} aria-label="بستن منو" />
       <aside className={`sidebar ${open ? 'is-open' : ''}`}>
-        <div className="sidebar-top"><Brand /><button className="sidebar-close" onClick={onClose}><X size={21} /></button></div>
-        <div className="sidebar-account">
-          <span className="avatar">{initialsOf(user?.displayName || user?.email)}</span>
-          <div>
-            <strong>{user?.displayName || 'کاربر روزت'}</strong>
-            <small>{primaryRole}</small>
-          </div>
+        <div className="sidebar-top">
+          <Brand compact />
+          <time className="sidebar-date">{longJalaliDate(todayIso())}</time>
+          <button className="sidebar-close" onClick={onClose}><X size={21} /></button>
         </div>
         <nav className="side-nav" aria-label="منوی اصلی">
           {visibleItems.map(({ label, icon: Icon, badge, children }) => (
@@ -549,6 +548,14 @@ function Sidebar({ active, onSelect, open, onClose }) {
             </div>
           ))}
         </nav>
+        <button type="button" className="sidebar-user-card" onClick={() => { onSelect(userProfileLabel); onClose() }} title="پروفایل و تنظیمات">
+          {user?.avatarUrl ? <img src={user.avatarUrl} alt="" /> : <span className="avatar">{initialsOf(user?.displayName || user?.email)}</span>}
+          <span>
+            <strong>{user?.displayName || 'کاربر روزت'}</strong>
+            <small>{primaryRole}</small>
+          </span>
+          <ChevronLeft size={16} />
+        </button>
       </aside>
     </>
   )
@@ -7613,15 +7620,35 @@ function TopbarUserMenu({ onProfile, onSignOut }) {
   const { user } = useAuth()
   return (
     <div className="profile-menu">
-      <button className="profile-chip">
-        <span className="avatar">{initialsOf(user?.displayName || user?.email)}</span>
-        <div><strong>{user?.displayName || 'کاربر'}</strong><small>{(user?.roles || [])[0] || user?.email}</small></div>
-        <ChevronLeft size={16} />
-      </button>
-      <div className="profile-dropdown">
+      <button type="button" className="icon-button" aria-label="حساب کاربری" aria-haspopup="menu"><UserRound size={22} strokeWidth={1.6} /></button>
+      <div className="profile-dropdown" role="menu">
+        <div className="profile-dropdown__who">
+          <strong>{user?.displayName || 'کاربر'}</strong>
+          <small>{(user?.roles || [])[0] || user?.email}</small>
+        </div>
         <button type="button" onClick={onProfile}><UserCog size={17} />پروفایل</button>
         <button type="button" onClick={onSignOut}><LogOut size={17} />خروج</button>
       </div>
+    </div>
+  )
+}
+
+/** The search field folds into an icon, as in the design, and opens on click. */
+function TopbarSearch() {
+  const [open, setOpen] = useState(false)
+  const inputRef = useRef(null)
+  return (
+    <div className={`topbar-search ${open ? 'is-open' : ''}`}>
+      {open && (
+        <input
+          ref={inputRef}
+          autoFocus
+          placeholder="جست‌وجو در سامانه..."
+          onBlur={(e) => { if (!e.target.value) setOpen(false) }}
+          onKeyDown={(e) => { if (e.key === 'Escape') setOpen(false) }}
+        />
+      )}
+      <button type="button" className="icon-button" onClick={() => setOpen((v) => !v)} aria-label="جست‌وجو"><Search size={22} strokeWidth={1.6} /></button>
     </div>
   )
 }
@@ -10084,11 +10111,11 @@ function Dashboard() {
       <div className="app-main">
         <header className="topbar">
           <div className="topbar-title">
-            <button className="mobile-menu" onClick={() => setSidebarOpen(true)}><Menu size={22} /></button>
-            <div><span>صفحه اصلی</span><strong>{active}</strong></div>
+            <button className="mobile-menu" onClick={() => setSidebarOpen(true)} aria-label="باز کردن منو"><Menu size={22} /></button>
+            <strong>{active}</strong>
           </div>
           <div className="topbar-actions">
-            <label className="search-box"><Search size={19} /><input placeholder="جست‌وجو در سامانه..." /></label>
+            <TopbarSearch />
             <NotificationBell />
             <TopbarUserMenu onProfile={() => setActive(userProfileLabel)} onSignOut={signOut} />
           </div>
