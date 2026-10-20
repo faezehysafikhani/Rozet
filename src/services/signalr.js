@@ -29,6 +29,10 @@ function createHub(path) {
     const conn = new signalR.HubConnectionBuilder()
       .withUrl(`${API_BASE_URL}${path}`, {
         accessTokenFactory: () => AuthTokenStore.getAccessToken() || '',
+        // The JWT travels in the token factory, not in cookies. The default (credentialed
+        // requests) is refused by browsers when the Core answers `Access-Control-Allow-Origin: *`
+        // (Rozet.Api's "AllowAll" policy), which showed up as a CORS error on negotiate.
+        withCredentials: false,
         transport: signalR.HttpTransportType.WebSockets | signalR.HttpTransportType.LongPolling,
       })
       .withAutomaticReconnect([0, 2000, 5000, 10000, 30000])
